@@ -1,0 +1,30 @@
+   <div id="globalnav">
+      <ul class='level1'>
+       	<li><a href="http://ultrascan.uthscsa.edu/index.php">Home</a></li>
+			<li><a href='http://www.ultrascan3.uthscsa.edu/index.php'>UltraScan III</a>
+			<li><a href='http://www.ultrascan2.uthscsa.edu/index.php'>UltraScan II</a>
+			<li class='submenu'><a href='http://www.uslims.uthscsa.edu'>LIMS</a>
+			<ul class='level2'>
+				<li><a href="http://www.uslims.uthscsa.edu/">Main Website</a></li>
+       		<li><a href="http://www.uslims3.uthscsa.edu/index.php">UltraScan-III LIMS</a></li>
+       		<li><a href="http://www.uslims2.uthscsa.edu/index.php">UltraScan-II LIMS</a></li>
+			</ul></li>
+         <li class='submenu'><a href='http://www.somo.uthscsa.edu/'>SOMO</a>
+         <ul class='level2'>
+				<li><a href='http://www.beads.uthscsa.edu/'>Beadmodeling</a></li>
+				<li><a href='http://www.sas.uthscsa.edu/'>SAXS/SANS</a></li>
+				<li><a href='http://www.dynamics.uthscsa.edu/'>Mol. Dynamics</a></li>
+         </ul></li>
+         <li class='submenu'><a href='http://wiki.bcf.uthscsa.edu/'>Wiki</a>
+         <ul class='level2'>
+				<li><a href='http://wiki.bcf.uthscsa.edu/ultrascan/'>UltraScan-II</a></li>
+				<li><a href='http://wiki.bcf.uthscsa.edu/cauma/'>UltraScan-II LIMS</a></li>
+				<li><a href='http://wiki.bcf.uthscsa.edu/ultrascan3/'>UltraScan-III</a></li>
+				<li><a href='http://wiki.bcf.uthscsa.edu/limsv3/'>UltraScan-III LIMS</a></li>
+				<li><a href='http://wiki.bcf.uthscsa.edu/somo/'>US SOMO</a></li>
+				<li><a href='http://wiki.bcf.uthscsa.edu/dmd/'>DMD</a></li>
+				<li><a href='http://wiki.bcf.uthscsa.edu/cfa/'>CFA</a></li>
+				<li><a href='http://wiki.bcf.uthscsa.edu/aucmanual/'>AUC Manual</a></li>
+         </ul></li>
+      </ul>
+   </div>

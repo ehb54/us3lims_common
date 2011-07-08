@@ -10,15 +10,16 @@ table.resources
   float            : left;
   margin           : 2em;
   border-collapse  : collapse;
-  border           : solid gray 0.1em;
+  border           : groove gray 0.5em;
   width            : 16em;
+  font-size        : 110%;
 }
 
 div#content caption
 {
   font-weight      : bold;
   font-style       : italic;
-  margin           : 0em 2em 1em;
+  margin           : 0em auto 1em;
   text-align       : center;
   width            : 16em;
 }
@@ -28,7 +29,7 @@ table.resources td, table.resources th
   text-align       : center;
   border           : solid #999 2px;
   border-style     : ridge;
-  padding          : 0.1em 0.2em;
+  padding          : 0.3em 0.6em;
 }
 
 table.resources thead th

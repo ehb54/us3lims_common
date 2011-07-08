@@ -1,8 +1,8 @@
    <div id="globalnav">
       <ul class='level1'>
        	<li><a href="http://ultrascan.uthscsa.edu/index.php">Home</a></li>
-			<li><a href='http://www.ultrascan3.uthscsa.edu/index.php'>UltraScan III</a>
-			<li><a href='http://www.ultrascan2.uthscsa.edu/index.php'>UltraScan II</a>
+			<li><a href='http://www.ultrascan3.uthscsa.edu/index.php'>UltraScan III</a></li>
+			<li><a href='http://www.ultrascan2.uthscsa.edu/index.php'>UltraScan II</a></li>
 			<li class='submenu'><a href='http://www.uslims.uthscsa.edu'>LIMS</a>
 			<ul class='level2'>
 				<li><a href="http://www.uslims.uthscsa.edu/">Main Website</a></li>

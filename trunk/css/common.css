@@ -335,7 +335,7 @@ a.block:hover {
   font-weight           : bold;
 }
 
-#box {
+.box {
   width						: 140px;
   background            : #7F7F7F url(../images/button-gradient.png) repeat-x;
   margin-left           : 0px;
@@ -346,7 +346,7 @@ a.block:hover {
   font-weight           : bold;
 }
 
-#box a {
+.box a {
   margin                : 0px;
   width						: 140px;
   color                 : white;
@@ -356,7 +356,7 @@ a.block:hover {
   font-weight           : bold;
 }
 
-#box a:hover {
+.box a:hover {
   background            : white url(../images/button-gradient-hover.png) repeat-x;
   margin                : 0px;
   width						: 140px;

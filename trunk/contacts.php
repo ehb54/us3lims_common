@@ -21,24 +21,27 @@ include 'header.php';
       <td><a href='mailto:jeremy@biochem.uthscsa.edu'>Jeremy Mann </a><br/>
           <a href='mailto:jeremy@biochem.uthscsa.edu'>jeremy@biochem.uthscsa.edu</a><br/>
           Telephone: 210-767-3419
+      </td>
    </tr>
    <tr valign='top'>
       <td><b>Website and Program Support:</b></td>
       <td><a href='mailto:zollarsd@biochem.uthscsa.edu'>Dan Zollars</a><br/>
           <a href='mailto:zollarsd@biochem.uthscsa.edu'>zollarsd@biochem.uthscsa.edu</a><br/>
           Telephone: 210-767-2761
+      </td>
    </tr>
    <tr valign='top'>
       <td><b>Program Support:</b></td>
       <td><a href='mailto:gegorbet@gmail.com'>Gary Gorbet</a><br/>
           <a href='mailto:gegorbet@gmail.com'>gegorbet@gmail.com</a><br/>
+      </td>
    </tr>
    <tr valign='top'>
       <td><b>Mailing Address:</b></td>
       <td>
          7703 Floyd Curl Drive <br/> 
 	      <a href='http://www.biochem.uthscsa.edu'>Department of Biochemistry<br/>
-         Mailcode 7760<br/>
+         Mailcode 7760</a><br/>
 	      <a href='http://www.uthscsa.edu'>The University of Texas Health 
          Science Center at San Antonio</a><br/>
 	      San Antonio, TX 78229-3901<br/>

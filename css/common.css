@@ -287,84 +287,43 @@ a.block:hover {
 
 /* Sidebar */
 
-#sidebar {
+div#sidebar {
   float                 : left;
-  width                 : 150px;                /* 180 - 25x2 in ul margin */
+  width                 : 156px;                /* 180 - 12x2 in padding */
   background            : #7F7F7F url(../images/black-grey-gradient.png) repeat-x;
-  padding               : 1em 15px 1em 15px;   /* a minimum spacing before footer */
-  color						: white;
-}
-
-#sidebar ul {
-  list-style-type       : none;
-  margin                : 0px;
-  padding               : 0px;
-  line-height				: 1.5em;
-}
-
-#sidebar ul ul{
-  list-style-type :disc;
-  margin                : 0px;
-  margin                : 0.5em 0px 1em 30px;
-  padding               : 0px;
-  color						: white;
-  line-height				: 1.2em;
-}
-
-#sidebar li.section {
-  border-bottom         : 1px solid black;
-  margin-bottom         : 0.5em;                /* to make a centered line */
-  padding-bottom        : 0.5em;
-	color						: white;
-  font-size             : 12px;
-  font-weight           : bold;
-}
-
-/* anchor tags need to be the same in #sidebar and #info */
-#sidebar a, #info a  {
-  text-decoration       : none;
+  padding               : 1em 12px 2em;   /* a minimum spacing all round */
   color                 : white;
-  font-size             : 12px;
-  font-weight           : bold;
 }
 
-#sidebar a:hover, #info a:hover {
-  text-decoration       : none;
-  color                 : cyan;
-  font-size             : 12px;
-  font-weight           : bold;
-}
-
-.box {
-  width						: 140px;
-  background            : #7F7F7F url(../images/button-gradient.png) repeat-x;
-  margin-left           : 0px;
+div#sidebar h4 {
+  margin                : 0;
+  padding-top           : 1em;
+  background-color      : transparent;
+  font-family           : Arial, Helvetica, Sans-serif;
   color                 : white;
+  font-size             : 1.2em;
+  font-weight           : bold;
+}
+
+div#sidebar a {
+  width                 : 140px;
   height                : 20px;
+  background            : transparent url(../images/button-gradient.png) repeat-x;
+  display               : block;
+  margin                : 0;
   padding               : 6px;
+  color                 : white;
   font-size             : 13px;
   font-weight           : bold;
+  text-decoration       : none;
 }
 
-.box a {
-  margin                : 0px;
-  width						: 140px;
-  color                 : white;
-  height                : 20px;
-  padding               : 6px;
-  font-size             : 13px;
-  font-weight           : bold;
-}
-
-.box a:hover {
+#sidebar a:hover {
   background            : white url(../images/button-gradient-hover.png) repeat-x;
-  margin                : 0px;
-  width						: 140px;
   color                 : cyan;
-  height                : 20px;
-  padding               : 6px;
   font-size             : 13px;
   font-weight           : bold;
+  text-decoration       : none;
 }
 
 /* Content */

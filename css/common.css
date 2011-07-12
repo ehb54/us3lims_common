@@ -146,16 +146,6 @@ a.block:hover {
 
 /* Header */
 
-#search {
-  width                 : 300px;
-  margin                : 1em auto 0px;   /* page will be 1em from top of window */
-  background            : black;
-  border                : solid black;
-  border-width          : 10px 2px 0px 2px;
-  border-width          : 5px 0px 5px 0px;
-}
-
-
 #header {
   width                 : 1000px;
   margin                : 1em auto 0px;   /* page will be 1em from top of window */
@@ -270,17 +260,20 @@ a.block:hover {
   display               : block;
 }
 
-/* doesn't show up */
-#globalnav li.submenu li.submenu {
-  background-image      : url(../images/submenu.gif);
-}
-
 /* Page */
 
 #page {
   width                 : 1000px;
   margin                : auto;
   background            : #FFFFFF  url(../images/links_background.gif) repeat-y;
+  border                : solid black;
+  border-width          : 0px 0px 0px 0px;
+}
+
+#search_page {
+  width                 : 1000px;
+  margin                : auto;
+  background            : #FFFFFF;
   border                : solid black;
   border-width          : 0px 0px 0px 0px;
 }
@@ -329,9 +322,15 @@ div#sidebar a {
 /* Content */
 
 #content {
-  width                 : 750px;    /* 780px - 25px r margin - 5px for IE6 */
-  margin-left           : 205px;    /* 180px for links + 25px l margin */
-  /*padding-bottom        : 2em;*/
+  width                 : 750px;                /* 780px - 25px r margin - 5px for IE6 */
+  margin-left           : 205px;                /* 180px for links + 25px l margin */
+  padding-bottom        : 2em;
+}
+
+#search_content {
+  width                 : 970px;                /* 1000px - 25px r margin - 5px for IE6 */
+  margin-left           : 25px;
+  padding-bottom        : 2em;
 }
 
 div#content p
@@ -401,7 +400,7 @@ fieldset.option_value {
 #info {
   float                 : left;
   margin                : 0px;
-  height						: 30px;
+  height                : 30px;
   width                 : 130px;
   color                 : #000;
   background-color      : #7F7F7F;

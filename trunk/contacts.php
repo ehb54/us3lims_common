@@ -19,13 +19,6 @@ include 'header.php';
       </td>
    </tr>
    <tr valign='top'>
-      <td><b>Technical Assistance:</b></td>
-      <td><a href='mailto:jeremy@biochem.uthscsa.edu'>Jeremy Mann </a><br/>
-          <a href='mailto:jeremy@biochem.uthscsa.edu'>jeremy@biochem.uthscsa.edu</a><br/>
-          Telephone: 210-767-3419
-      </td>
-   </tr>
-   <tr valign='top'>
       <td><b>Website and Program Support:</b></td>
       <td><a href='mailto:zollarsd@biochem.uthscsa.edu'>Dan Zollars</a><br/>
           <a href='mailto:zollarsd@biochem.uthscsa.edu'>zollarsd@biochem.uthscsa.edu</a><br/>

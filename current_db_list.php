@@ -7,7 +7,10 @@
 
 
 // These are in mysql SHOW DATABASES order
-$dblist = array('us3'                          ,
+$dblist = array(
+                'us3'                          ,
+                'uslims3_AESKU'                ,
+                'uslims3_Avatar'               ,
                 'uslims3_BIOCORUW'             ,
                 'uslims3_Beckman'              ,
                 'uslims3_CAUMA'                ,
@@ -31,6 +34,7 @@ $dblist = array('us3'                          ,
                 'uslims3_TAMU'                 ,
                 'uslims3_TIT'                  ,
                 'uslims3_UAB'                  ,
+                'uslims3_UCSF'                 ,
                 'uslims3_UCSanDiego'           ,
                 'uslims3_UIC'                  ,
                 'uslims3_UMICH'                ,
@@ -41,9 +45,11 @@ $dblist = array('us3'                          ,
                 'uslims3_UW_Biophys'           ,
                 'uslims3_U_Regensbg'           ,
                 'uslims3_Uni_KN'               ,
+                'uslims3_Univ_Leeds'           ,
                 'uslims3_UofL'                 ,
                 'uslims3_WSU'                  ,
                 'uslims3_YCU'                  ,
                 'uslims3_cauma3'               ,
                 'uslims3_cauma3d'              ,
+                'uslims3_uea'                  ,
                 'uslims3_unimelb'              );

@@ -32,7 +32,7 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 60000,
         "ppn"        => 2,
-        "maxproc"    => 24
+        "maxproc"    => 20
       );
     
       $this->grid[ 'bcf-local' ] = array 
@@ -44,7 +44,7 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 60000,
         "ppn"        => 2,
-        "maxproc"    => 24
+        "maxproc"    => 20
       );
 
       $this->grid[ 'alamo' ] = array 
@@ -103,6 +103,52 @@ class jobsubmit
         "ppn"        => 12,
         "maxproc"    => 36
       );
+
+      $this->grid[ 'gordon' ] = array 
+      (
+        "name"       => "gordon.sdsc.edu",
+        "submithost" => "http://gf5.ucs.indiana.edu",
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => 8080,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 1440,
+        "ppn"        => 16,
+        "maxproc"    => 64
+      );
+    
+      $this->grid[ 'trestles' ] = array 
+      (
+        "name"       => "trestles.sdsc.edu",
+        "submithost" => "http://gf5.ucs.indiana.edu",
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => 8080,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 1440,
+        "ppn"        => 32,
+        "maxproc"    => 64
+      );
+    
+      $this->grid[ 'stampede' ] = array 
+      (
+        "name"       => "stampede.tacc.teragrid.org",
+        "submithost" => "http://gf5.ucs.indiana.edu",
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => 8080,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 1440,
+        "ppn"        => 16,
+        "maxproc"    => 64
+      );
+    
    }
    
    // Deconstructor

@@ -388,7 +388,7 @@ fieldset.option_value {
 #footer {
   clear                 : both;
   width                 : 1000px;
-  height                : 30px;
+  height                : 40px;
   margin                : -2em auto 1em ; /* page will be 1em from bottom of window */
   padding-bottom        : 0px;           /* 15px + 25px to match padding in #info */
   font-family           : Arial, Helvetica, sans-serif;

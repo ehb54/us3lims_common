@@ -15,16 +15,16 @@
 		<li><a href='http://www.sas.uthscsa.edu/'>SAXS/SANS</a></li>
 		<li><a href='http://www.dynamics.uthscsa.edu/'>Mol. Dynamics</a></li>
         </ul></li>
-        <li class='submenu'><a href='http://wiki.bcf.uthscsa.edu/'>Wiki</a>
+        <li class='submenu'><a href='http://wiki.bcf2.uthscsa.edu/'>Wiki</a>
         <ul class='level2'>
-		<li><a href='http://wiki.bcf.uthscsa.edu/ultrascan/'>UltraScan-II</a></li>
-		<li><a href='http://wiki.bcf.uthscsa.edu/cauma/'>LIMS-II</a></li>
-		<li><a href='http://wiki.bcf.uthscsa.edu/ultrascan3/'>UltraScan-III</a></li>
-		<li><a href='http://wiki.bcf.uthscsa.edu/limsv3/'>LIMS-III</a></li>
-		<li><a href='http://wiki.bcf.uthscsa.edu/somo/'>US SOMO</a></li>
-		<li><a href='http://wiki.bcf.uthscsa.edu/dmd/'>DMD</a></li>
-		<li><a href='http://wiki.bcf.uthscsa.edu/cfa/'>CFA</a></li>
-		<li><a href='http://wiki.bcf.uthscsa.edu/aucmanual/'>AUC Manual</a></li>
+		<li><a href='http://wiki.bcf2.uthscsa.edu/ultrascan/'>UltraScan-II</a></li>
+		<li><a href='http://wiki.bcf2.uthscsa.edu/cauma/'>LIMS-II</a></li>
+		<li><a href='http://wiki.bcf2.uthscsa.edu/ultrascan3/'>UltraScan-III</a></li>
+		<li><a href='http://wiki.bcf2.uthscsa.edu/limsv3/'>LIMS-III</a></li>
+		<li><a href='http://wiki.bcf2.uthscsa.edu/somo/'>US SOMO</a></li>
+		<li><a href='http://wiki.bcf2.uthscsa.edu/dmd/'>DMD</a></li>
+		<li><a href='http://wiki.bcf2.uthscsa.edu/cfa/'>CFA</a></li>
+		<li><a href='http://wiki.bcf2.uthscsa.edu/aucmanual/'>AUC Manual</a></li>
          </ul></li>
       </ul>
    </div>

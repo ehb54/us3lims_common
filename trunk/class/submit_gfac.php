@@ -32,8 +32,49 @@ $this->message[] = "End of submit_gfac.php\n";
       $workdir     = $this->grid[ $cluster ][ 'workdir' ];
       $userdn      = $this->grid[ $cluster ][ 'userdn' ];
       $queue       = $this->data[ 'job' ][ 'cluster_queue' ];
-      $gfacID      = "US3-" . basename( $this->data['job']['directory'] );
+      $gfacID      = 'US3-' . basename( $this->data['job']['directory'] );
       $dbname      = $this->data[ 'db'  ][ 'name' ];
+      $comuser     = 'Ultrascan3 Community User';
+      switch ( $dbname )
+      {
+         case 'uslims3_cauma3d':
+         case 'uslims3_cauma3':
+         case 'uslims3_Uni_KN':
+         case 'uslims3_HHU':
+            $httpport    = '9090';
+            break;
+ 
+         default :
+            break;
+      }
+
+      if ( $cluster == 'juropa' )
+      {
+         switch ( $dbname )
+         {
+            case 'uslims3_cauma3d':
+            case 'uslims3_cauma3':
+               $comuser     = 'zdv575';
+//               $this->grid[ $cluster ][ 'maxtime' ] = 300;
+//               $comuser     = 'hkn001';
+               break;
+ 
+            case 'uslims3_Uni_KN':
+               $comuser     = 'hkn001';
+               break;
+ 
+            case 'uslims3_HHU':
+               $comuser     = 'jics6301';
+               break;
+ 
+            default :
+               $comuser     = 'Ultrascan3 Community User';
+               break;
+         }
+
+         $userdn = str_replace( '_USER_', $comuser, $userdn );
+      }
+
       $mgroupcount = min( $this->max_mgroupcount() ,
                           $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
 
@@ -41,14 +82,13 @@ $this->message[] = "End of submit_gfac.php\n";
       $nodes       = $this->nodes() * $mgroupcount;
       $cores       = $nodes * $ppn;
       
+      $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
       $maxWallTime = $this->maxwall();
-      //$maxWallTime = "5";      // override for now
  
       $this->data[ 'cores'       ] = $cores;
       $this->data[ 'nodes'       ] = $nodes;
       $this->data[ 'ppn'         ] = $ppn;
       $this->data[ 'maxWallTime' ] = $maxWallTime;
-      $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
  
       $writer = new XMLWriter();
       $writer ->openMemory();
@@ -136,6 +176,17 @@ $this->message[] = "Job xml created";
       $cluster  = $this->data['job']['cluster_shortname'];
       $host     = $this->grid[ $cluster ]['submithost'];
       $port     = $this->grid[ $cluster ]['httpport'];
+      $dbname   = $this->data[ 'db'  ][ 'name' ];
+
+      if ( $dbname == "uslims3_cauma3d" )
+         $port    = '9090';
+      if ( $dbname == "uslims3_cauma3" )
+         $port    = '9090';
+      if ( $dbname == "uslims3_HHU" )
+         $port    = '9090';
+      if ( $dbname == "uslims3_Uni_KN" )
+         $port    = '9090';
+
       $path     = $this->grid[ $cluster ]['workdir'];
       $boundary = 'US3-' . basename( $this->data['job']['directory'] );
       $xml      = $this->data['jobxmlfile'];
@@ -148,6 +199,7 @@ $this->message[] = "URL: $url";
       $headers['MIME-Version'] = '1.0';
       $headers['Content-Type'] = "multipart/mixed; boundary=\"$boundary\"";
 
+//$this->message[] = "XML: $xml";
 //$this->message[] = "Headers:";
 //$this->message[] = $headers; 
  
@@ -173,7 +225,7 @@ Content-Transfer-Encoding: base64
  
       // It is important to have the embedded newlines below.
       $httpdata .= "
---$boundary
+--$boundary--
 ";
 
 //$this->message[] = "Httpdata:
@@ -240,8 +292,8 @@ $this->message[] = preg_replace( "/&gt;/", "&gt;\n", $epr );
       }
  
       $gfacID = $this->getGfacID( $epr );
-
-      if ( $gfacID == '' ) // Nothing returned
+      if ( strpos( $gfacID, "Error report" ) !== false  ||
+           $gfacID == '' ) // "...Error..." or Nothing returned
          $gfacID      = "US3-" . basename( $this->data['job']['directory'] );
 
       $query = "INSERT INTO HPCAnalysisResult SET "                   .

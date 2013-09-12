@@ -17,22 +17,22 @@ class jobsubmit
    {
       global $globaldbname;
 
-      if ( $globaldbname == 'gfac2' )
-          ; // Add logic to change port from 8080 to 8081
+      $subhost = "http://gridfarm005.ucs.indiana.edu";
+      $subport = 8080;
 
       $this->grid[ 'bcf' ] = array 
       (
         "name"       => "bcf.uthscsa.edu",
-        "submithost" => "http://gf5.ucs.indiana.edu",
+        "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
-        "httpport"   => 8080,
+        "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
         "queue"      => "default",
         "maxtime"    => 60000,
         "ppn"        => 2,
-        "maxproc"    => 20
+        "maxproc"    => 18
       );
     
       $this->grid[ 'bcf-local' ] = array 
@@ -44,22 +44,22 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 60000,
         "ppn"        => 2,
-        "maxproc"    => 20
+        "maxproc"    => 18
       );
 
       $this->grid[ 'alamo' ] = array 
       (
         "name"       => "alamo.uthscsa.edu",
-        "submithost" => "http://gf5.ucs.indiana.edu",
+        "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
-        "httpport"   => 8080,
+        "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
         "queue"      => "default",
         "maxtime"    => 90000,
         "ppn"        => 4,
-        "maxproc"    => 52
+        "maxproc"    => 40
       );
     
       $this->grid[ 'alamo-local' ] = array 
@@ -71,31 +71,16 @@ class jobsubmit
         "queue"      => "",
         "maxtime"    => 90000,
         "ppn"        => 4,
-        "maxproc"    => 52
+        "maxproc"    => 40
       );
 
-      $this->grid[ 'ranger' ] = array 
-      (
-        "name"       => "gatekeeper.ranger.tacc.teragrid.org",
-        "submithost" => "http://gf5.ucs.indiana.edu",
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => 8080,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,   // This is overridden in maxwall() if using the long queue
-        "ppn"        => 16,
-        "maxproc"    => 64
-      );
-    
       $this->grid[ 'lonestar' ] = array 
       (
         "name"       => "lonestar.tacc.teragrid.org",
-        "submithost" => "http://gf5.ucs.indiana.edu",
+        "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
-        "httpport"   => 8080,
+        "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
         "queue"      => "normal",
@@ -107,10 +92,10 @@ class jobsubmit
       $this->grid[ 'gordon' ] = array 
       (
         "name"       => "gordon.sdsc.edu",
-        "submithost" => "http://gf5.ucs.indiana.edu",
+        "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
-        "httpport"   => 8080,
+        "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
         "queue"      => "normal",
@@ -122,10 +107,10 @@ class jobsubmit
       $this->grid[ 'trestles' ] = array 
       (
         "name"       => "trestles.sdsc.edu",
-        "submithost" => "http://gf5.ucs.indiana.edu",
+        "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
-        "httpport"   => 8080,
+        "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
         "queue"      => "normal",
@@ -136,16 +121,31 @@ class jobsubmit
     
       $this->grid[ 'stampede' ] = array 
       (
-        "name"       => "stampede.tacc.teragrid.org",
-        "submithost" => "http://gf5.ucs.indiana.edu",
+        "name"       => "stampede.tacc.xsede.org",
+        "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
-        "httpport"   => 8080,
+        "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
         "queue"      => "normal",
         "maxtime"    => 1440,
         "ppn"        => 16,
+        "maxproc"    => 64
+      );
+    
+      $this->grid[ 'juropa' ] = array 
+      (
+        "name"       => "juropa.fz-juelich.de",
+        "submithost" => $subhost,
+        "userdn"     => "CN=_USER_, O=Ultrascan Gateway, C=DE",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "default",
+        "maxtime"    => 360,
+        "ppn"        => 8,
         "maxproc"    => 64
       );
     
@@ -410,11 +410,6 @@ class jobsubmit
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
  
-      // Override max time in the case of the long queue on ranger
-      if ( $cluster == 'ranger' &&
-           $queue   == 'long'   )
-         $max_time = 2880;
-
       if ( preg_match( "/^GA/", $this->data[ 'method' ] ) )
       {
          // Assume 1 sec a basic unit
@@ -427,7 +422,7 @@ class jobsubmit
 
          $time        = ( 125 + $population ) * $generations;
  
-         $time *= 1.5;  // Pad things a bit
+         $time *= 1.2;  // Pad things a bit
          $time  = (int)( ($time + 59) / 60 ); // Round up to minutes
       }
       else // 2DSA
@@ -440,7 +435,7 @@ class jobsubmit
                        ? $parameters[ 'rinoise_option' ] > 0
                        : false;
  
-         $time       = 20;  // Base time in minutes
+         $time       = 5;  // Base time in minutes
 
          if ( isset( $parameters[ 'meniscus_points' ] ) )
          {
@@ -463,7 +458,7 @@ class jobsubmit
          if ( $mxiters > 0 )  $time *= $mxiters;
       }
 
-      $time *= 1.5;  // Padding
+      $time = (int)( ( $time * 12 ) / 10 );  // Padding
  
       // Account for parallel group count in max walltime
       $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
@@ -477,23 +472,27 @@ class jobsubmit
 
       else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
       {
-         // For bcf, hardwire $max_time to 120 (2 hours), and no PMG
-         $time = 120;
+         // For bcf, hardwire $max_time to 240 (4 hours), and no PMG
+         $time = 240;
          $mgroupcount = 1;
       }
 
       switch ( $mgroupcount )
       {
          case 2  :
-            $time = (int)( $time * 10 / 15 );
+            $time = (int)( ( $time * 10 ) / 15 );
             break;
 
          case 4  :
-            $time = (int)( $time * 10 / 35 );
+            $time = (int)( ( $time * 10 ) / 35 );
             break;
 
          case 8  :
-            $time = (int)( $time * 10 / 75 );
+            $time = (int)( ( $time * 10 ) / 75 );
+            break;
+
+         case 16 :
+            $time = (int)( ( $time * 10 ) / 150 );
             break;
 
          case 1  :

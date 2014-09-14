@@ -32,7 +32,7 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 60000,
         "ppn"        => 2,
-        "maxproc"    => 18
+        "maxproc"    => 12
       );
     
       $this->grid[ 'bcf-local' ] = array 
@@ -44,7 +44,7 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 60000,
         "ppn"        => 2,
-        "maxproc"    => 18
+        "maxproc"    => 12
       );
 
       $this->grid[ 'alamo' ] = array 
@@ -59,7 +59,7 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 90000,
         "ppn"        => 4,
-        "maxproc"    => 40
+        "maxproc"    => 32
       );
     
       $this->grid[ 'alamo-local' ] = array 
@@ -71,7 +71,7 @@ class jobsubmit
         "queue"      => "",
         "maxtime"    => 90000,
         "ppn"        => 4,
-        "maxproc"    => 40
+        "maxproc"    => 32
       );
 
       $this->grid[ 'lonestar' ] = array 
@@ -144,7 +144,7 @@ class jobsubmit
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
         "queue"      => "default",
-        "maxtime"    => 360,
+        "maxtime"    => 1440,
         "ppn"        => 8,
         "maxproc"    => 64
       );
@@ -408,9 +408,10 @@ class jobsubmit
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
+      $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
  
-      if ( preg_match( "/^GA/", $this->data[ 'method' ] ) )
+      if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {
          // Assume 1 sec a basic unit
 
@@ -446,6 +447,8 @@ class jobsubmit
          if ( $ti_noise || $ri_noise ) $time *= 2;
       }
  
+      $montecarlo = 1;
+ 
       if ( isset( $parameters[ 'mc_iterations' ] ) )
       {
          $montecarlo = $parameters[ 'mc_iterations' ];
@@ -458,10 +461,14 @@ class jobsubmit
          if ( $mxiters > 0 )  $time *= $mxiters;
       }
 
-      $time = (int)( ( $time * 12 ) / 10 );  // Padding
+      $time *= $dset_count;                   // times number of datasets
+      $time  = (int)( ( $time * 12 ) / 10 );  // Padding
  
       // Account for parallel group count in max walltime
-      $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
+      if ( $montecarlo > 1 )
+         $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
+      else
+         $mgroupcount = 1;
 
       if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
       {
@@ -477,6 +484,7 @@ class jobsubmit
          $mgroupcount = 1;
       }
 
+      // Adjust max wall time down based on parallel group count
       switch ( $mgroupcount )
       {
          case 2  :
@@ -513,7 +521,7 @@ class jobsubmit
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
  
-      if ( preg_match( "/^GA/", $this->data[ 'method' ] ) )
+      if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {  // GA: procs is demes+1 rounded to procs-per-node
          $procs = $parameters[ 'demes' ] + $ppn;  // Procs = demes+1
          $procs = (int)( $procs / $ppn ) * $ppn;  // Rounded to procs-per-node

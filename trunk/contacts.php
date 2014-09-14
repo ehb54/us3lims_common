@@ -1,9 +1,20 @@
 <?php
-session_start();
+include 'checkinstance.php';
 
 include 'header.php';
 ?>
 <div id='content'>
+
+	<h1 class="title">Local Facility Administrator Contact:</h1>
+   <table cellpadding='10' border='1'>
+   <tr valign='top'>
+      <td><b>Facility Administrator:</b></td>
+      <td><a href='mailto:<?php echo $admin_email; ?>'><?php echo $admin; ?></a><br/>
+         <a href='mailto:<?php echo $admin_email; ?>'><?php echo $admin_email; ?></a><br/>
+         Office/Telephone: <?php echo $admin_phone; ?><br/>
+      </td>
+   </tr>
+   </table>
 	<h1 class="title">UltraScan Contacts:</h1>
 
    <table cellpadding='10' border='1'>
@@ -20,13 +31,6 @@ include 'header.php';
    </tr>
    <tr valign='top'>
       <td><b>Website and Program Support:</b></td>
-      <td><a href='mailto:zollarsd@biochem.uthscsa.edu'>Dan Zollars</a><br/>
-          <a href='mailto:zollarsd@biochem.uthscsa.edu'>zollarsd@biochem.uthscsa.edu</a><br/>
-          Telephone: 210-767-2761
-      </td>
-   </tr>
-   <tr valign='top'>
-      <td><b>Program Support:</b></td>
       <td><a href='mailto:gegorbet@gmail.com'>Gary Gorbet</a><br/>
           <a href='mailto:gegorbet@gmail.com'>gegorbet@gmail.com</a><br/>
       </td>

@@ -5,16 +5,16 @@
  * A place to display search results
  *
  */
-session_start();
+include 'checkinstance.php';
 
 include 'config.php';
 
 // Start displaying page
 echo<<<HTML
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
-    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+    "https://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<html xmlns="https://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
 <!--
 Description   : Website designed and implemented by Dan Zollars 
                 and Borries Demeler, 2010
@@ -57,14 +57,14 @@ Released      : 6/30/2011
        <td style='vertical-align:middle;width:400px;'>
 
        <div id="cse-search-form">Loading</div>
-       <script src="http://www.google.com/jsapi" type="text/javascript"></script>
+       <script src="https://www.google.com/jsapi" type="text/javascript"></script>
        <script type="text/javascript"> 
          google.load('search', '1', {language : 'en', style : google.loader.themes.MINIMALIST});
          google.setOnLoadCallback(function() {
            var customSearchControl = new google.search.CustomSearchControl('007201445830912588415:jg05a0rix7y');
            customSearchControl.setResultSetSize(google.search.Search.FILTERED_CSE_RESULTSET);
            var options = new google.search.DrawOptions();
-           options.enableSearchboxOnly("http://$org_site/search.php");    
+           options.enableSearchboxOnly("https://$org_site/search.php");    
            customSearchControl.draw('cse-search-form', options);
          }, true);
        </script>
@@ -92,7 +92,7 @@ echo<<<HTML
   <!-- Place page content here -->
  
   <div id="cse" style="width: 90%;">Loading</div>
-  <script src="http://www.google.com/jsapi" type="text/javascript"></script>
+  <script src="https://www.google.com/jsapi" type="text/javascript"></script>
   <script type="text/javascript"> 
     function parseQueryFromUrl () {
       var queryParamName = "q";

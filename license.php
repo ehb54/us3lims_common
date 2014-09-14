@@ -1,5 +1,5 @@
 <?php
-session_start();
+include 'checkinstance.php';
 
 include 'header.php';
 ?>

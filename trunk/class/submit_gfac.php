@@ -41,7 +41,7 @@ $this->message[] = "End of submit_gfac.php\n";
          case 'uslims3_cauma3':
          case 'uslims3_Uni_KN':
          case 'uslims3_HHU':
-            $httpport    = '9090';
+            $httpport    = '8080';
             break;
  
          default :
@@ -52,11 +52,13 @@ $this->message[] = "End of submit_gfac.php\n";
       {
          switch ( $dbname )
          {
-            case 'uslims3_cauma3d':
             case 'uslims3_cauma3':
                $comuser     = 'zdv575';
 //               $this->grid[ $cluster ][ 'maxtime' ] = 300;
-//               $comuser     = 'hkn001';
+               break;
+ 
+            case 'uslims3_cauma3d':
+               $comuser     = 'zdv576';
                break;
  
             case 'uslims3_Uni_KN':
@@ -67,8 +69,12 @@ $this->message[] = "End of submit_gfac.php\n";
                $comuser     = 'jics6301';
                break;
  
+            case 'uslims3_FAU':
+               $comuser     = 'her210';
+               break;
+ 
             default :
-               $comuser     = 'Ultrascan3 Community User';
+               $comuser     = 'zdv575';
                break;
          }
 
@@ -179,13 +185,13 @@ $this->message[] = "Job xml created";
       $dbname   = $this->data[ 'db'  ][ 'name' ];
 
       if ( $dbname == "uslims3_cauma3d" )
-         $port    = '9090';
+         $port    = '8080';
       if ( $dbname == "uslims3_cauma3" )
-         $port    = '9090';
+         $port    = '8080';
       if ( $dbname == "uslims3_HHU" )
-         $port    = '9090';
+         $port    = '8080';
       if ( $dbname == "uslims3_Uni_KN" )
-         $port    = '9090';
+         $port    = '8080';
 
       $path     = $this->grid[ $cluster ]['workdir'];
       $boundary = 'US3-' . basename( $this->data['job']['directory'] );

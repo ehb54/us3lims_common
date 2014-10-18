@@ -83,6 +83,8 @@ $this->message[] = "End of submit_gfac.php\n";
 
       $mgroupcount = min( $this->max_mgroupcount() ,
                           $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
+$mg_max=$this->max_mgroupcount();
+$mg_req=$this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ];
 
       $ppn         = $this->grid[ $cluster ][ 'ppn' ];
       $nodes       = $this->nodes() * $mgroupcount;
@@ -134,6 +136,12 @@ $this->message[] = "End of submit_gfac.php\n";
             $writer ->startElement( 'mgroupcount' );
             $writer ->text( $mgroupcount );
             $writer ->endElement();
+$writer ->startElement( 'mgroupcount_max' );
+$writer ->text( $mg_max );
+$writer ->endElement();
+$writer ->startElement( 'mgroupcount_req' );
+$writer ->text( $mg_req );
+$writer ->endElement();
  
             $writer ->startElement( 'hostcount' );
             $writer ->text( $nodes );

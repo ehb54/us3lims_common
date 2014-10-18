@@ -1,11 +1,11 @@
 <?php
 /*
- * jobsubmit.php
+ * jobsubmit_aira.php
  *
  * Base class for common elements used to submit an analysis
  *
  */
-class jobsubmit
+class airavata_jobsubmit
 {
    protected $data    = array();   // Global parsed input
    protected $jobfile = "";        // Global string
@@ -101,7 +101,7 @@ class jobsubmit
         "queue"      => "normal",
         "maxtime"    => 1440,
         "ppn"        => 16,
-        "maxproc"    => 32
+        "maxproc"    => 64
       );
     
       $this->grid[ 'trestles' ] = array 
@@ -116,7 +116,7 @@ class jobsubmit
         "queue"      => "normal",
         "maxtime"    => 1440,
         "ppn"        => 32,
-        "maxproc"    => 32
+        "maxproc"    => 64
       );
     
       $this->grid[ 'stampede' ] = array 
@@ -131,7 +131,7 @@ class jobsubmit
         "queue"      => "normal",
         "maxtime"    => 1440,
         "ppn"        => 16,
-        "maxproc"    => 32
+        "maxproc"    => 64
       );
     
       $this->grid[ 'juropa' ] = array 
@@ -146,7 +146,7 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 1440,
         "ppn"        => 8,
-        "maxproc"    => 32
+        "maxproc"    => 64
       );
     
    }
@@ -411,7 +411,7 @@ class jobsubmit
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
  
-      if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
+      if ( preg_match( "/^GA/", $this->data[ 'method' ] ) )
       {
          // Assume 1 sec a basic unit
 
@@ -462,12 +462,10 @@ class jobsubmit
       }
 
       $time *= $dset_count;                   // times number of datasets
-      $time  = (int)( ( $time * 11 ) / 10 );  // Padding
+      $time  = (int)( ( $time * 12 ) / 10 );  // Padding
  
       // Account for parallel group count in max walltime
-      if ( $montecarlo > 1 )
-         $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
-      else if ( $dset_count > 1 )
+      if ( $montecarlo > 1  ||  $dset_count > 1 )
          $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
       else
          $mgroupcount = 1;
@@ -475,8 +473,9 @@ class jobsubmit
       if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
       {
          // For alamo, $max_time is hardwired to 90000, and no PMG
-//         $time        = $max_time;
-         $mgroupcount = min( 2, $mgroupcount );
+//         $time = $max_time;
+//         $mgroupcount = 1;
+$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
       }
 
       else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
@@ -489,6 +488,9 @@ class jobsubmit
       // Adjust max wall time down based on parallel group count
       switch ( $mgroupcount )
       {
+         case 1  :
+            break;
+
          case 2  :
             $time = (int)( ( $time * 10 ) / 15 );
             break;
@@ -505,8 +507,8 @@ class jobsubmit
             $time = (int)( ( $time * 10 ) / 150 );
             break;
 
-         case 1  :
          default :
+            $time = (int)( ( $time * 10 ) / ( ( $mgroupcount -1 ) * 10 ) );
             break;
       }
 
@@ -523,7 +525,7 @@ class jobsubmit
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
  
-      if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
+      if ( preg_match( "/^GA/", $this->data[ 'method' ] ) )
       {  // GA: procs is demes+1 rounded to procs-per-node
          $procs = $parameters[ 'demes' ] + $ppn;  // Procs = demes+1
          $procs = (int)( $procs / $ppn ) * $ppn;  // Rounded to procs-per-node
@@ -551,14 +553,14 @@ class jobsubmit
 
       $groups = $max_procs / $nodes;
 
-      if ( $max_time > 50000 )
-      {  // "Unlimited" max time (bcf,alamo) means no PMG
+//      if ( $max_time > 50000 )
+//      {  // "Unlimited" max time (bcf,alamo) means no PMG
 //        $groups = 1;
-      }
+//      }
 
-      // Convert to 1, 2, 4, or 8
+      // Convert to 1/2/4/8/16/32
       $power      = (int) floor( log( $groups, 2 ) );
-      $max_groups = min( 8, pow( 2, $power ) );
+      $max_groups = min( 32, pow( 2, $power ) );
 
       return $max_groups;
    }

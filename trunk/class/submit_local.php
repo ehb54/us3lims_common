@@ -87,6 +87,9 @@ $this->message[] = "Files copied to $address:$workdir";
       $ppn     = $this->grid[ $cluster ][ 'ppn' ]; 
 
       $walltime = sprintf( "%02.2d:%02.2d:00", $hours, $mins );  // 01:09:00
+      $havepl   = true;
+      $mpirun   = "mpirun";
+      $mpiana   = "/home/us3/bin/us_mpi_analysis";
 
       switch( $cluster )
       {
@@ -95,9 +98,18 @@ $this->message[] = "Files copied to $address:$workdir";
          $path    = "/share/apps64/openmpi/bin";
          break;
 
-        case 'alamo-local':
+        case 'jacinto-local':
          $libpath = "/share/apps/openmpi/lib";
          $path    = "/share/apps/openmpi/bin";
+         break;
+
+        case 'alamo-local':
+         $havepl  = false;
+         $load1   = "intel/2015/64";
+         $load2   = "openmpi/intel/1.8.4";
+         $load3   = "qt4/4.8.6";
+         $load4   = "ultrascan3/3.3";
+
          break;
 
         default:
@@ -105,6 +117,33 @@ $this->message[] = "Files copied to $address:$workdir";
          $path    = "/share/apps/openmpi/bin";
          $ppn     = 2;
          break;
+      }
+
+      if ( $havepl )
+      {
+         $plines  = 
+            "\n"                                                  .
+            "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
+            "export PATH=$path:\$PATH\n"                          .
+            "\n";
+         $dlines  = 
+            "# Turn off extraneous mpi debug output\n"            .
+            "export OMPI_MCA_mpi_param_check=0\n"                 . 
+            "export OMPI_MCA_mpi_show_handle_leaks=0\n"           .
+            "export OMPI_MCA_mpi_show_mca_params=0\n"             .
+            "\n";
+      }
+
+      else
+      {
+         $plines  = 
+            "\n"                    .
+            "module load $load1 \n" .
+            "module load $load2 \n" .
+            "module load $load3 \n" .
+            "module load $load4 \n" .
+            "\n";
+         $dlines  = "";
       }
 
       $procs   = $nodes * $ppn;
@@ -117,18 +156,12 @@ $this->message[] = "Files copied to $address:$workdir";
       "#PBS -V\n"                                           .
       "#PBS -o $workdir/stdout\n"                           .
       "#PBS -e $workdir/stderr\n"                           .
-      "#pmgroups=$mgroupcount\n"                               .
+      "#pmgroups=$mgroupcount\n"                            .
+      "$plines"                                             .
+      "$dlines"                                             .
       "\n"                                                  .
-      "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
-      "export PATH=$path:\$PATH\n"                          .
-      "\n"                                                  .
-      "# Turn off extraneous mpi debug output\n"            .
-      "export OMPI_MCA_mpi_param_check=0\n"                 . 
-      "export OMPI_MCA_mpi_show_handle_leaks=0\n"           .
-      "export OMPI_MCA_mpi_show_mca_params=0\n"             .
-      "\n"                                                  .
-      "cd $workdir\n"                                 .
-      "mpirun -np $procs /home/us3/bin/us_mpi_analysis $tarfile\n";
+      "cd $workdir\n"                                       .
+      "$mpirun -np $procs $mpiana $tarfile\n";
 
       $this->data[ 'pbsfile' ] = $contents;
 

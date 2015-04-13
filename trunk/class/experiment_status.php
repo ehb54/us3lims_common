@@ -1,5 +1,5 @@
 <?php
-include_once '/srv/www/htdocs/common/class/thrift_includes.php';
+include_once '/srv/www/htdocs/common/class/thrift_includes_0_15.php';
 
 use Airavata\Model\Workspace\Experiment\ExperimentState;
 use Airavata\Model\Workspace\Experiment\JobState;

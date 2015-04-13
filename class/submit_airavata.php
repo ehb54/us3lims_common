@@ -7,14 +7,12 @@
  */
 require_once $class_dir . 'jobsubmit_aira.php';
 
-include 'thrift_includes.php';
-
-use Airavata\Model\Workspace\Experiment\Experiment;
-use Airavata\Model\Workspace\Experiment\DataObjectType;
-use Airavata\Model\Workspace\Experiment\UserConfigurationData;
+include 'thrift_includes_0_15.php';
 use Airavata\Model\Workspace\Experiment\ComputationalResourceScheduling;
+use Airavata\Model\Workspace\Experiment\UserConfigurationData;
 use Airavata\Model\Workspace\Experiment\AdvancedOutputDataHandling;
-use Airavata\Model\Workspace\Experiment\DataType;
+use Airavata\Model\Workspace\Experiment\Experiment;
+use Airavata\Model\AppCatalog\AppInterface\InputDataObjectType;
 
 class submit_airavata extends airavata_jobsubmit
 {
@@ -25,7 +23,7 @@ class submit_airavata extends airavata_jobsubmit
       global $globaldbname, $globaldbhost,$filename,$airavataclient,$transport;
       chdir( $this->data['job']['directory'] );
       $expId = $this->createExperiment();
-      $airavataclient->launchExperiment($expId, 'airavataToken');
+      $airavataclient->launchExperiment($expId, '00409bfe-8e5f-4e50-b8eb-138bf0158e90');
       $this->update_db($expId);
       $transport->close();
       $this->message[] = "End of submit_airavata.php\n";
@@ -50,14 +48,13 @@ class submit_airavata extends airavata_jobsubmit
 
       $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
       $maxWallTime = $this->maxwall();
-
       $this->data[ 'cores'       ] = $cores;
       $this->data[ 'nodes'       ] = $nodes;
       $this->data[ 'ppn'         ] = $ppn;
       $this->data[ 'maxWallTime' ] = $maxWallTime;
       $this->data[ 'dataset' ][ 'status' ] = 'queued';
 
-      $us3_appId   = 'ultrascan_e76ab5cf-79f6-44df-a244-10a734183fec';
+      $us3_appId   = 'Ultrascan_856df1d5-944a-49d3-a476-d969e57a8f37';
       $host        = $this->data[ 'db' ][ 'host' ];
       $tarFilename = sprintf( "hpcinput-%s-%s-%05d.tar", $host,
                               $this->data['db']['name'],
@@ -74,23 +71,29 @@ class submit_airavata extends airavata_jobsubmit
       switch($hostname)
       {
          case 'trestles.sdsc.edu':
-            $hostname = "trestles.sdsc.xsede.org_1ccc526f-ab74-4a5a-970a-c464cb9def5a";
+            $hostname = "trestles.sdsc.xsede.org_467a4f25-4f44-4466-8ba9-e343e7ccf23d";
             break;
          case 'stampede.tacc.xsede.org':
-            $hostname = "stampede.tacc.xsede.org_af57850b-103b-49a1-aab2-27cb070d3bd9";
+            $hostname = "stampede.tacc.xsede.org_28c4bf70-ed52-4f87-b481-31a64a1f5808";
             break;
          case 'lonestar.tacc.teragrid.org':
-            $hostname = "lonestar.tacc.teragrid.org_2e0273bc-324b-419b-9786-38a360d44772";
+            $hostname = "lonestar.tacc.utexas.edu_6d62fa0c-a9b1-4414-a76a-a4e2cbd9d290";
             break;
          case 'alamo.uthscsa.edu':
-            $hostname = "alamo.uthscsa.edu_7b6cf99a-af2e-4e8b-9eff-998a5ef60fe5";
+            $hostname = "alamo.uthscsa.edu_a591c220-345b-4f67-9337-901b76360df6";
+            break;
+         case 'comet.sdsc.edu':
+            $hostname = "comet-ln1.sdsc.edu_0bb9bd78-b5e7-40cf-a5dd-fd6f8bd6b537";
+            break;
+         case 'gordon.sdsc.edu':
+            $hostname = "gordon.sdsc.edu_9ee43a5a-cee7-4efd-996b-4fc11662a726";
             break;
          default:
             echo "set the right host" . $hostname;
             break;
       }
       $cmRST->resourceHostId = $hostname;
-      $cmRST->totalCPUCount = $ppn;
+      $cmRST->totalCPUCount = $cores;
       $cmRST->nodeCount = $nodes;
       $cmRST->numberOfThreads = 0;
       $cmRST->queueName = $queue;
@@ -107,8 +110,22 @@ class submit_airavata extends airavata_jobsubmit
       $advHandling = new AdvancedOutputDataHandling();
       $advHandling->outputDataDir = $dirPath;
       $userConfigurationData->advanceOutputDataHandling = $advHandling;
-
-      /* Experiment input and output data. */
+      //var_dump($userConfigurationData);
+      //Exp Inputs 
+      $applicationInputs = $airavataclient->getApplicationInputs($us3_appId);
+      foreach ($applicationInputs as $applicationInput){
+       if($applicationInput->name =='input'){
+	$applicationInput->value = $input_data;
+	}
+ 	else if($applicationInput->name =='walltime'){
+	$applicationInput->value = "-walltime=" . $maxWallTime;
+        }
+	else if($applicationInput->name =='mgroupcount'){
+	$applicationInput->value = "-mgroupcount=" . $mgroupcount;
+        }
+	}
+	$applicationOutputs = $airavataclient->getApplicationOutputs($us3_appId);
+      /* Experiment input and output data. 
       $input = new DataObjectType();
       $input->key = "input";
       $input->value = $input_data;
@@ -138,10 +155,10 @@ class submit_airavata extends airavata_jobsubmit
       $output2->key = "stderr";
       $output2->type = DataType::STDERR;
 
-      $exOutputs = array($output);
+      $exOutputs = array($output);*/
 
-      $user = "ultrascan";
-      $proj = "ultrascan_41574ef5-b054-4d03-ab20-2cfe768d5096";
+      $user = "us3";
+      $proj = "ultrascan_cd0900d4-2b4d-4919-9aa2-b7649ea1f391";
 
       $experiment = new Experiment();
       $experiment->projectID = $proj;
@@ -149,10 +166,11 @@ class submit_airavata extends airavata_jobsubmit
       $experiment->name = $exp_name;
       $experiment->applicationId = $us3_appId;
       $experiment->userConfigurationData = $userConfigurationData;
-      $experiment->experimentInputs = $exInputs;
-      $experiment->experimentOutputs = $exOutputs;
-           
-      $expId = $airavataclient->createExperiment($experiment);
+      $experiment->experimentInputs = $applicationInputs;
+      $experiment->experimentOutputs = $applicationOutputs;
+      //var_dump($experiment);     
+      $expId = $airavataclient->createExperiment('ultrascan',$experiment);
+      //var_dump($expId);
       $this->message[] = "Experiment $expId created";
       return $expId;
    }

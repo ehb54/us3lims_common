@@ -1,13 +1,14 @@
 <?php
-include_once '/srv/www/htdocs/common/class/thrift_includes.php';
+include_once '/srv/www/htdocs/common/class/thrift_includes_0_15.php';
 
-#$outputs = getExperimentOutputs($expId);
-#foreach ($outputs as $output)
-#{
-#    echo "$output->type: $output->value      <br><br>";
-#}
+$expId = $argv[1];
+$outputs = getExperimentOutputs($expId);
+foreach ($outputs as $output)
+{
+    echo "$output->name : $output->type: $output->value      <br><br>";
+}
 #var_dump($outputs);
-#$transport->close();
+$transport->close();
 
 
 /**
@@ -21,7 +22,7 @@ function getExperimentOutputs($expId)
 
     try
     {
-        return $airavataclient->getExperimentOutputs($expId);
+       return $airavataclient->getExperimentOutputs($expId);
     }
     catch (InvalidRequestException $ire)
     {

@@ -47,6 +47,33 @@ class jobsubmit
         "maxproc"    => 12
       );
 
+      $this->grid[ 'jacinto' ] = array 
+      (
+        "name"       => "jacinto.uthscsa.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "default",
+        "maxtime"    => 2160,
+        "ppn"        => 4,
+        "maxproc"    => 32
+      );
+    
+      $this->grid[ 'jacinto-local' ] = array 
+      (
+        "name"       => "jacinto.uthscsa.edu",
+        "submittype" => "local",
+        "workdir"    => "/home/us3/work/",  // Need trailing slash
+        "sshport"    => 22,
+        "queue"      => "",
+        "maxtime"    => 2160,
+        "ppn"        => 4,
+        "maxproc"    => 32
+      );
+
       $this->grid[ 'alamo' ] = array 
       (
         "name"       => "alamo.uthscsa.edu",
@@ -57,9 +84,9 @@ class jobsubmit
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
         "queue"      => "default",
-        "maxtime"    => 90000,
-        "ppn"        => 4,
-        "maxproc"    => 32
+        "maxtime"    => 2160,
+        "ppn"        => 12,
+        "maxproc"    => 36
       );
     
       $this->grid[ 'alamo-local' ] = array 
@@ -69,9 +96,9 @@ class jobsubmit
         "workdir"    => "/home/us3/work/",  // Need trailing slash
         "sshport"    => 22,
         "queue"      => "",
-        "maxtime"    => 90000,
-        "ppn"        => 4,
-        "maxproc"    => 32
+        "maxtime"    => 2160,
+        "ppn"        => 12,
+        "maxproc"    => 36
       );
 
       $this->grid[ 'lonestar' ] = array 
@@ -103,7 +130,7 @@ class jobsubmit
         "ppn"        => 16,
         "maxproc"    => 32
       );
-    
+
       $this->grid[ 'trestles' ] = array 
       (
         "name"       => "trestles.sdsc.edu",
@@ -118,7 +145,22 @@ class jobsubmit
         "ppn"        => 32,
         "maxproc"    => 32
       );
-    
+
+      $this->grid[ 'comet' ] = array 
+      (
+        "name"       => "comet.sdsc.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 1440,
+        "ppn"        => 12,
+        "maxproc"    => 36
+      );
+
       $this->grid[ 'stampede' ] = array 
       (
         "name"       => "stampede.tacc.xsede.org",
@@ -426,16 +468,16 @@ class jobsubmit
          $time *= 1.2;  // Pad things a bit
          $time  = (int)( ($time + 59) / 60 ); // Round up to minutes
       }
-      else // 2DSA
+      else // 2DSA or PCSA
       {
          $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
                        ? $parameters[ 'tinoise_option' ] > 0 
                        : false;
-    
+
          $ri_noise   = isset( $parameters[ 'rinoise_option' ] )
                        ? $parameters[ 'rinoise_option' ] > 0
                        : false;
- 
+
          $time       = 5;  // Base time in minutes
 
          if ( isset( $parameters[ 'meniscus_points' ] ) )
@@ -443,8 +485,18 @@ class jobsubmit
             $points = $parameters[ 'meniscus_points' ];
             if ( $points > 0 )  $time *= $points;
          }
-    
+
          if ( $ti_noise || $ri_noise ) $time *= 2;
+
+         if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
+         {
+            $time *= 3;
+         }
+
+         if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
+         {
+            $time *= 2;
+         }
       }
  
       $montecarlo = 1;
@@ -474,8 +526,15 @@ class jobsubmit
 
       if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
       {
-         // For alamo, $max_time is hardwired to 90000, and no PMG
-//         $time        = $max_time;
+         // For alamo, $max_time is hardwired to 2160, and no PMG
+         $time        = $max_time;
+         $mgroupcount = min( 2, $mgroupcount );
+      }
+
+      if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
+      {
+         // For jacinto, $max_time is hardwired to 2160, and no PMG
+         $time        = $max_time;
          $mgroupcount = min( 2, $mgroupcount );
       }
 
@@ -505,6 +564,10 @@ class jobsubmit
             $time = (int)( ( $time * 10 ) / 150 );
             break;
 
+         case 32 :
+            $time = (int)( ( $time * 10 ) / 300 );
+            break;
+
          case 1  :
          default :
             break;
@@ -528,11 +591,18 @@ class jobsubmit
          $procs = $parameters[ 'demes' ] + $ppn;  // Procs = demes+1
          $procs = (int)( $procs / $ppn ) * $ppn;  // Rounded to procs-per-node
       }
-      else  // 2DSA
+      else if ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
       {  // 2DSA:  procs is max_procs, but no more than subgrid count
          $gsize = $parameters[ 'uniform_grid' ];
          $gsize = $gsize * $gsize;           // Subgrid count
          $procs = min( $max_procs, $gsize ); // Procs = max or subgrid count
+      }
+      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
+      {  // PCSA:  procs is max_procs, but no more than vars_count
+         $vsize = $parameters[ 'vars_count' ];
+         if ( $parameters[ 'curve_type' ] != 'HL' )
+            $vsize = $vsize * $vsize;        // Variations count
+         $procs = min( $max_procs, $vsize ); // Procs = max or subgrid count
       }
 
       $procs = max( $procs, 4 );             // Minimum procs is 4
@@ -545,20 +615,26 @@ class jobsubmit
    function max_mgroupcount()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
-      $nodes      = $this->nodes();
+      $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
 
-      $groups = $max_procs / $nodes;
-
-      if ( $max_time > 50000 )
-      {  // "Unlimited" max time (bcf,alamo) means no PMG
-//        $groups = 1;
+      if ( $max_time > 1999 )
+      {  // "Unlimited" max time (bcf,alamo,jacinto) means no PMG
+        //$groups = 1;
+        $groups = 2;
+      }
+      else
+      {
+        $groups = 32;
       }
 
-      // Convert to 1, 2, 4, or 8
-      $power      = (int) floor( log( $groups, 2 ) );
-      $max_groups = min( 8, pow( 2, $power ) );
+      // Convert to 1, 2, 4, 8, 16, 32
+      $power      = (int) ceil( log( $groups, 2 ) );
+      $max_groups = min( 32, pow( 2, $power ) );
+
+      // For 2DSA/PCSA composite, insure groups no more than datasets count
+      if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
+        $max_groups = min( $max_groups, $dset_count );
 
       return $max_groups;
    }

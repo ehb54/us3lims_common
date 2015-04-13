@@ -30,7 +30,7 @@ class airavata_jobsubmit
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
         "queue"      => "default",
-        "maxtime"    => 60000,
+        "maxtime"    => 240,
         "ppn"        => 2,
         "maxproc"    => 12
       );
@@ -42,7 +42,7 @@ class airavata_jobsubmit
         "workdir"    => "/home/us3/work/",  // Need trailing slash
         "sshport"    => 22,
         "queue"      => "default",
-        "maxtime"    => 60000,
+        "maxtime"    => 240,
         "ppn"        => 2,
         "maxproc"    => 12
       );
@@ -56,10 +56,10 @@ class airavata_jobsubmit
         "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
-        "queue"      => "default",
-        "maxtime"    => 90000,
-        "ppn"        => 4,
-        "maxproc"    => 32
+        "queue"      => "batch",
+        "maxtime"    => 2160,
+        "ppn"        => 12,
+        "maxproc"    => 36
       );
     
       $this->grid[ 'alamo-local' ] = array 
@@ -69,7 +69,34 @@ class airavata_jobsubmit
         "workdir"    => "/home/us3/work/",  // Need trailing slash
         "sshport"    => 22,
         "queue"      => "",
-        "maxtime"    => 90000,
+        "maxtime"    => 2160,
+        "ppn"        => 12,
+        "maxproc"    => 36
+      );
+
+      $this->grid[ 'jacinto' ] = array 
+      (
+        "name"       => "jacinto.uthscsa.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "default",
+        "maxtime"    => 2160,
+        "ppn"        => 4,
+        "maxproc"    => 32
+      );
+    
+      $this->grid[ 'jacinto-local' ] = array 
+      (
+        "name"       => "jacinto.uthscsa.edu",
+        "submittype" => "local",
+        "workdir"    => "/home/us3/work/",  // Need trailing slash
+        "sshport"    => 22,
+        "queue"      => "",
+        "maxtime"    => 2160,
         "ppn"        => 4,
         "maxproc"    => 32
       );
@@ -118,7 +145,22 @@ class airavata_jobsubmit
         "ppn"        => 32,
         "maxproc"    => 64
       );
-    
+
+      $this->grid[ 'comet' ] = array 
+      (
+        "name"       => "comet.sdsc.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 1440,
+        "ppn"        => 12,
+        "maxproc"    => 72
+      );
+
       $this->grid[ 'stampede' ] = array 
       (
         "name"       => "stampede.tacc.xsede.org",
@@ -472,8 +514,16 @@ class airavata_jobsubmit
 
       if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
       {
-         // For alamo, $max_time is hardwired to 90000, and no PMG
-//         $time = $max_time;
+         // For alamo, $max_time is hardwired to 2160, and no PMG
+         $time = $max_time;
+//         $mgroupcount = 1;
+$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
+      }
+
+      if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
+      {
+         // For jacinto, $max_time is hardwired to 2160, and no PMG
+         $time = $max_time;
 //         $mgroupcount = 1;
 $mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
       }
@@ -525,7 +575,7 @@ $mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
  
-      if ( preg_match( "/^GA/", $this->data[ 'method' ] ) )
+      if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {  // GA: procs is demes+1 rounded to procs-per-node
          $procs = $parameters[ 'demes' ] + $ppn;  // Procs = demes+1
          $procs = (int)( $procs / $ppn ) * $ppn;  // Rounded to procs-per-node

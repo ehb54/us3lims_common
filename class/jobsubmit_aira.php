@@ -58,8 +58,8 @@ class airavata_jobsubmit
         "sshport"    => 22,
         "queue"      => "batch",
         "maxtime"    => 2160,
-        "ppn"        => 12,
-        "maxproc"    => 36
+        "ppn"        => 8,
+        "maxproc"    => 32
       );
     
       $this->grid[ 'alamo-local' ] = array 
@@ -70,8 +70,8 @@ class airavata_jobsubmit
         "sshport"    => 22,
         "queue"      => "",
         "maxtime"    => 2160,
-        "ppn"        => 12,
-        "maxproc"    => 36
+        "ppn"        => 8,
+        "maxproc"    => 32
       );
 
       $this->grid[ 'jacinto' ] = array 
@@ -157,8 +157,8 @@ class airavata_jobsubmit
         "sshport"    => 22,
         "queue"      => "normal",
         "maxtime"    => 1440,
-        "ppn"        => 12,
-        "maxproc"    => 72
+        "ppn"        => 8,
+        "maxproc"    => 64
       );
 
       $this->grid[ 'stampede' ] = array 
@@ -517,7 +517,7 @@ class airavata_jobsubmit
          // For alamo, $max_time is hardwired to 2160, and no PMG
          $time = $max_time;
 //         $mgroupcount = 1;
-$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
+//$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
       }
 
       if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
@@ -525,7 +525,7 @@ $mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
          // For jacinto, $max_time is hardwired to 2160, and no PMG
          $time = $max_time;
 //         $mgroupcount = 1;
-$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
+//$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
       }
 
       else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
@@ -597,20 +597,25 @@ $mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
    function max_mgroupcount()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
-      $nodes      = $this->nodes();
-
-      $groups = $max_procs / $nodes;
-
-//      if ( $max_time > 50000 )
-//      {  // "Unlimited" max time (bcf,alamo) means no PMG
-//        $groups = 1;
-//      }
+      $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
+      $groups     = 32;
+      if ( $max_time > 3999 )
+      {  // "Unlimited" max time (bcf,jacinto) means max PMG of 2
+        $groups = 2;
+      }
+      if ( $cluster == 'alamo' )
+      {  // Alamo can have no more than 8 PMGs
+        $groups = 8;
+      }
 
       // Convert to 1/2/4/8/16/32
-      $power      = (int) floor( log( $groups, 2 ) );
+      $power      = (int) ceil( log( $groups, 2 ) );
       $max_groups = min( 32, pow( 2, $power ) );
+
+      // For 2DSA/PCSA composite, insure groups no more than datasets count
+      if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
+        $max_groups = min( $max_groups, $dset_count );
 
       return $max_groups;
    }

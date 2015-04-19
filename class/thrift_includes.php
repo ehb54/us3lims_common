@@ -28,26 +28,31 @@ require_once $GLOBALS['AIRAVATA_ROOT'] . 'API/Airavata.php';
 require_once $GLOBALS['AIRAVATA_ROOT'] . 'Model/Workspace/Types.php';
 require_once $GLOBALS['AIRAVATA_ROOT'] . 'Model/Workspace/Experiment/Types.php';
 require_once $GLOBALS['AIRAVATA_ROOT'] . 'API/Error/Types.php';
-
-require_once '/opt/thrift/lib/AiravataClientFactory.php';
+require_once $GLOBALS['AIRAVATA_ROOT'] . 'Model/AppCatalog/AppInterface/Types.php';
+require_once $GLOBALS['AIRAVATA_ROOT'] . 'Model/AppCatalog/AppDeployment/Types.php';
+require_once $GLOBALS['AIRAVATA_ROOT'] . 'Model/AppCatalog/ComputeResource/Types.php';
 
 use Thrift\Protocol\TBinaryProtocol;
 use Thrift\Transport\TBufferedTransport;
 use Thrift\Transport\TSocket;
 use Thrift\Exception\TException;
 
+use Airavata\API\AiravataClient;
+use Airavata\API\Error\InvalidRequestException;
 use Airavata\API\Error\AiravataClientException;
 use Airavata\API\Error\AiravataSystemException;
-use Airavata\API\Error\InvalidRequestException;
-use Airavata\Client\AiravataClientFactory;
-use Airavata\API\AiravataClient;
-use Airavata\Model\Workspace\Project;
-use Airavata\Model\Workspace\Experiment\Experiment;
-use Airavata\Model\Workspace\Experiment\DataObjectType;
-use Airavata\Model\Workspace\Experiment\UserConfigurationData;
+use Airavata\API\Error\ExperimentNotFoundException;
 use Airavata\Model\Workspace\Experiment\ComputationalResourceScheduling;
+use Airavata\Model\AppCatalog\AppInterface\InputDataObjectType;
+use Airavata\Model\Workspace\Experiment\UserConfigurationData;
 use Airavata\Model\Workspace\Experiment\AdvancedOutputDataHandling;
-use Airavata\Model\Workspace\Experiment\DataType;
+use Airavata\Model\Workspace\Experiment\Experiment;
+use Airavata\Model\Workspace\Experiment\ExperimentState;
+use Airavata\Model\AppCatalog\AppInterface\DataType;
+use Airavata\Model\Workspace\Project;
+use Airavata\Model\Workspace\Experiment\JobState;
+use Airavata\Model\AppCatalog\ComputeResource\JobSubmissionInterface;
+use Airavata\Model\AppCatalog\ComputeResource\JobSubmissionProtocol;
 
 function print_error_message($message)
 {

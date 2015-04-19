@@ -7,7 +7,7 @@
  */
 require_once $class_dir . 'jobsubmit_aira.php';
 
-include 'thrift_includes_0_15.php';
+include 'thrift_includes.php';
 use Airavata\Model\Workspace\Experiment\ComputationalResourceScheduling;
 use Airavata\Model\Workspace\Experiment\UserConfigurationData;
 use Airavata\Model\Workspace\Experiment\AdvancedOutputDataHandling;
@@ -44,6 +44,19 @@ class submit_airavata extends airavata_jobsubmit
 
       $ppn         = $this->grid[ $cluster ][ 'ppn' ];
       $nodes       = $this->nodes() * $mgroupcount;
+
+      if ( $cluster == 'alamo'  &&  $nodes > 16 )
+      {  // If more nodes needed on Alamo than available, try to adjust
+         $hnode      = (int)( $nodes / 2 );
+         $tnode      = $hnode * 2;   // Test that nodes is an even number
+         if ( $tnode == $nodes )
+         {
+            $nodes      = $hnode;    // Half the number of nodes
+            $ppn       *= 2;         // Twice the processors per node
+            $this->grid[ $cluster ][ 'ppn' ] = $ppn;
+         }
+      }
+
       $cores       = $nodes * $ppn;
 
       $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;

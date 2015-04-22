@@ -58,8 +58,8 @@ class airavata_jobsubmit
         "sshport"    => 22,
         "queue"      => "batch",
         "maxtime"    => 2160,
-        "ppn"        => 8,
-        "maxproc"    => 32
+        "ppn"        => 24,
+        "maxproc"    => 24
       );
     
       $this->grid[ 'alamo-local' ] = array 
@@ -70,8 +70,8 @@ class airavata_jobsubmit
         "sshport"    => 22,
         "queue"      => "",
         "maxtime"    => 2160,
-        "ppn"        => 8,
-        "maxproc"    => 32
+        "ppn"        => 24,
+        "maxproc"    => 24
       );
 
       $this->grid[ 'jacinto' ] = array 
@@ -453,7 +453,7 @@ class airavata_jobsubmit
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
  
-      if ( preg_match( "/^GA/", $this->data[ 'method' ] ) )
+      if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {
          // Assume 1 sec a basic unit
 
@@ -534,6 +534,10 @@ class airavata_jobsubmit
          $time = 240;
          $mgroupcount = 1;
       }
+      else
+      {
+         $time = min( $time, $max_time ); // Maximum time is defined for each cluster
+      }
 
       // Adjust max wall time down based on parallel group count
       switch ( $mgroupcount )
@@ -606,7 +610,8 @@ class airavata_jobsubmit
       }
       if ( $cluster == 'alamo' )
       {  // Alamo can have no more than 8 PMGs
-        $groups = 8;
+//        $groups = 8;
+        $groups = 16;
       }
 
       // Convert to 1/2/4/8/16/32

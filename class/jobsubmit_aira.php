@@ -584,14 +584,21 @@ class airavata_jobsubmit
          $procs = $parameters[ 'demes' ] + $ppn;  // Procs = demes+1
          $procs = (int)( $procs / $ppn ) * $ppn;  // Rounded to procs-per-node
       }
-      else  // 2DSA
+      else if ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
       {  // 2DSA:  procs is max_procs, but no more than subgrid count
          $gsize = $parameters[ 'uniform_grid' ];
          $gsize = $gsize * $gsize;           // Subgrid count
          $procs = min( $max_procs, $gsize ); // Procs = max or subgrid count
       }
+      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
+      {  // PCSA:  procs is max_procs, but no more than vars_count
+         $vsize = $parameters[ 'vars_count' ];
+         if ( $parameters[ 'curve_type' ] != 'HL' )
+            $vsize = $vsize * $vsize;        // Variations count
+         $procs = min( $max_procs, $vsize ); // Procs = max or subgrid count
+      }
 
-      $procs = max( $procs, 4 );             // Minimum procs is 4
+      $procs = max( $procs, $ppn );          // Minimum procs is procs-per-node
       $procs = min( $procs, $max_procs );    // Maximum procs depends on cluster
 
       $nodes = $procs / $ppn;    // Return nodes, procs divided by procs-per-node

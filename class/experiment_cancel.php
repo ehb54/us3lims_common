@@ -11,7 +11,7 @@ function cancelAiravataJob($expId)
     global $airavataclient,$transport;
     try
     {
-    $airavataclient->terminateExperiment($expId);
+    $airavataclient->terminateExperiment($expId, '00409bfe-8e5f-4e50-b8eb-138bf0158e90');
     $transport->close();
     return true;
     }

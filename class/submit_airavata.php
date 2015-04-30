@@ -43,6 +43,7 @@ class submit_airavata extends airavata_jobsubmit
                           $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
 
       $ppn         = $this->grid[ $cluster ][ 'ppn' ];
+$tnodes=$this->nodes();
       $nodes       = $this->nodes() * $mgroupcount;
 
       if ( $cluster == 'alamo'  &&  $nodes > 16 )
@@ -58,6 +59,10 @@ class submit_airavata extends airavata_jobsubmit
       }
 
       $cores       = $nodes * $ppn;
+      if( $cores < 1 )
+      {
+         $this->message[] = "Requested cores is zero (ns=$nodes, pp=$ppn, n0=$tnodes, gc=$mgroupcount)";
+      }
 
       $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
       $maxWallTime = $this->maxwall();

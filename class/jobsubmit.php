@@ -131,21 +131,6 @@ class jobsubmit
         "maxproc"    => 32
       );
 
-      $this->grid[ 'trestles' ] = array 
-      (
-        "name"       => "trestles.sdsc.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,
-        "ppn"        => 32,
-        "maxproc"    => 32
-      );
-
       $this->grid[ 'comet' ] = array 
       (
         "name"       => "comet.sdsc.edu",

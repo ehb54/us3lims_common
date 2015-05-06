@@ -616,8 +616,7 @@ class airavata_jobsubmit
         $groups = 2;
       }
       if ( $cluster == 'alamo' )
-      {  // Alamo can have no more than 8 PMGs
-//        $groups = 8;
+      {  // Alamo can have no more than 16 PMGs
         $groups = 16;
       }
 

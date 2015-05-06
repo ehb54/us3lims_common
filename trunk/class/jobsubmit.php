@@ -85,8 +85,8 @@ class jobsubmit
         "sshport"    => 22,
         "queue"      => "default",
         "maxtime"    => 2160,
-        "ppn"        => 12,
-        "maxproc"    => 36
+        "ppn"        => 24,
+        "maxproc"    => 24
       );
     
       $this->grid[ 'alamo-local' ] = array 
@@ -97,8 +97,8 @@ class jobsubmit
         "sshport"    => 22,
         "queue"      => "",
         "maxtime"    => 2160,
-        "ppn"        => 12,
-        "maxproc"    => 36
+        "ppn"        => 24,
+        "maxproc"    => 24
       );
 
       $this->grid[ 'lonestar' ] = array 
@@ -528,7 +528,7 @@ class jobsubmit
       {
          // For alamo, $max_time is hardwired to 2160, and no PMG
          $time        = $max_time;
-         $mgroupcount = min( 2, $mgroupcount );
+         //$mgroupcount = min( 2, $mgroupcount );
       }
 
       if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
@@ -618,9 +618,8 @@ class jobsubmit
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
 
-      if ( $max_time > 1999 )
-      {  // "Unlimited" max time (bcf,alamo,jacinto) means no PMG
-        //$groups = 1;
+      if ( $max_time > 3999 )
+      {  // "Unlimited" max time (bcf,jacinto) means PMG max 2
         $groups = 2;
       }
       else

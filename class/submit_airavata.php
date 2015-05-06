@@ -43,8 +43,8 @@ class submit_airavata extends airavata_jobsubmit
                           $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
 
       $ppn         = $this->grid[ $cluster ][ 'ppn' ];
-$tnodes=$this->nodes();
-      $nodes       = $this->nodes() * $mgroupcount;
+      $tnodes      = $this->nodes();
+      $nodes       = $tnodes * $mgroupcount;
 
       if ( $cluster == 'alamo'  &&  $nodes > 16 )
       {  // If more nodes needed on Alamo than available, try to adjust
@@ -88,9 +88,6 @@ $tnodes=$this->nodes();
       $cmRST = new ComputationalResourceScheduling();
       switch($hostname)
       {
-         case 'trestles.sdsc.edu':
-            $hostname = "trestles.sdsc.xsede.org_467a4f25-4f44-4466-8ba9-e343e7ccf23d";
-            break;
          case 'stampede.tacc.xsede.org':
             $hostname = "stampede.tacc.xsede.org_28c4bf70-ed52-4f87-b481-31a64a1f5808";
             break;

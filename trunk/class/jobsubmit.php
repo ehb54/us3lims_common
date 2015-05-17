@@ -32,6 +32,7 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 60000,
         "ppn"        => 2,
+        "ppbj"       => 8,
         "maxproc"    => 12
       );
     
@@ -44,6 +45,7 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 60000,
         "ppn"        => 2,
+        "ppbj"       => 8,
         "maxproc"    => 12
       );
 
@@ -59,6 +61,7 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 2160,
         "ppn"        => 4,
+        "ppbj"       => 8,
         "maxproc"    => 32
       );
     
@@ -71,6 +74,7 @@ class jobsubmit
         "queue"      => "",
         "maxtime"    => 2160,
         "ppn"        => 4,
+        "ppbj"       => 8,
         "maxproc"    => 32
       );
 
@@ -86,7 +90,8 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 2160,
         "ppn"        => 24,
-        "maxproc"    => 24
+        "ppbj"       => 24,
+        "maxproc"    => 48
       );
     
       $this->grid[ 'alamo-local' ] = array 
@@ -98,7 +103,8 @@ class jobsubmit
         "queue"      => "",
         "maxtime"    => 2160,
         "ppn"        => 24,
-        "maxproc"    => 24
+        "ppbj"       => 24,
+        "maxproc"    => 48
       );
 
       $this->grid[ 'lonestar' ] = array 
@@ -113,7 +119,8 @@ class jobsubmit
         "queue"      => "normal",
         "maxtime"    => 1440,
         "ppn"        => 12,
-        "maxproc"    => 36
+        "ppbj"       => 36,
+        "maxproc"    => 72
       );
 
       $this->grid[ 'gordon' ] = array 
@@ -128,7 +135,8 @@ class jobsubmit
         "queue"      => "normal",
         "maxtime"    => 1440,
         "ppn"        => 16,
-        "maxproc"    => 32
+        "ppbj"       => 32,
+        "maxproc"    => 64
       );
 
       $this->grid[ 'comet' ] = array 
@@ -142,8 +150,9 @@ class jobsubmit
         "sshport"    => 22,
         "queue"      => "normal",
         "maxtime"    => 1440,
-        "ppn"        => 12,
-        "maxproc"    => 36
+        "ppn"        => 24,
+        "ppbj"       => 24,
+        "maxproc"    => 72
       );
 
       $this->grid[ 'stampede' ] = array 
@@ -158,7 +167,8 @@ class jobsubmit
         "queue"      => "normal",
         "maxtime"    => 1440,
         "ppn"        => 16,
-        "maxproc"    => 32
+        "ppbj"       => 32,
+        "maxproc"    => 64
       );
     
       $this->grid[ 'juropa' ] = array 
@@ -173,7 +183,8 @@ class jobsubmit
         "queue"      => "default",
         "maxtime"    => 1440,
         "ppn"        => 8,
-        "maxproc"    => 32
+        "ppbj"       => 32,
+        "maxproc"    => 64
       );
     
    }
@@ -570,31 +581,35 @@ class jobsubmit
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
+      $ppbj       = $this->grid[ $cluster ][ 'ppbj'    ];
  
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {  // GA: procs is demes+1 rounded to procs-per-node
-         $procs = $parameters[ 'demes' ] + $ppn;  // Procs = demes+1
+         $demes = $parameters[ 'demes' ];
+         if ( $demes == 1 )
+            $demes = $ppbj - 1;
+         $procs = $demes + $ppn;                  // Procs = demes+1
          $procs = (int)( $procs / $ppn ) * $ppn;  // Rounded to procs-per-node
       }
       else if ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
       {  // 2DSA:  procs is max_procs, but no more than subgrid count
          $gsize = $parameters[ 'uniform_grid' ];
          $gsize = $gsize * $gsize;           // Subgrid count
-         $procs = min( $max_procs, $gsize ); // Procs = max or subgrid count
+         $procs = min( $ppbj, $gsize );      // Procs = base or subgrid count
       }
       else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
       {  // PCSA:  procs is max_procs, but no more than vars_count
          $vsize = $parameters[ 'vars_count' ];
          if ( $parameters[ 'curve_type' ] != 'HL' )
             $vsize = $vsize * $vsize;        // Variations count
-         $procs = min( $max_procs, $vsize ); // Procs = max or subgrid count
+         $procs = min( $ppbj, $vsize );      // Procs = base or subgrid count
       }
 
-      $procs = max( $procs, 4 );             // Minimum procs is 4
+      $procs = max( $procs, $ppn );          // Minimum procs is procs-per-node
       $procs = min( $procs, $max_procs );    // Maximum procs depends on cluster
 
-      $nodes = $procs / $ppn;    // Return nodes, procs divided by procs-per-node
-      return (int)$nodes;
+      $nodes = (int)$procs / $ppn;    // Return nodes, procs divided by procs-per-node
+      return $nodes;
    }
 
    function max_mgroupcount()
@@ -602,17 +617,17 @@ class jobsubmit
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
-
-      if ( $max_time > 3999 )
-      {  // "Unlimited" max time (bcf,jacinto) means PMG max 2
+      $groups     = 32;
+      if ( preg_match( "/jacinto/", $cluster ) )
+      {  // Jacinto can have no more than 2 PMGs
         $groups = 2;
       }
-      else
-      {
-        $groups = 32;
+      if ( $cluster == 'alamo' )
+      {  // Alamo can have no more than 16 PMGs
+        $groups = 16;
       }
 
-      // Convert to 1, 2, 4, 8, 16, 32
+      // Convert to 1/2/4/8/16/32
       $power      = (int) ceil( log( $groups, 2 ) );
       $max_groups = min( 32, pow( 2, $power ) );
 

@@ -187,6 +187,7 @@ class submit_airavata extends airavata_jobsubmit
       $expId = $airavataclient->createExperiment('ultrascan',$experiment);
       //var_dump($expId);
       $this->message[] = "Experiment $expId created";
+$this->message[] = "    ppn=$ppn  tnodes=$tnodes  nodes=$nodes  cores=$cores";
       return $expId;
    }
 

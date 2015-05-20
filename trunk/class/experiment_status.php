@@ -24,7 +24,10 @@ function getExperimentStatus($expId)
                 $jobStatus = $airavataclient->getJobStatuses($expId);
                 $jobName = array_keys($jobStatus);
                 $jobState = JobState::$__names[$jobStatus[$jobName[0]]->jobState];
-	        $status    = $jobState;
+//                $status   = $jobState;
+		if($jobState != 'COMPLETE'){
+			$status    = $jobState;
+		}
                 break;
 	case '':
         case 'UNKNOWN':

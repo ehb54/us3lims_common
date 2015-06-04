@@ -31,7 +31,7 @@ function getExperimentStatus($expId)
                 break;
 	case '':
         case 'UNKNOWN':
-		$status    = 'EXECUTING';
+//		$status    = 'EXECUTING';
         //        sleep( 5 );
         //        $jobStatus = $airavataclient->getJobStatuses($expId);
         //        $jobName   = array_keys($jobStatus);
@@ -49,6 +49,7 @@ function getExperimentStatus($expId)
     catch (ExperimentNotFoundException $enf)
     {
         echo 'ExperimentNotFoundException!<br><br>' . $enf->getMessage();
+		$status    = 'EXP_NOT_FOUND';
     }
     catch (AiravataClientException $ace)
     {

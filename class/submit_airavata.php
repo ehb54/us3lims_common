@@ -32,7 +32,7 @@ class submit_airavata extends airavata_jobsubmit
    // Function to create the job xml
    function createExperiment()
    {
-      global $globaldbname, $globaldbhost,$filename,$airavataclient;
+      global $globaldbname, $globaldbhost,$filename,$airavataclient,$class_dir;
       $cluster     = $this->data[ 'job' ][ 'cluster_shortname' ];
       $hostname    = $this->grid[ $cluster ][ 'name' ];
       $workdir     = $this->grid[ $cluster ][ 'workdir' ];
@@ -83,7 +83,13 @@ class submit_airavata extends airavata_jobsubmit
       $dirPath     = "file://raminder@$thishost:/" . getcwd();
       $input_data  = $dirPath . "/" . $tarFilename;
       $output_data = 'analysis.tar';
-      $exp_name    = 'US3-AIRA';
+
+      if ( preg_match( "/class_devel/", $class_dir ) )
+         $exp_name    = 'US3-ADEV';
+      else if ( preg_match( "/class/", $class_dir ) )
+         $exp_name    = 'US3-AIRA';
+      else
+         $exp_name    = 'US3-AIRX';
 
       $cmRST = new ComputationalResourceScheduling();
       switch($hostname)

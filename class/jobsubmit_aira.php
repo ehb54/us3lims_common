@@ -508,32 +508,6 @@ class airavata_jobsubmit
       else
          $mgroupcount = 1;
 
-      if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
-      {
-         // For alamo, $max_time is hardwired to 2160, and no PMG
-         $time = $max_time;
-//         $mgroupcount = 1;
-//$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
-      }
-
-      if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
-      {
-         // For jacinto, $max_time is hardwired to 2160, and no PMG
-         $time = $max_time;
-//         $mgroupcount = 1;
-//$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
-      }
-
-      else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
-      {
-         // For bcf, hardwire $max_time to 240 (4 hours), and no PMG
-         $time = 240;
-         $mgroupcount = 1;
-      }
-      else
-      {
-         $time = min( $time, $max_time ); // Maximum time is defined for each cluster
-      }
 
       // Adjust max wall time down based on parallel group count
       switch ( $mgroupcount )
@@ -563,7 +537,30 @@ class airavata_jobsubmit
       }
 
       $time = max( $time, 5 );         // Minimum time is 5 minutes
-      $time = min( $time, $max_time ); // Maximum time is defined for each cluster
+      if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
+      {
+         // For alamo, $max_time is hardwired to 2160
+         $time = $max_time;
+      }
+
+      if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
+      {
+         // For jacinto, $max_time is hardwired to 2160, and no PMG
+         $time = $max_time;
+//         $mgroupcount = 1;
+//$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
+      }
+
+      else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
+      {
+         // For bcf, hardwire $max_time to 240 (4 hours), and no PMG
+         $time = $max_time;
+         $mgroupcount = 1;
+      }
+      else
+      {
+         $time = min( $time, $max_time ); // Maximum time is defined for each cluster
+      }
  
       return (int)$time;
    }

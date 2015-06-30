@@ -25,7 +25,7 @@ function getExperimentStatus($expId)
                 $jobName = array_keys($jobStatus);
                 $jobState = JobState::$__names[$jobStatus[$jobName[0]]->jobState];
 //                $status   = $jobState;
-		if($jobState != 'COMPLETE'){
+		if($jobState == 'QUEUED' || $jobState == 'ACTIVE'){
 			$status    = $jobState;
 		}
                 break;

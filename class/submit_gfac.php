@@ -48,17 +48,19 @@ $this->message[] = "End of submit_gfac.php\n";
             break;
       }
 
-      if ( $cluster == 'juropa' )
+      if ( $cluster == 'jureca' )
       {
          switch ( $dbname )
          {
             case 'uslims3_cauma3':
-               $comuser     = 'zdv575';
+//               $comuser     = 'zdv575';
+               $comuser     = 'swus1';
 //               $this->grid[ $cluster ][ 'maxtime' ] = 300;
                break;
  
             case 'uslims3_cauma3d':
-               $comuser     = 'zdv576';
+//               $comuser     = 'zdv576';
+               $comuser     = 'swus3';
                break;
  
             case 'uslims3_Uni_KN':

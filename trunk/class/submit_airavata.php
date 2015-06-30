@@ -7,7 +7,7 @@
  */
 require_once $class_dir . 'jobsubmit_aira.php';
 
-include 'thrift_includes.php';
+include $class_dir . 'thrift_includes.php';
 use Airavata\Model\Workspace\Experiment\ComputationalResourceScheduling;
 use Airavata\Model\Workspace\Experiment\UserConfigurationData;
 use Airavata\Model\Workspace\Experiment\AdvancedOutputDataHandling;
@@ -25,7 +25,7 @@ class submit_airavata extends airavata_jobsubmit
       $expId = $this->createExperiment();
       $airavataclient->launchExperiment($expId, '00409bfe-8e5f-4e50-b8eb-138bf0158e90');
       $this->update_db($expId);
-      $transport->close();
+      //$transport->close();
       $this->message[] = "End of submit_airavata.php\n";
    }
 
@@ -195,6 +195,12 @@ class submit_airavata extends airavata_jobsubmit
       $this->message[] = "Experiment $expId created";
 $this->message[] = "    ppn=$ppn  tnodes=$tnodes  nodes=$nodes  cores=$cores";
       return $expId;
+   }
+
+   function close_transport()
+   {
+      global $transport;
+      $transport->close();
    }
 
    function update_db($expId)

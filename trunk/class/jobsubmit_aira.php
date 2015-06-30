@@ -171,9 +171,9 @@ class airavata_jobsubmit
         "maxproc"    => 64
       );
     
-      $this->grid[ 'juropa' ] = array 
+      $this->grid[ 'jureca' ] = array 
       (
-        "name"       => "juropa.fz-juelich.de",
+        "name"       => "jureca.fz-juelich.de",
         "submithost" => $subhost,
         "userdn"     => "CN=_USER_, O=Ultrascan Gateway, C=DE",
         "submittype" => "http",
@@ -182,9 +182,9 @@ class airavata_jobsubmit
         "sshport"    => 22,
         "queue"      => "default",
         "maxtime"    => 1440,
-        "ppn"        => 8,
-        "ppbj"       => 32,
-        "maxproc"    => 64
+        "ppn"        => 24,
+        "ppbj"       => 24,
+        "maxproc"    => 72
       );
     
    }

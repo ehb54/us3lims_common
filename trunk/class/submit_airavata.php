@@ -159,13 +159,15 @@ class submit_airavata extends airavata_jobsubmit
       $cmRST->wallTimeLimit = $maxWallTime;
       $cmRST->jobStartTime = 0;
       $cmRST->totalPhysicalMemory = 0;
-      $cmRST->userDN = $userdn;
+      //$cmRST->userDN = $userdn;
 
       $cmRS = $cmRST;
       $userConfigurationData = new UserConfigurationData();
       $userConfigurationData->airavataAutoSchedule = 0;
       $userConfigurationData->overrideManualScheduledParams = 0;
       $userConfigurationData->computationalResourceScheduling = $cmRS;
+      $userConfigurationData->generateCert = 1;
+      $userConfigurationData->userDN = $userdn;
 
       $advHandling = new AdvancedOutputDataHandling();
       $advHandling->outputDataDir = $dirPath;

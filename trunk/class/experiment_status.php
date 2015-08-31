@@ -16,30 +16,35 @@ function getExperimentStatus($expId)
     try
     {
         $experimentStatus = $airavataclient->getExperimentStatus($expId);
-	$status = ExperimentState::$__names[$experimentStatus->experimentState];
+        $status = ExperimentState::$__names[$experimentStatus->experimentState];
 
         switch ($status)
         {
-        case 'EXECUTING':
-                $jobStatus = $airavataclient->getJobStatuses($expId);
-                $jobName = array_keys($jobStatus);
-                $jobState = JobState::$__names[$jobStatus[$jobName[0]]->jobState];
-//                $status   = $jobState;
-		if($jobState == 'QUEUED' || $jobState == 'ACTIVE'){
-			$status    = $jobState;
-		}
-                break;
-	case '':
-        case 'UNKNOWN':
+           case 'EXECUTING':
+              $jobStatus = $airavataclient->getJobStatuses($expId);
+              $jobName = array_keys($jobStatus);
+              $jobState = JobState::$__names[$jobStatus[$jobName[0]]->jobState];
+              if ( $jobState == 'QUEUED'  ||  $jobState == 'ACTIVE' )
+                 $status    = $jobState;
+              break;
+           case 'COMPLETED':
+              $jobStatus = $airavataclient->getJobStatuses($expId);
+              $jobName = array_keys($jobStatus);
+              $jobState = JobState::$__names[$jobStatus[$jobName[0]]->jobState];
+              if ( $jobState == 'COMPLETED'  ||  $jobState == 'FAILED' )
+                 $status    = $jobState;
+              break;
+           case '':
+           case 'UNKNOWN':
 //		$status    = 'EXECUTING';
         //        sleep( 5 );
         //        $jobStatus = $airavataclient->getJobStatuses($expId);
         //        $jobName   = array_keys($jobStatus);
         //        $jobState  = JobState::$__names[$jobStatus[$jobName[0]]->jobState];
         //        $status    = $jobState;
-                break;
-        default:
-                break;
+              break;
+           default:
+              break;
         }
     }
     catch (InvalidRequestException $ire)

@@ -180,7 +180,7 @@ class airavata_jobsubmit
         "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
-        "queue"      => "default",
+        "queue"      => "batch",
         "maxtime"    => 1440,
         "ppn"        => 24,
         "ppbj"       => 24,

@@ -53,13 +53,10 @@ $this->message[] = "End of submit_gfac.php\n";
          switch ( $dbname )
          {
             case 'uslims3_cauma3':
-//               $comuser     = 'zdv575';
                $comuser     = 'swus1';
-//               $this->grid[ $cluster ][ 'maxtime' ] = 300;
                break;
  
             case 'uslims3_cauma3d':
-//               $comuser     = 'zdv576';
                $comuser     = 'swus3';
                break;
  
@@ -76,7 +73,7 @@ $this->message[] = "End of submit_gfac.php\n";
                break;
  
             default :
-               $comuser     = 'zdv575';
+               $comuser     = 'swus1';
                break;
          }
 

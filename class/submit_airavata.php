@@ -45,6 +45,39 @@ class submit_airavata extends airavata_jobsubmit
       $ppn         = $this->grid[ $cluster ][ 'ppn' ];
       $tnodes      = $this->nodes();
       $nodes       = $tnodes * $mgroupcount;
+      $user        = "us3";
+
+      if ( $cluster == 'jureca' )
+      {
+         switch ( $dbname )
+         {
+            case 'uslims3_cauma3':
+               $user        = 'swus1';
+               break;
+ 
+            case 'uslims3_cauma3d':
+               $user        = 'swus3';
+               break;
+ 
+            case 'uslims3_Uni_KN':
+               $user        = 'hkn001';
+               break;
+ 
+            case 'uslims3_HHU':
+               $user        = 'jics6301';
+               break;
+ 
+            case 'uslims3_FAU':
+               $user        = 'her210';
+               break;
+ 
+            default :
+               $user        = 'swus1';
+               break;
+         }
+
+         $userdn = str_replace( '_USER_', $user, $userdn );
+      }
 
       if ( $cluster == 'alamo'  &&  $nodes > 16 )
       {  // If more nodes needed on Alamo than available, try to adjust
@@ -109,6 +142,12 @@ class submit_airavata extends airavata_jobsubmit
          case 'gordon.sdsc.edu':
             $hostname = "gordon.sdsc.edu_9ee43a5a-cee7-4efd-996b-4fc11662a726";
             break;
+         case 'jureca.fz-juelich.de':
+            //$hostname = "jureca.fz-juelich.de_3cf4acc0-abcd-4dd6-983c-4a84d68d6154";
+            $hostname = "Jureca_3cf4acc0-abcd-4dd6-983c-4a84d68d6154";
+            $user     = "swus1";
+            $us3_appId   = 'Ultrascan_Unicore_d7c02231-e8af-4e80-a634-f7bed15083ca';
+            break;
          default:
             echo "set the right host" . $hostname;
             break;
@@ -121,6 +160,7 @@ class submit_airavata extends airavata_jobsubmit
       $cmRST->wallTimeLimit = $maxWallTime;
       $cmRST->jobStartTime = 0;
       $cmRST->totalPhysicalMemory = 0;
+      $cmRST->userDN = $userdn;
 
       $cmRS = $cmRST;
       $userConfigurationData = new UserConfigurationData();
@@ -134,51 +174,28 @@ class submit_airavata extends airavata_jobsubmit
       //var_dump($userConfigurationData);
       //Exp Inputs 
       $applicationInputs = $airavataclient->getApplicationInputs($us3_appId);
-      foreach ($applicationInputs as $applicationInput){
-       if($applicationInput->name =='input'){
-	$applicationInput->value = $input_data;
-	}
- 	else if($applicationInput->name =='walltime'){
-	$applicationInput->value = "-walltime=" . $maxWallTime;
-        }
-	else if($applicationInput->name =='mgroupcount'){
-	$applicationInput->value = "-mgroupcount=" . $mgroupcount;
-        }
-	}
-	$applicationOutputs = $airavataclient->getApplicationOutputs($us3_appId);
-      /* Experiment input and output data. 
-      $input = new DataObjectType();
-      $input->key = "input";
-      $input->value = $input_data;
-      $input->type = DataType::URI;
+      foreach ( $applicationInputs as $applicationInput )
+      {
+         if ( $applicationInput->name =='input' )
+         {
+            $applicationInput->value = $input_data;
+         }
+         else if ( $applicationInput->name =='walltime' )
+         {
+            $applicationInput->value = "-walltime=" . $maxWallTime;
+         }
+         else if ( $applicationInput->name =='mgroupcount' )
+         {
+            $applicationInput->value = "-mgroupcount=" . $mgroupcount;
+         }
+         else if ( $applicationInput->name =='US3INPUTARG' )
+         {
+            $applicationInput->value = $tarFilename;
+         }
+      }
+      $applicationOutputs = $airavataclient->getApplicationOutputs($us3_appId);
 
-      $input1 = new DataObjectType();
-      $input1->key = "walltime";
-      $input1->value = "-walltime=" . $maxWallTime;
-      $input1->type = DataType::STRING;
-
-      $input2 = new DataObjectType();
-      $input2->key = "mgroupcount";
-      $input2->value = "-mgroupcount=" . $mgroupcount;
-      $input2->type = DataType::STRING;
-
-      $exInputs = array($input,$input1,$input2);
-
-      $output = new DataObjectType();
-      $output->key = "output";
-      $output->type = DataType::URI;
-
-      $output1 = new DataObjectType();
-      $output1->key = "stdout";
-      $output1->type = DataType::STDOUT;
-
-      $output2 = new DataObjectType();
-      $output2->key = "stderr";
-      $output2->type = DataType::STDERR;
-
-      $exOutputs = array($output);*/
-
-      $user = "us3";
+      // Experiment input and output data. 
       $proj = "ultrascan_cd0900d4-2b4d-4919-9aa2-b7649ea1f391";
 
       $experiment = new Experiment();

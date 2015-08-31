@@ -145,7 +145,6 @@ class submit_airavata extends airavata_jobsubmit
          case 'jureca.fz-juelich.de':
             //$hostname = "jureca.fz-juelich.de_3cf4acc0-abcd-4dd6-983c-4a84d68d6154";
             $hostname = "Jureca_3cf4acc0-abcd-4dd6-983c-4a84d68d6154";
-            $user     = "swus1";
             $us3_appId   = 'Ultrascan_Unicore_d7c02231-e8af-4e80-a634-f7bed15083ca';
             break;
          default:

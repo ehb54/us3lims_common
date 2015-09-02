@@ -143,9 +143,8 @@ class submit_airavata extends airavata_jobsubmit
             $hostname = "gordon.sdsc.edu_9ee43a5a-cee7-4efd-996b-4fc11662a726";
             break;
          case 'jureca.fz-juelich.de':
-            //$hostname = "jureca.fz-juelich.de_3cf4acc0-abcd-4dd6-983c-4a84d68d6154";
             $hostname = "Jureca_3cf4acc0-abcd-4dd6-983c-4a84d68d6154";
-            $us3_appId   = 'Ultrascan_Unicore_d7c02231-e8af-4e80-a634-f7bed15083ca';
+            $us3_appId = 'Ultrascan_Unicore_a5dc980b-2215-42ff-a9fe-fab8581462fc';
             break;
          default:
             echo "set the right host" . $hostname;
@@ -159,7 +158,6 @@ class submit_airavata extends airavata_jobsubmit
       $cmRST->wallTimeLimit = $maxWallTime;
       $cmRST->jobStartTime = 0;
       $cmRST->totalPhysicalMemory = 0;
-      //$cmRST->userDN = $userdn;
 
       $cmRS = $cmRST;
       $userConfigurationData = new UserConfigurationData();

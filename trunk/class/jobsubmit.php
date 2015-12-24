@@ -491,7 +491,8 @@ class jobsubmit
 
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
          {
-            $time *= 2;
+//            $time *= 3;
+            $time *= 9;
          }
       }
  

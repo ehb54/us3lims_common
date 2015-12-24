@@ -19,7 +19,7 @@ class submit_local extends jobsubmit
         return;
       }
 
-      $savedir = getcwd();
+      $savedir   = getcwd();
       chdir( $this->data[ 'job' ][ 'directory' ] );
       $this->copy_files    ();
       $this->submit_job    ();
@@ -32,10 +32,14 @@ $this->message[] = "End of submit_local.php";
    function copy_files()
    {
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $is_us3iab = preg_match( "/us3iab/", $cluster );
+      $no_us3iab = 1 - $is_us3iab;
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
       $address   = $this->grid[ $cluster ][ 'name' ];
+      if ( $is_us3iab )
+         $address   = "localhost";
       $port      = $this->grid[ $cluster ][ 'sshport' ]; 
       $tarfile   = sprintf( "hpcinput-%s-%s-%05d.tar",
                          $this->data['db']['host'],
@@ -43,17 +47,28 @@ $this->message[] = "End of submit_local.php";
                          $this->data['job']['requestID'] );
     
       // Create working directory
-      $output = array();
-      $cmd    = "ssh -p $port -x us3@$address mkdir -p $workdir 2>&1";
+      $output    = array();
+      $ssladr    = " -x us3@$address";
+      $sshcmd    = "ssh -p $port ";
+      $scpcmd    = "scp -P $port ";
+      $cmd       = "mkdir -p $workdir 2>&1";
+      if ( $no_us3iab )
+         $cmd       = $sshcmd . $ssladr . " " . $cmd;
       exec( $cmd, $output, $status );
 
       // Copy tar file
-      $cmd    = "scp -P $port $tarfile us3@$address:$workdir 2>&1";
+      if ( $no_us3iab )
+         $cmd       = $scpcmd . "$tarfile " . $ssladr . ":$workdir 2>&1";
+      else
+         $cmd       = "cp $tarfile $workdir/ 2>&1";
       exec( $cmd, $output, $status );
 
       //  Create and copy pbs file
-      $pbsfile = $this->create_pbs();
-      $cmd     = "scp -P $port $pbsfile us3@$address:$workdir 2>&1";
+      $pbsfile   = $this->create_pbs();
+      if ( $no_us3iab )
+         $cmd       = $scpcmd . "$pbsfile " . $ssladr . ":$workdir 2>&1";
+      else
+         $cmd       = "cp $pbsfile $workdir/ 2>&1";
       exec( $cmd, $output, $status );
       
 $this->message[] = "Files copied to $address:$workdir";
@@ -63,6 +78,8 @@ $this->message[] = "Files copied to $address:$workdir";
    function create_pbs()
    {
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $is_us3iab = preg_match( "/us3iab/", $cluster );
+      $no_us3iab = 1 - $is_us3iab;
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
@@ -87,71 +104,92 @@ $this->message[] = "Files copied to $address:$workdir";
       $ppn     = $this->grid[ $cluster ][ 'ppn' ]; 
 
       $walltime = sprintf( "%02.2d:%02.2d:00", $hours, $mins );  // 01:09:00
-      $havepl   = true;
+      $wallmins = $hours * 60 + $mins;
+      $havepl   = 1;
       $mpirun   = "mpirun";
-      $mpiana   = "/home/us3/bin/us_mpi_analysis";
+      $mpiana   = "us_mpi_analysis";
 
       switch( $cluster )
       {
         case 'bcf-local':
-         $libpath = "/share/apps64/openmpi/lib";
-         $path    = "/share/apps64/openmpi/bin";
-         break;
+          $libpath  = "/share/apps64/openmpi/lib";
+          $path     = "/share/apps64/openmpi/bin";
+          break;
 
         case 'jacinto-local':
-         $libpath = "/share/apps/openmpi/lib";
-         $path    = "/share/apps/openmpi/bin";
-         break;
+          $libpath  = "/share/apps/openmpi/lib";
+          $path     = "/share/apps/openmpi/bin";
+          break;
 
         case 'alamo-local':
-         $havepl  = false;
-         $load1   = "intel/2015/64";
-         $load2   = "openmpi/intel/1.8.4";
-         $load3   = "qt4/4.8.6";
-         $load4   = "ultrascan3/3.3";
+          $havepl   = false;
+          $load1    = "intel/2015/64";
+          $load2    = "openmpi/intel/1.8.4";
+          $load3    = "qt4/4.8.6";
+          $load4    = "ultrascan3/3.3";
+          break;
 
-         break;
+        case 'us3iab-local':
+        case 'us3iab-node0':
+        case 'us3iab-node1':
+          $havepl   = 1;
+          $load1    = "";
+          $load2    = "";
+          $load3    = "";
+          $load4    = "";
+          if ( $nodes > 1 )
+          {
+             $ppn      = $nodes * $ppn;
+             $ppn      = min( $ppn, 64 );
+          }
+          $us3cdir  = exec( "ls -d ~us3/cluster" );
+          $libpath  = "$us3cdir/lib:/usr/lib64/openmpi/lib:/opt/qt4/lib";
+          $path     = "$us3cdir/bin:/usr/lib64/openmpi/bin";
+          $ppn      = max( $ppn, 8 );
+          $nodes    = 1;
+          break;
 
         default:
-         $libpath = "/share/apps/openmpi/lib:/share/apps/qt4/lib";
-         $path    = "/share/apps/openmpi/bin";
-         $ppn     = 2;
-         break;
+          $libpath  = "/share/apps/openmpi/lib:/share/apps/qt4/lib";
+          $path     = "/share/apps/openmpi/bin";
+          $ppn      = 2;
+          break;
       }
 
-      if ( $havepl )
+      if ( $havepl != 0 )
       {
-         $plines  = 
-            "\n"                                                  .
+         $plines   = 
+            "\n"
             "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
             "export PATH=$path:\$PATH\n"                          .
             "\n";
-         $dlines  = 
-            "# Turn off extraneous mpi debug output\n"            .
-            "export OMPI_MCA_mpi_param_check=0\n"                 . 
-            "export OMPI_MCA_mpi_show_handle_leaks=0\n"           .
-            "export OMPI_MCA_mpi_show_mca_params=0\n"             .
-            "\n";
+         $dlines   = '';
       }
 
       else
       {
-         $plines  = 
-            "\n"                    .
-            "module load $load1 \n" .
-            "module load $load2 \n" .
-            "module load $load3 \n" .
-            "module load $load4 \n" .
-            "\n";
+         if ( $no_us3iab )
+            $plines  = 
+               "\n"                    .
+               "module load $load1 \n" .
+               "module load $load2 \n" .
+               "module load $load3 \n" .
+               "module load $load4 \n" .
+               "\n";
+         else
+            $plines  = 
+               "\n"                    .
+               "module load $load4 \n" .
+               "\n";
          $dlines  = "";
       }
 
-      $procs   = $nodes * $ppn;
+      $procs    = $nodes * $ppn;
 
       $contents = 
       "#! /bin/bash\n"                                      .
       "#\n"                                                 . 
-      "#PBS -N US3_Job\n"                                   .
+      "#PBS -N US3_Job_$requestID\n"                        .
       "#PBS -l nodes=$nodes:ppn=$ppn,walltime=$walltime\n"  .
       "#PBS -V\n"                                           .
       "#PBS -o $workdir/stdout\n"                           .
@@ -161,7 +199,7 @@ $this->message[] = "Files copied to $address:$workdir";
       "$dlines"                                             .
       "\n"                                                  .
       "cd $workdir\n"                                       .
-      "$mpirun -np $procs $mpiana $tarfile\n";
+      "$mpirun -np $procs $mpiana -walltime $wallmins -pmgc $mgroupcount $tarfile\n\n";
 
       $this->data[ 'pbsfile' ] = $contents;
 
@@ -178,6 +216,8 @@ $this->message[] = "Files copied to $address:$workdir";
       date_default_timezone_set( "America/Chicago" );
  
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $is_us3iab = preg_match( "/us3iab/", $cluster );
+      $no_us3iab = 1 - $is_us3iab;
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
@@ -189,13 +229,14 @@ $this->message[] = "Files copied to $address:$workdir";
                          $this->data['job']['requestID'] );
 
       // Submit job to the queue
-      $cmd   = "ssh -p $port -x us3@$address qsub $workdir/us3.pbs 2>&1";
-      $jobid = exec( $cmd, $output, $status );
+      $cmd       = "qsub $workdir/us3.pbs 2>&1";
+      if ( $no_us3iab )
+         $cmd       = "ssh -p $port -x us3@$address " . $cmd;
+      $jobid     = exec( $cmd, $output, $status );
 
       // Save the job ID
-      $this->data[ 'eprfile' ] = rtrim( $jobid );;
-
-$this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ];
+      $this->data[ 'eprfile' ] = rtrim( $jobid );
+$this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" . $status;
    }
  
    function update_db()

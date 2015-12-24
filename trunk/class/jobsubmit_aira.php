@@ -454,6 +454,9 @@ class airavata_jobsubmit
       $ri_noise   = isset( $parameters[ 'rinoise_option' ] )
                     ? $parameters[ 'rinoise_option' ] > 0
                     : false;
+      $mxiters    = isset( $parameters[ 'max_iterations' ] )
+                    ? $parameters[ 'max_iterations' ]
+                    : 0;
  
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {
@@ -479,7 +482,13 @@ class airavata_jobsubmit
          $gfiters    = isset( $parameters[ 'gfit_iterations' ] )
                        ? $parameters[ 'gfit_iterations' ]
                        : 1;
-         $time       = $vsize * $vsize * $gfiters;
+         $curvtype   = isset( $parameters[ 'curve_type' ] )
+                       ? $parameters[ 'curve_type' ]
+                       : "SL";
+         if ( preg_match( "/HL/", $curvtype ) )
+            $time       = $vsize * $gfiters;
+         else
+            $time       = $vsize * $vsize * $gfiters;
          if ( $ti_noise || $ri_noise ) $time *= 2;
          $time       = $time / 4;        // Base time is 15 seconds
          $time       = max( $time, 30 ); // Minimum PCSA time is 30 minutes
@@ -491,11 +500,17 @@ class airavata_jobsubmit
 
          if ( isset( $parameters[ 'meniscus_points' ] ) )
          {
-            $points = $parameters[ 'meniscus_points' ];
+            $points     = $parameters[ 'meniscus_points' ];
             if ( $points > 0 )  $time *= $points;
          }
     
          if ( $ti_noise || $ri_noise ) $time *= 2;
+
+         if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
+         {
+            $time      *= 8;
+            if ( $mxiters > 0 )  $time *= 2;
+         }
       }
  
       $montecarlo = 1;
@@ -506,12 +521,7 @@ class airavata_jobsubmit
          if ( $montecarlo > 0 )  $time *= $montecarlo;
       }
 
-      if ( isset( $parameters[ 'max_iterations' ] ) )
-      {
-         $mxiters = $parameters[ 'max_iterations' ];
-         if ( $mxiters > 0 )  $time *= $mxiters;
-      }
-
+      if ( $mxiters > 0 )  $time *= $mxiters;
 
       $time *= $dset_count;                   // times number of datasets
       $time  = (int)( ( $time * 12 ) / 10 );  // Padding

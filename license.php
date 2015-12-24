@@ -14,7 +14,7 @@ include 'header.php';
 
    The entire software, including documentation, source code,
    LIMS and grid middleware components are protected by the <a
-   href='http://www.gnu.org/copyleft/gpl.html'>GNU General Public License,
+   href='http://www.gnu.org/licenses/lgpl.html'>GNU Lesser General Public License,
    version 3</a>.
 
 </div>

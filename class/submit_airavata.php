@@ -8,11 +8,13 @@
 require_once $class_dir . 'jobsubmit_aira.php';
 
 include $class_dir . 'thrift_includes.php';
+/* Skip use of Airavata Model for LOCAL */
 use Airavata\Model\Workspace\Experiment\ComputationalResourceScheduling;
 use Airavata\Model\Workspace\Experiment\UserConfigurationData;
 use Airavata\Model\Workspace\Experiment\AdvancedOutputDataHandling;
 use Airavata\Model\Workspace\Experiment\Experiment;
 use Airavata\Model\AppCatalog\AppInterface\InputDataObjectType;
+/* Skip use of Airavata Model for LOCAL */
 
 class submit_airavata extends airavata_jobsubmit
 {

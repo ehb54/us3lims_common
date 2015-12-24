@@ -5,6 +5,7 @@
  * Includes to enable use of the Thrift and Airavata APIs
  *
  */
+/* Disable all Thrift code for LOCAL */
 $GLOBALS['THRIFT_ROOT'] = '/opt/thrift/lib/Thrift/';
 $GLOBALS['AIRAVATA_ROOT'] = '/opt/thrift/lib/Airavata/';
 
@@ -82,5 +83,6 @@ catch (TException $ire)
     {
         print_error_message('AiravataSystemException!<br><br>' . $ase->getMessage());
     }
+/* Disable all Thrift code for LOCAL */
 
 ?>

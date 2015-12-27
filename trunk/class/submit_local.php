@@ -159,7 +159,7 @@ $this->message[] = "Files copied to $address:$workdir";
       if ( $havepl != 0 )
       {
          $plines   = 
-            "\n"
+            "\n"                                                  .
             "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
             "export PATH=$path:\$PATH\n"                          .
             "\n";

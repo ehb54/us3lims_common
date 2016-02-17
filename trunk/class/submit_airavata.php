@@ -148,6 +148,9 @@ class submit_airavata extends airavata_jobsubmit
             $hostname = "Jureca_3cf4acc0-abcd-4dd6-983c-4a84d68d6154";
             $us3_appId = 'Ultrascan_Unicore_a5dc980b-2215-42ff-a9fe-fab8581462fc';
             break;
+         case 'lonestar5.tacc.teragrid.org':
+            $hostname = "lonestar5.tacc.utexas.edu_6d62fa0c-a9b1-4414-a76a-a4e2cbd9d290";
+            break;
          default:
             echo "set the right host" . $hostname;
             break;

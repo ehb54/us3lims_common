@@ -123,6 +123,22 @@ class jobsubmit
         "maxproc"    => 72
       );
 
+      $this->grid[ 'lonestar5' ] = array 
+      (
+        "name"       => "lonestar5.tacc.teragrid.org",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 1440,
+        "ppn"        => 12,
+        "ppbj"       => 48,
+        "maxproc"    => 96
+      );
+
       $this->grid[ 'gordon' ] = array 
       (
         "name"       => "gordon.sdsc.edu",

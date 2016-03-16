@@ -125,7 +125,7 @@ class airavata_jobsubmit
 
       $this->grid[ 'lonestar5' ] = array 
       (
-        "name"       => "lonestar5.tacc.teragrid.org",
+        "name"       => "ls5.tacc.utexas.edu",
         "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
@@ -141,7 +141,7 @@ class airavata_jobsubmit
 
       $this->grid[ 'gordon' ] = array 
       (
-        "name"       => "gordon.sdsc.edu",
+        "name"       => "gordon.sdsc.xsede.org",
         "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
@@ -157,14 +157,14 @@ class airavata_jobsubmit
     
       $this->grid[ 'comet' ] = array 
       (
-        "name"       => "comet.sdsc.edu",
+        "name"       => "comet.sdsc.xsede.org",
         "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
         "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
-        "queue"      => "normal",
+        "queue"      => "compute",
         "maxtime"    => 1440,
         "ppn"        => 24,
         "ppbj"       => 24,
@@ -352,6 +352,7 @@ class airavata_jobsubmit
  
                case 'user':
                   $db[ 'user' ] = $parser->getAttribute( 'email' );
+                  $db[ 'user_id' ] = $parser->getAttribute( 'user_id' );
                   break;
  
                case 'submitter':

@@ -1,5 +1,7 @@
 <?php
-include_once '/srv/www/htdocs/common/class/thrift_includes.php';
+
+require_once(dirname(__FILE__) . '/ultrascan-airavata-bridge/AiravataWrapper.php');
+use SCIGAP\AiravataWrapper;
 
 /**
  * Cancel the running experiment
@@ -8,35 +10,16 @@ include_once '/srv/www/htdocs/common/class/thrift_includes.php';
  */
 function cancelAiravataJob($expId)
 {
-    global $airavataclient,$transport;
-    try
-    {
-    $airavataclient->terminateExperiment($expId, '00409bfe-8e5f-4e50-b8eb-138bf0158e90');
-    $transport->close();
-    return true;
+    $airavataWrapper = new AiravataWrapper();
+
+    $cancelResult = $airavataWrapper->terminate_airavata_experiment($expId);
+
+    if ($cancelResult['terminateStatus']) {
+        return true;
+    } else {
+        echo "Experiment Termination Failed: " . $cancelResult['message'] . PHP_EOL;
+        return false;
     }
-    catch (InvalidRequestException $ire)
-    {
-        echo 'InvalidRequestException!<br><br>' . $ire->getMessage();
-    }
-    catch (ExperimentNotFoundException $enf)
-    {
-        echo 'ExperimentNotFoundException!<br><br>' . $enf->getMessage();
-    }
-    catch (AiravataClientException $ace)
-    {
-        echo 'AiravataClientException!<br><br>' . $ace->getMessage();
-    }
-    catch (AiravataSystemException $ase)
-    {
-        echo 'AiravataSystemException!<br><br>' . $ase->getMessage();
-    }
-    catch (\Exception $e)
-    {
-        echo 'Exception!<br><br>' . $e->getMessage();
-    }
-   $transport->close();
-   return false;
 }
 
 ?>

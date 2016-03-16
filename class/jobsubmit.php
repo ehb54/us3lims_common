@@ -125,7 +125,7 @@ class jobsubmit
 
       $this->grid[ 'lonestar5' ] = array 
       (
-        "name"       => "lonestar5.tacc.teragrid.org",
+        "name"       => "ls5.tacc.utexas.edu",
         "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",

@@ -105,7 +105,7 @@ class submit_airavata extends airavata_jobsubmit
                               $this->data[ 'job' ][ 'requestID' ] );
 
       $workingDirPath = $this->data[ 'job' ][ 'directory' ];
-      $inputTarFile   = $workingDirPath . "/" . $tarFilename;
+      $inputTarFile   = $workingDirPath . $tarFilename;
       $outputDirName  = basename( $workingDirPath );
 
       if ( preg_match( "/class_devel/", $class_dir ) )
@@ -139,6 +139,12 @@ class submit_airavata extends airavata_jobsubmit
          //var_dump($expId);
          $this->message[] = "Experiment $expId created";
          $this->message[] = "    ppn=$ppn  tnodes=$tnodes  nodes=$nodes  cores=$cores";
+         $this->message[] = "    uslimsVMHost=$uslimsVMHost  limsUser=$limsUser";
+         $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId";
+         $this->message[] = "    clus_host=$clus_host  queue=$queue  clus_user=$clus_user";
+         $this->message[] = "    mgroupcount=$mgroupcount  maxWallTime=$maxWallTime";
+         $this->message[] = "    inputTarFile=$inputTarFile";
+         $this->message[] = "    outputDirName=$outputDirName";
       }
       else
       {

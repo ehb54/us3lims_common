@@ -135,8 +135,8 @@ class airavata_jobsubmit
         "queue"      => "normal",
         "maxtime"    => 1440,
         "ppn"        => 12,
-        "ppbj"       => 48,
-        "maxproc"    => 96
+        "ppbj"       => 24,
+        "maxproc"    => 72
       );
 
       $this->grid[ 'gordon' ] = array 

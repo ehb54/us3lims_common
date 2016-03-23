@@ -1,6 +1,6 @@
 <?php
 
-require_once(dirname(__FILE__) . '/ultrascan-airavata-bridge/AiravataWrapper.php');
+require_once dirname(__FILE__) . '/ultrascan-airavata-bridge/AiravataWrapper.php';
 use SCIGAP\AiravataWrapper;
 
 /**

@@ -545,7 +545,12 @@ class airavata_jobsubmit
  
       // Account for parallel group count in max walltime
       if ( $montecarlo > 1  ||  $dset_count > 1 )
+      {
          $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
+         // Base time no more than max*2 (48 hours), later divided by $mgroupcount
+         if ( $mgroupcount > 1 )
+            $time = min( $time, ( $max_time * 2 ) );
+      }
       else
          $mgroupcount = 1;
 

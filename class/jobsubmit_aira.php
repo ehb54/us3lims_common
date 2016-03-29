@@ -547,9 +547,9 @@ class airavata_jobsubmit
       if ( $montecarlo > 1  ||  $dset_count > 1 )
       {
          $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
-         // Base time no more than max*2 (48 hours), later divided by $mgroupcount
+         // Base time no more than max*4 (96 hours), later divided by $mgroupcount
          if ( $mgroupcount > 1 )
-            $time = min( $time, ( $max_time * 2 ) );
+            $time = min( $time, ( $max_time * 4 ) );
       }
       else
          $mgroupcount = 1;
@@ -558,26 +558,26 @@ class airavata_jobsubmit
       // Adjust max wall time down based on parallel group count
       switch ( $mgroupcount )
       {
-         case 1  :
+         case 1  :  // max 24 h
             break;
 
-         case 2  :
+         case 2  :  // max 64 h
             $time = (int)( ( $time * 10 ) / 15 );
             break;
 
-         case 4  :
+         case 4  :  // max 27 h
             $time = (int)( ( $time * 10 ) / 35 );
             break;
 
-         case 8  :
+         case 8  :  // max 12 h
             $time = (int)( ( $time * 10 ) / 75 );
             break;
 
-         case 16 :
+         case 16 :  // max  6 h
             $time = (int)( ( $time * 10 ) / 150 );
             break;
 
-         default :
+         default :  // max  3 h, ...
             $time = (int)( ( $time * 10 ) / ( ( $mgroupcount -1 ) * 10 ) );
             break;
       }

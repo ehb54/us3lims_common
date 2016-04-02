@@ -134,7 +134,7 @@ class airavata_jobsubmit
         "sshport"    => 22,
         "queue"      => "normal",
         "maxtime"    => 1440,
-        "ppn"        => 12,
+        "ppn"        => 24,
         "ppbj"       => 24,
         "maxproc"    => 72
       );

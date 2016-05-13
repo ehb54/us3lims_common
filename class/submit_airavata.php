@@ -43,9 +43,11 @@ class submit_airavata extends airavata_jobsubmit
       $tnodes      = $this->nodes();
       $nodes       = $tnodes * $mgroupcount;
       $clus_user   = 'us3';
+      $clus_scrd   = '';
 
       if ( $cluster == 'jureca' )
       {
+         $clus_group  = 'ultrascn';
          switch ( $dbname )
          {
             case 'uslims3_cauma3':
@@ -53,19 +55,22 @@ class submit_airavata extends airavata_jobsubmit
                break;
 
             case 'uslims3_cauma3d':
-               $clus_user   = 'swus3';
+               $clus_user   = 'swus2';
                break;
 
             case 'uslims3_Uni_KN':
                $clus_user   = 'hkn001';
+               $clus_group  = 'hkn00';
                break;
 
             case 'uslims3_HHU':
                $clus_user   = 'jics6301';
+               $clus_group  = 'jics63';
                break;
 
             case 'uslims3_FAU':
                $clus_user   = 'her210';
+               $clus_group  = 'her21';
                break;
 
             default :
@@ -74,6 +79,7 @@ class submit_airavata extends airavata_jobsubmit
          }
 
          $userdn      = str_replace( '_USER_', $user, $userdn );
+         $clus_scrd   = '/work/$clus_group/$clus_user/airavata-workdirs';
       }
 
       if ( $cluster == 'alamo'  &&  $nodes > 16 )
@@ -128,7 +134,8 @@ class submit_airavata extends airavata_jobsubmit
       $expResult  = $airavataWrapper->launch_airavata_experiment( $uslimsVMHost, $limsUser,
                        $exp_name, $expReqId,
                        $clus_host, $queue, $cores, $nodes, $mgroupcount,
-                       $maxWallTime, $clus_user,
+//                       $maxWallTime, $clus_user,
+                       $maxWallTime, $clus_user, $clus_scrd,
                        $inputTarFile, $outputDirName );
 
       $expId      = 0;

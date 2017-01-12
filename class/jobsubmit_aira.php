@@ -107,23 +107,7 @@ class airavata_jobsubmit
         "maxproc"    => 32
       );
 
-      $this->grid[ 'lonestar' ] = array 
-      (
-        "name"       => "lonestar.tacc.teragrid.org",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,
-        "ppn"        => 12,
-        "ppbj"       => 36,
-        "maxproc"    => 72
-      );
-
-      $this->grid[ 'lonestar5' ] = array 
+      $this->grid[ 'lonestar5' ] = array
       (
         "name"       => "ls5.tacc.utexas.edu",
         "submithost" => $subhost,
@@ -134,7 +118,7 @@ class airavata_jobsubmit
         "sshport"    => 22,
         "queue"      => "normal",
         "maxtime"    => 1440,
-        "ppn"        => 24,
+        "ppn"        => 12,
         "ppbj"       => 24,
         "maxproc"    => 72
       );
@@ -164,7 +148,7 @@ class airavata_jobsubmit
         "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
-        "queue"      => "compute",
+        "queue"      => "normal",
         "maxtime"    => 1440,
         "ppn"        => 24,
         "ppbj"       => 24,
@@ -352,7 +336,6 @@ class airavata_jobsubmit
  
                case 'user':
                   $db[ 'user' ] = $parser->getAttribute( 'email' );
-                  $db[ 'user_id' ] = $parser->getAttribute( 'user_id' );
                   break;
  
                case 'submitter':
@@ -465,17 +448,8 @@ class airavata_jobsubmit
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
-      $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
-                    ? $parameters[ 'tinoise_option' ] > 0 
-                    : false;
-      $ri_noise   = isset( $parameters[ 'rinoise_option' ] )
-                    ? $parameters[ 'rinoise_option' ] > 0
-                    : false;
-      $mxiters    = isset( $parameters[ 'max_iterations' ] )
-                    ? $parameters[ 'max_iterations' ]
-                    : 0;
  
-      if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
+      if ( preg_match( "/GA/", $this->data[ 'method' ] ) )  // GA or DMGA
       {
          // Assume 1 sec a basic unit
 
@@ -491,43 +465,25 @@ class airavata_jobsubmit
          $time  = (int)( ($time + 59) / 60 ); // Round up to minutes
       }
 
-      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
-      {  // PCSA
-         $vsize      = isset( $parameters[ 'vars_count' ] )
-                       ? $parameters[ 'vars_count' ]
-                       : 1;
-         $gfiters    = isset( $parameters[ 'gfit_iterations' ] )
-                       ? $parameters[ 'gfit_iterations' ]
-                       : 1;
-         $curvtype   = isset( $parameters[ 'curve_type' ] )
-                       ? $parameters[ 'curve_type' ]
-                       : "SL";
-         if ( preg_match( "/HL/", $curvtype ) )
-            $time       = $vsize * $gfiters;
-         else
-            $time       = $vsize * $vsize * $gfiters;
-         if ( $ti_noise || $ri_noise ) $time *= 2;
-         $time       = $time / 4;        // Base time is 15 seconds
-         $time       = max( $time, 30 ); // Minimum PCSA time is 30 minutes
-      }
-
-      else // 2DSA
+      else // 2DSA or PCSA
       {
+         $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
+                       ? $parameters[ 'tinoise_option' ] > 0 
+                       : false;
+    
+         $ri_noise   = isset( $parameters[ 'rinoise_option' ] )
+                       ? $parameters[ 'rinoise_option' ] > 0
+                       : false;
+ 
          $time       = 5;  // Base time in minutes
 
          if ( isset( $parameters[ 'meniscus_points' ] ) )
          {
-            $points     = $parameters[ 'meniscus_points' ];
+            $points = $parameters[ 'meniscus_points' ];
             if ( $points > 0 )  $time *= $points;
          }
     
          if ( $ti_noise || $ri_noise ) $time *= 2;
-
-         if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
-         {
-            $time      *= 8;
-            if ( $mxiters > 0 )  $time *= 2;
-         }
       }
  
       $montecarlo = 1;
@@ -538,19 +494,18 @@ class airavata_jobsubmit
          if ( $montecarlo > 0 )  $time *= $montecarlo;
       }
 
-      if ( $mxiters > 0 )  $time *= $mxiters;
+      if ( isset( $parameters[ 'max_iterations' ] ) )
+      {
+         $mxiters = $parameters[ 'max_iterations' ];
+         if ( $mxiters > 0 )  $time *= $mxiters;
+      }
 
       $time *= $dset_count;                   // times number of datasets
       $time  = (int)( ( $time * 12 ) / 10 );  // Padding
  
       // Account for parallel group count in max walltime
       if ( $montecarlo > 1  ||  $dset_count > 1 )
-      {
          $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
-         // Base time no more than max*4 (96 hours), later divided by $mgroupcount
-         if ( $mgroupcount > 1 )
-            $time = min( $time, ( $max_time * 4 ) );
-      }
       else
          $mgroupcount = 1;
 
@@ -558,26 +513,34 @@ class airavata_jobsubmit
       // Adjust max wall time down based on parallel group count
       switch ( $mgroupcount )
       {
-         case 1  :  // max 24 h
+         case 1  :
             break;
 
-         case 2  :  // max 64 h
+         case 2  :
+         case 3  :
             $time = (int)( ( $time * 10 ) / 15 );
             break;
 
-         case 4  :  // max 27 h
+         case 4  :
+         case 5  :
+         case 6  :
             $time = (int)( ( $time * 10 ) / 35 );
             break;
 
-         case 8  :  // max 12 h
+         case 7  :
+         case 8  :
             $time = (int)( ( $time * 10 ) / 75 );
             break;
 
-         case 16 :  // max  6 h
+         case 16 :
             $time = (int)( ( $time * 10 ) / 150 );
             break;
 
-         default :  // max  3 h, ...
+         case 32 :
+            $time = (int)( ( $time * 10 ) / 300 );
+            break;
+
+         default :
             $time = (int)( ( $time * 10 ) / ( ( $mgroupcount -1 ) * 10 ) );
             break;
       }

@@ -20,6 +20,54 @@ class jobsubmit
       $subhost = "http://gridfarm005.ucs.indiana.edu";
       $subport = 8080;
 
+      $this->grid[ 'us3iab-node0' ] = array 
+      (
+        "name"       => "us3iab-node0.aucsolutions.com",
+        "submithost" => "localhost",
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/export/home/us3/lims/work/",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 2160,
+        "ppn"        => 8,
+        "ppbj"       => 8,
+        "maxproc"    => 16
+      );
+
+      $this->grid[ 'us3iab-node1' ] = array 
+      (
+        "name"       => "us3iab-node1.aucsolutions.com",
+        "submithost" => "localhost",
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/export/home/us3/lims/work/",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 2160,
+        "ppn"        => 8,
+        "ppbj"       => 8,
+        "maxproc"    => 16
+      );
+
+      $this->grid[ 'us3iab-devel' ] = array 
+      (
+        "name"       => "us3iab-devel.attlocal.net",
+        "submithost" => "localhost",
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/export/home/us3/lims/work/",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 2160,
+        "ppn"        => 8,
+        "ppbj"       => 8,
+        "maxproc"    => 16
+      );
+    
       $this->grid[ 'bcf' ] = array 
       (
         "name"       => "bcf.uthscsa.edu",
@@ -39,7 +87,10 @@ class jobsubmit
       $this->grid[ 'bcf-local' ] = array 
       (
         "name"       => "bcf.uthscsa.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "local",
+        "httpport"   => $subport,
         "workdir"    => "/home/us3/work/",  // Need trailing slash
         "sshport"    => 22,
         "queue"      => "default",
@@ -68,10 +119,13 @@ class jobsubmit
       $this->grid[ 'jacinto-local' ] = array 
       (
         "name"       => "jacinto.uthscsa.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "local",
+        "httpport"   => $subport,
         "workdir"    => "/home/us3/work/",  // Need trailing slash
         "sshport"    => 22,
-        "queue"      => "",
+        "queue"      => "default",
         "maxtime"    => 2160,
         "ppn"        => 4,
         "ppbj"       => 8,
@@ -97,33 +151,20 @@ class jobsubmit
       $this->grid[ 'alamo-local' ] = array 
       (
         "name"       => "alamo.uthscsa.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "local",
+        "httpport"   => $subport,
         "workdir"    => "/home/us3/work/",  // Need trailing slash
         "sshport"    => 22,
-        "queue"      => "",
+        "queue"      => "default",
         "maxtime"    => 2160,
         "ppn"        => 24,
         "ppbj"       => 24,
         "maxproc"    => 48
       );
 
-      $this->grid[ 'lonestar' ] = array 
-      (
-        "name"       => "lonestar.tacc.teragrid.org",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,
-        "ppn"        => 12,
-        "ppbj"       => 36,
-        "maxproc"    => 72
-      );
-
-      $this->grid[ 'lonestar5' ] = array 
+      $this->grid[ 'lonestar5' ] = array
       (
         "name"       => "ls5.tacc.utexas.edu",
         "submithost" => $subhost,
@@ -141,7 +182,7 @@ class jobsubmit
 
       $this->grid[ 'gordon' ] = array 
       (
-        "name"       => "gordon.sdsc.edu",
+        "name"       => "gordon.sdsc.xsede.org",
         "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
@@ -157,7 +198,7 @@ class jobsubmit
 
       $this->grid[ 'comet' ] = array 
       (
-        "name"       => "comet.sdsc.edu",
+        "name"       => "comet.sdsc.xsede.org",
         "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
@@ -480,6 +521,7 @@ class jobsubmit
          $time *= 1.2;  // Pad things a bit
          $time  = (int)( ($time + 59) / 60 ); // Round up to minutes
       }
+
       else // 2DSA or PCSA
       {
          $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
@@ -507,8 +549,9 @@ class jobsubmit
 
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
          {
-//            $time *= 3;
-            $time *= 9;
+            $time *= 2;
+            if ( preg_match( "/us3iab/", $cluster ) )
+               $time *= 4;
          }
       }
  
@@ -540,14 +583,18 @@ class jobsubmit
       // Adjust max wall time down based on parallel group count
       switch ( $mgroupcount )
       {
+         case 1  :
          case 2  :
             $time = (int)( ( $time * 10 ) / 15 );
             break;
 
+         case 3  :
          case 4  :
+         case 5  :
             $time = (int)( ( $time * 10 ) / 35 );
             break;
 
+         case 7  :
          case 8  :
             $time = (int)( ( $time * 10 ) / 75 );
             break;
@@ -596,16 +643,57 @@ class jobsubmit
    function nodes()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $is_us3iab  = preg_match( "/us3iab/", $cluster );
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
       $ppbj       = $this->grid[ $cluster ][ 'ppbj'    ];
  
+      if ( $is_us3iab )
+      {  // It is "us3iab"
+         $mgroup     = 1;
+         $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
+         $montecarlo = $parameters[ 'mc_iterations' ];
+
+         if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
+         {  // GA or DMGA
+            if ( $montecarlo < 2 )
+            {  // Non-MC GA
+               $ppn        = 16;
+            }
+            else
+            {  // GA-MC
+               if ( isset( $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] ) )
+               {
+                  $mgroup     = $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ];
+                  if ( $mgroup > 1 )
+                     $ppn     = (int)( $max_procs / $mgroup );
+                  $ppn        = max( $ppn, 16 );
+               }
+               else
+               {
+                  $mgroup     = 1;
+                  $ppn        = 16;
+                  $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] = $mgroup;
+               }
+               $this->data[ 'job' ][ 'mgroupcount' ] = $mgroup;
+            }
+         }
+
+         $max_procs  = $ppn;
+         $this->grid[ $cluster ][ 'maxproc' ] = $max_procs;
+         $this->grid[ $cluster ][ 'ppn'     ] = $ppn;
+      }  // End: us3iab
+ 
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {  // GA: procs is demes+1 rounded to procs-per-node
          $demes = $parameters[ 'demes' ];
          if ( $demes == 1 )
+         {
             $demes = $ppbj - 1;
+            if ( $is_us3iab )
+               $demes = max( 15, $demes );
+         }
          $procs = $demes + $ppn;                  // Procs = demes+1
          $procs = (int)( $procs / $ppn ) * $ppn;  // Rounded to procs-per-node
       }
@@ -633,25 +721,23 @@ class jobsubmit
    function max_mgroupcount()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
-      $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
-      $groups     = 32;
-      if ( preg_match( "/jacinto/", $cluster ) )
-      {  // Jacinto can have no more than 2 PMGs
-        $groups = 2;
-      }
-      if ( $cluster == 'alamo' )
-      {  // Alamo can have no more than 16 PMGs
-        $groups = 16;
-      }
+      $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
+      $max_groups = 32;
 
-      // Convert to 1/2/4/8/16/32
-      $power      = (int) ceil( log( $groups, 2 ) );
-      $max_groups = min( 32, pow( 2, $power ) );
-
-      // For 2DSA/PCSA composite, insure groups no more than datasets count
       if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
-        $max_groups = min( $max_groups, $dset_count );
+      {  // For 2DSA/PCSA, PMGs is always 1
+         $max_groups = 1;
+      }
+
+      else if ( preg_match( "/us3iab/", $cluster ) )
+      {   // Us3iab PMGs limited by max procs available
+         $max_groups = $max_procs / 16;
+      }
+ 
+      else if ( preg_match( "/alamo/", $cluster ) )
+      {  // Alamo can have no more than 16 PMGs
+         $max_groups = 16;
+      }
 
       return $max_groups;
    }

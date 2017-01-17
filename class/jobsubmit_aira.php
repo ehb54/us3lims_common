@@ -448,6 +448,15 @@ class airavata_jobsubmit
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
+      $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
+                    ? $parameters[ 'tinoise_option' ] > 0 
+                    : false;
+      $ri_noise   = isset( $parameters[ 'rinoise_option' ] )
+                    ? $parameters[ 'rinoise_option' ] > 0
+                    : false;
+      $mxiters    = isset( $parameters[ 'max_iterations' ] )
+                    ? $parameters[ 'max_iterations' ]
+                    : 0;
  
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )  // GA or DMGA
       {
@@ -465,16 +474,28 @@ class airavata_jobsubmit
          $time  = (int)( ($time + 59) / 60 ); // Round up to minutes
       }
 
-      else // 2DSA or PCSA
+      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )  // PCSA
+      {  // PCSA
+         $vsize      = isset( $parameters[ 'vars_count' ] )
+                       ? $parameters[ 'vars_count' ]
+                       : 1;
+         $gfiters    = isset( $parameters[ 'gfit_iterations' ] )
+                       ? $parameters[ 'gfit_iterations' ]
+                       : 1;
+         $curvtype   = isset( $parameters[ 'curve_type' ] )
+                       ? $parameters[ 'curve_type' ]
+                       : "SL";
+         if ( preg_match( "/HL/", $curvtype ) )
+            $time       = $vsize * $gfiters;
+         else
+            $time       = $vsize * $vsize * $gfiters;
+         if ( $ti_noise || $ri_noise ) $time *= 2;
+         $time       = $time / 4;        // Base time is 15 seconds
+         $time       = max( $time, 30 ); // Minimum PCSA time is 30 minutes
+      }
+
+      else // 2DSA or 2DSA-CG
       {
-         $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
-                       ? $parameters[ 'tinoise_option' ] > 0 
-                       : false;
-    
-         $ri_noise   = isset( $parameters[ 'rinoise_option' ] )
-                       ? $parameters[ 'rinoise_option' ] > 0
-                       : false;
- 
          $time       = 5;  // Base time in minutes
 
          if ( isset( $parameters[ 'meniscus_points' ] ) )
@@ -484,6 +505,12 @@ class airavata_jobsubmit
          }
     
          if ( $ti_noise || $ri_noise ) $time *= 2;
+
+         if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
+         {
+            $time      *= 8;
+            if ( $mxiters > 0 )  $time *= 2;
+         }
       }
  
       $montecarlo = 1;
@@ -494,11 +521,7 @@ class airavata_jobsubmit
          if ( $montecarlo > 0 )  $time *= $montecarlo;
       }
 
-      if ( isset( $parameters[ 'max_iterations' ] ) )
-      {
-         $mxiters = $parameters[ 'max_iterations' ];
-         if ( $mxiters > 0 )  $time *= $mxiters;
-      }
+      if ( $mxiters > 0 )  $time *= $mxiters;
 
       $time *= $dset_count;                   // times number of datasets
       $time  = (int)( ( $time * 12 ) / 10 );  // Padding
@@ -546,29 +569,29 @@ class airavata_jobsubmit
       }
 
       $time = max( $time, 5 );         // Minimum time is 5 minutes
+
       if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
       {
          // For alamo, $max_time is hardwired to 2160
-         $time = $max_time;
+         $time        = $max_time;
       }
 
       if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
       {
          // For jacinto, $max_time is hardwired to 2160, and no PMG
-         $time = $max_time;
-//         $mgroupcount = 1;
-//$mgroupcount=$this->data[ 'job' ][ 'mgroupcount' ];
+         $time        = $max_time;
+         $mgroupcount = 1;
       }
 
       else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
       {
          // For bcf, hardwire $max_time to 240 (4 hours), and no PMG
-         $time = $max_time;
+         $time        = $max_time;
          $mgroupcount = 1;
       }
       else
       {
-         $time = min( $time, $max_time ); // Maximum time is defined for each cluster
+         $time        = min( $time, $max_time ); // Maximum time is defined for each cluster
       }
  
       return (int)$time;

@@ -623,7 +623,7 @@ class jobsubmit
             break;
 
          default :
-            $time = (int)( ( $time * 10 ) / ( $mgroupcount -1 ) * 10 ) );
+            $time = (int)( ( $time * 10 ) / ( ( $mgroupcount -1 ) * 10 ) );
             break;
       }
 

@@ -5,10 +5,8 @@
  * Submits an analysis using the airvata thrift API method
  *
  */
-require_once $class_dir . 'jobsubmit_aira.php';
-require_once $class_dir . 'ultrascan-airavata-bridge/AiravataWrapper.php';
-
-//require_once(dirname(__FILE__) . '/ultrascan-airavata-bridge/AiravataWrapper.php');
+require_once(dirname(__FILE__) . '/jobsubmit_aira.php');
+require_once(dirname(__FILE__) . '/ultrascan-airavata-bridge/AiravataWrapper.php');
 use SCIGAP\AiravataWrapper;
 
 class submit_airavata extends airavata_jobsubmit
@@ -43,7 +41,7 @@ class submit_airavata extends airavata_jobsubmit
       $tnodes      = $this->nodes();
       $nodes       = $tnodes * $mgroupcount;
       $clus_user   = 'us3';
-      $clus_scrd   = '';
+      $clus_scrd   = 'NONE';
 
       if ( $cluster == 'jureca' )
       {
@@ -129,14 +127,14 @@ class submit_airavata extends airavata_jobsubmit
 
       $airavataWrapper = new AiravataWrapper();
 //var_dump( $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, $queue, $cores, $nodes,
-//          $mgroupcount, $maxWallTime, $clus_user, $inputTarFile, $outputDirName );
+//          $mgroupcount, $maxWallTime, $clus_user, $clus_scrd, $inputTarFile, $outputDirName );
 
       $expResult  = $airavataWrapper->launch_airavata_experiment( $uslimsVMHost, $limsUser,
                        $exp_name, $expReqId,
                        $clus_host, $queue, $cores, $nodes, $mgroupcount,
-//                       $maxWallTime, $clus_user,
                        $maxWallTime, $clus_user, $clus_scrd,
                        $inputTarFile, $outputDirName );
+//                       $maxWallTime, $clus_user,
 
       $expId      = 0;
 

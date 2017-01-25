@@ -5,7 +5,7 @@
  * Submits an analysis using the gfac http method
  *
  */
-require_once $class_dir . 'jobsubmit.php';
+require_once (dirname(__FILE__) . '/jobsubmit.php');
 
 class submit_gfac extends jobsubmit
 {

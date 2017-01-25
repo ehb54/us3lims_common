@@ -336,6 +336,7 @@ class airavata_jobsubmit
  
                case 'user':
                   $db[ 'user' ] = $parser->getAttribute( 'email' );
+                  $db[ 'user_id' ] = $parser->getAttribute( 'user_id' );
                   break;
  
                case 'submitter':

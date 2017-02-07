@@ -77,7 +77,7 @@ class submit_airavata extends airavata_jobsubmit
          }
 
          $userdn      = str_replace( '_USER_', $user, $userdn );
-         $clus_scrd   = '/work/$clus_group/$clus_user/airavata-workdirs';
+         $clus_scrd   = '/work/' . $clus_group . '/' . $clus_user;
       }
 
       if ( $cluster == 'alamo'  &&  $nodes > 16 )

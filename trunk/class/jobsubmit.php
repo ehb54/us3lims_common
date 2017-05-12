@@ -141,7 +141,7 @@ class jobsubmit
         "httpport"   => $subport,
         "workdir"    => "/ogce-rest/job/runjob/async",
         "sshport"    => 22,
-        "queue"      => "default",
+        "queue"      => "batch",
         "maxtime"    => 2160,
         "ppn"        => 24,
         "ppbj"       => 24,
@@ -155,9 +155,9 @@ class jobsubmit
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "local",
         "httpport"   => $subport,
-        "workdir"    => "/home/us3/work/",  // Need trailing slash
+        "workdir"    => "/home/us3/lims/work/local/",  // Need trailing slash
         "sshport"    => 22,
-        "queue"      => "default",
+        "queue"      => "batch",
         "maxtime"    => 2160,
         "ppn"        => 24,
         "ppbj"       => 24,

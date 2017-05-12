@@ -71,6 +71,10 @@ class submit_airavata extends airavata_jobsubmit
                $clus_group  = 'her21';
                break;
 
+            case 'uslims3_JSC':
+               $clus_user   = 'm.memon';
+               break;
+
             default :
                $clus_user   = 'swus1';
                break;
@@ -97,8 +101,12 @@ class submit_airavata extends airavata_jobsubmit
          $this->message[] = "Requested cores is zero (ns=$nodes, pp=$ppn, n0=$tnodes, gc=$mgroupcount)";
       }
 
-      $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
       $maxWallTime = $this->maxwall();
+      if ( preg_match( "/swus/", $clus_user ) )
+      {  // Development users on Jureca limited to 6 hours wall time
+         $maxWallTime = min( $maxWallTime, 360 );
+      }
+      $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
       $this->data[ 'cores'       ] = $cores;
       $this->data[ 'nodes'       ] = $nodes;
       $this->data[ 'ppn'         ] = $ppn;
@@ -134,7 +142,6 @@ class submit_airavata extends airavata_jobsubmit
                        $clus_host, $queue, $cores, $nodes, $mgroupcount,
                        $maxWallTime, $clus_user, $clus_scrd,
                        $inputTarFile, $outputDirName );
-//                       $maxWallTime, $clus_user,
 
       $expId      = 0;
 
@@ -146,7 +153,7 @@ class submit_airavata extends airavata_jobsubmit
          $this->message[] = "    ppn=$ppn  tnodes=$tnodes  nodes=$nodes  cores=$cores";
          $this->message[] = "    uslimsVMHost=$uslimsVMHost  limsUser=$limsUser";
          $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId";
-         $this->message[] = "    clus_host=$clus_host  queue=$queue  clus_user=$clus_user";
+         $this->message[] = "    clus_host=$clus_host  queue=$queue  clus_user=$clus_user  clus_scrd=$clus_scrd";
          $this->message[] = "    mgroupcount=$mgroupcount  maxWallTime=$maxWallTime";
          $this->message[] = "    inputTarFile=$inputTarFile";
          $this->message[] = "    outputDirName=$outputDirName";
@@ -178,8 +185,10 @@ echo "err-message=" . $expResult['message'];
       $host      = $this->data[ 'db' ][ 'host' ];
       $user      = $this->data[ 'db' ][ 'user' ];
       $status    = $this->data[ 'dataset' ][ 'status' ];
-      $epr       = $this->data[ 'eprfile' ];
-      $xml       = $this->data[ 'jobxmlfile' ];
+      $epr       = isset( $this->data[ 'eprfile' ] )
+                   ?  $this->data[ 'eprfile' ] : '';
+      $xml       = isset( $this->data[ 'jobxmlfile' ] )
+                   ?  $this->data[ 'jobxmlfile' ] : '';
 
       $link      = mysql_connect( $host, $dbusername, $dbpasswd );
 

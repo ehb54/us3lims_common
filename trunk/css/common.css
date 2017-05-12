@@ -70,7 +70,7 @@ ul ul ul {
 
 table.style1 {
   border                : 5px groove #2B4E72;
-  width                 : 90%;
+  width                 : 98%;
   margin                : 2em 1em;
 }
 
@@ -437,6 +437,10 @@ fieldset#clusters tr.subheader th
   font-size  : x-small;
 }
 
+#fixed {
+  table-layout: fixed;
+  word-wrap: break-word;
+}
 
 @media print {
 
@@ -451,7 +455,7 @@ fieldset#clusters tr.subheader th
 
   table.style1 {
     border:none;
-    width: 100%;
+    width: 110%;
   }
 
   table.style1 tbody th, table.style1 td {

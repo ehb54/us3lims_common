@@ -68,10 +68,13 @@ class airavata_jobsubmit
       $this->grid[ 'alamo-local' ] = array 
       (
         "name"       => "alamo.uthscsa.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "local",
-        "workdir"    => "/home/us3/work/",  // Need trailing slash
+        "httpport"   => $subport,
+        "workdir"    => "/home/us3/lims/work/local/",  // Need trailing slash
         "sshport"    => 22,
-        "queue"      => "",
+        "queue"      => "batch",
         "maxtime"    => 2160,
         "ppn"        => 24,
         "ppbj"       => 24,

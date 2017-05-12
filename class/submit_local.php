@@ -52,20 +52,22 @@ $this->message[] = "cluster=$cluster is_us3iab=$is_us3iab no_us3iab=$no_us3iab";
       $cmd    = "/bin/mkdir $workdir 2>&1";
       if ( $no_us3iab )
          $cmd    = "/usr/bin/ssh -p $port -x us3@$address " . $cmd;
+
       exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status";
 if($status != 0)
-$this->message[] = "++++ output=$output[0]";
+ $this->message[] = "  ++++ output=$output[0]";
 
       // Copy tar file
       if ( $no_us3iab )
          $cmd    = "/usr/bin/scp -P $port $tarfile us3@$address:$workdir 2>&1";
       else
          $cmd    = "/bin/cp $tarfile $workdir/ 2>&1";
+
       exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status";
 if($status != 0)
-$this->message[] = "++++ output=$output[0]";
+ $this->message[] = "++++ output=$output[0]";
 
       //  Create and copy pbs file
       $pbsfile  = $this->create_pbs();
@@ -73,10 +75,11 @@ $this->message[] = "++++ output=$output[0]";
          $cmd     = "/usr/bin/scp -P $port $pbsfile us3@$address:$workdir 2>&1";
       else
          $cmd     = "/bin/cp $pbsfile $workdir/ 2>&1";
+
       exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status";
 if($status != 0)
-$this->message[] = "++++ output=$output[0]";
+ $this->message[] = "++++ output=$output[0]";
       
 $this->message[] = "Files copied to $address:$workdir";
    }
@@ -203,7 +206,8 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "$plines"                                             .
       "\n"                                                  .
       "cd $workdir\n"                                       .
-      "$mpirun -np $procs $mpiana -walltime $wallmins -pmgc $mgroupcount $tarfile\n";
+      "$mpirun -np $procs $mpiana -walltime $wallmins"      .
+      " -mgroupcount $mgroupcount $tarfile\n";
 
       $this->data[ 'pbsfile' ] = $contents;
 
@@ -236,13 +240,15 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $cmd   = "/usr/bin/qsub $workdir/us3.pbs 2>&1";
       if ( $no_us3iab )
          $cmd   = "ssh -p $port -x us3@$address " . $cmd;
+
       $jobid = exec( $cmd, $output, $status );
 
       // Save the job ID
 //      if ( $status == 0 )
          $this->data[ 'eprfile' ] = rtrim( $jobid );
 //      else
-$this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" . $status;
+$this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" . $status
+ . " out0=" . $output[0];
    }
  
    function update_db()
@@ -323,5 +329,10 @@ $this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" 
 
 $this->message[] = "Database $dbname updated: requestID = $requestID";
    }
+
+   function close_transport( )
+   {  // Dummy function since new class functions have already closed
+   }
+
 }
 ?>

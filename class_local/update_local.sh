@@ -1,10 +1,17 @@
 #!/bin/sh
-#	update_local.sh
+#	update_local.sh  - update */common/class_local
  
-LOC_FILES="airavata-client-properties.ini experiment_cancel.php experiment_errors.php \
-experiment_status.php submit_airavata.php thrift_includes.php"
+LOC_FILES="airavata-client-properties.ini \
+           experiment_cancel.php \
+           experiment_errors.php \
+           experiment_status.php \
+           submit_airavata.php \
+           thrift_includes.php"
  
-COM_FILES="jobsubmit.php jobsubmit_aira.php submit_gfac.php submit_local.php"
+COM_FILES="jobsubmit.php \
+           jobsubmit_aira.php \
+           submit_gfac.php \
+           submit_local.php"
 
 # Do svn update of local-specific files
 svn up ${LOC_FILES}

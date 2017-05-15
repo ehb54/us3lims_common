@@ -584,13 +584,20 @@ class jobsubmit
       if ( $mxiters > 0 )  $time *= $mxiters;
 
       $time *= $dset_count;                   // times number of datasets
-      $time  = (int)( ( $time * 11 ) / 10 );  // Padding
+      $time  = (int)( ( $time * 11 ) / 10 );  // Padding (+10%)
  
       // Account for parallel group count in max walltime
       if ( $montecarlo > 1  ||  $dset_count > 1 )
-         $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
+      {
+         if ( isset( $this->data[ 'job' ][ 'mgroupcount' ] ) )
+            $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
+         else
+            $mgroupcount = 1;
+      }
       else
          $mgroupcount = 1;
+
+      $mgroupcount = max( $mgroupcount, 1 );
 
       // Adjust max wall time down based on parallel group count
       switch ( $mgroupcount )

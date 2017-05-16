@@ -101,12 +101,12 @@ class submit_airavata extends airavata_jobsubmit
          $this->message[] = "Requested cores is zero (ns=$nodes, pp=$ppn, n0=$tnodes, gc=$mgroupcount)";
       }
 
+      $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
       $maxWallTime = $this->maxwall();
       if ( preg_match( "/swus/", $clus_user ) )
       {  // Development users on Jureca limited to 6 hours wall time
          $maxWallTime = min( $maxWallTime, 360 );
       }
-      $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
       $this->data[ 'cores'       ] = $cores;
       $this->data[ 'nodes'       ] = $nodes;
       $this->data[ 'ppn'         ] = $ppn;

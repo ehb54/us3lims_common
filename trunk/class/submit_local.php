@@ -109,6 +109,8 @@ $this->message[] = "Files copied to $address:$workdir";
       $pbsfile = "us3.pbs";
       $pbspath = $pbsfile;
       $wall    = $this->maxwall() * 3.0;
+       if ( $is_us3iab )
+         $wall    = 2880.0;
       $nodes   = $this->nodes() * $mgroupcount;
 
       $hours   = (int)( $wall / 60 );
@@ -145,9 +147,9 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
         case 'alamo-local':
          $can_load = 1;
          $load1    = "intel/2015/64";
-         $load2    = "openmpi/intel/1.8.4";
-         $load3    = "qt4/4.8.6";
-         $load4    = "ultrascan3/3.3";
+         $load2    = "openmpi/intel/2.1.1";
+         $load3    = "qt5/5.6.2";
+         $load4    = "ultrascan3/3.5";
          break;
 
         case 'us3iab-node0':
@@ -162,6 +164,7 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
          $libpath  = "/usr/local/lib64:/export/home/us3/cluster/lib:/usr/lib64/openmpi-1.10/lib:/opt/qt/lib";
          $path     = "/export/home/us3/cluster/bin:/usr/lib64/openmpi-1.10/bin";
          $ppn      = max( $ppn, 8 );
+         $wall     = 2880;
          break;
 
         default:
@@ -196,8 +199,8 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
 
       $contents = 
       "#! /bin/bash\n"                                      .
-      "#\n"                                                 . 
-      "#PBS -N US3_Job_$requestID\n"                                   .
+      "#\n"                                                 .
+      "#PBS -N US3_Job_$requestID\n"                        .
       "#PBS -l nodes=$nodes:ppn=$ppn,walltime=$walltime\n"  .
       "#PBS -V\n"                                           .
       "#PBS -o $workdir/stdout\n"                           .
@@ -206,6 +209,10 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "$plines"                                             .
       "\n"                                                  .
       "cd $workdir\n"                                       .
+      "if [ -f \$PBS_O_HOME/lims/work/aux.pbs ]; then\n"         .
+      " .  \$PBS_O_HOME/lims/work/aux.pbs\n"                     .
+      "fi\n"                                                .
+      "\n"                                                  .
       "$mpirun -np $procs $mpiana -walltime $wallmins"      .
       " -mgroupcount $mgroupcount $tarfile\n";
 

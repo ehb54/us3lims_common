@@ -34,7 +34,8 @@ $this->message[] = "End of submit_local.php";
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
       $is_us3iab = preg_match( "/us3iab/", $cluster );
       $no_us3iab = 1 - $is_us3iab;
-$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab no_us3iab=$no_us3iab";
+      $is_jetstr = preg_match( "/jetstream/", $cluster );
+$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_jetstr=$is_jetstr";
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
@@ -48,33 +49,26 @@ $this->message[] = "cluster=$cluster is_us3iab=$is_us3iab no_us3iab=$no_us3iab";
                          $this->data['job']['requestID'] );
     
       // Create working directory
-      $output = array();
-      $cmd    = "/bin/mkdir $workdir 2>&1";
+      $output    = array();
+      $cmd       = "/bin/mkdir $workdir 2>&1";
       if ( $no_us3iab )
-         $cmd    = "/usr/bin/ssh -p $port -x us3@$address " . $cmd;
+         $cmd       = "/usr/bin/ssh -p $port -x us3@$address " . $cmd;
 
       exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status";
 if($status != 0)
  $this->message[] = "  ++++ output=$output[0]";
 
-      // Copy tar file
-      if ( $no_us3iab )
-         $cmd    = "/usr/bin/scp -P $port $tarfile us3@$address:$workdir 2>&1";
+      //  Create pbs/slurm file, then copy it and tar file to work directory
+      if ( $is_jetstr )
+         $pbsfile  = $this->create_slurm();
       else
-         $cmd    = "/bin/cp $tarfile $workdir/ 2>&1";
+         $pbsfile  = $this->create_pbs();
 
-      exec( $cmd, $output, $status );
-$this->message[] = "$cmd status=$status";
-if($status != 0)
- $this->message[] = "++++ output=$output[0]";
-
-      //  Create and copy pbs file
-      $pbsfile  = $this->create_pbs();
       if ( $no_us3iab )
-         $cmd     = "/usr/bin/scp -P $port $pbsfile us3@$address:$workdir 2>&1";
+         $cmd      = "/usr/bin/scp -P $port $tarfile $pbsfile us3@$address:$workdir 2>&1";
       else
-         $cmd     = "/bin/cp $pbsfile $workdir/ 2>&1";
+         $cmd      = "/bin/cp $tarfile $pbsfile $workdir/ 2>&1";
 
       exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status";
@@ -209,8 +203,8 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "$plines"                                             .
       "\n"                                                  .
       "cd $workdir\n"                                       .
-      "if [ -f \$PBS_O_HOME/lims/work/aux.pbs ]; then\n"         .
-      " .  \$PBS_O_HOME/lims/work/aux.pbs\n"                     .
+      "if [ -f \$PBS_O_HOME/work/aux.pbs ]; then\n"         .
+      " .  \$PBS_O_HOME/work/aux.pbs\n"                     .
       "fi\n"                                                .
       "\n"                                                  .
       "$mpirun -np $procs $mpiana -walltime $wallmins"      .
@@ -225,6 +219,127 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       return $pbsfile;
    }
 
+   // Create a slurm file
+   function create_slurm()
+   {
+      $quename   = "batch";
+      $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $requestID = $this->data[ 'job' ][ 'requestID' ];
+      $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
+      $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
+      $tarfile   = sprintf( "hpcinput-%s-%s-%05d.tar",
+                         $this->data['db']['host'],
+                         $this->data['db']['name'],
+                         $this->data['job']['requestID'] );
+      $mgroupcount = 1;
+      $nodes       = $this->nodes();
+      if ( isset( $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] ) )
+      {
+         $mgroupcount  = min( $this->max_mgroupcount(),
+            $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
+      }
+
+      $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
+      $slufile = "us3.slurm";
+      $slupath = $slufile;
+      $wall    = $this->maxwall() * 3.0;
+       if ( $is_us3iab )
+         $wall    = 2880.0;
+      $nodes   = $this->nodes() * $mgroupcount;
+
+      $hours   = (int)( $wall / 60 );
+      $mins    = (int)( $wall % 60 );
+      $ppn     = $this->grid[ $cluster ][ 'ppn' ]; 
+      $ppbj    = $this->grid[ $cluster ][ 'ppbj' ]; 
+
+      $walltime = sprintf( "%02.2d:%02.2d:00", $hours, $mins );  // 01:09:00
+      $wallmins = $hours * 60 + $mins;
+      $can_load = 0;
+      $plines   = "";
+      $mpirun   = "mpirun";
+      $mpiana   = "us_mpi_analysis";
+
+$this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
+
+      switch( $cluster )
+      {
+        case 'jetstream-local':
+         $can_load = 1;
+         $load1    = "mpi";
+         $load2    = "qt5";
+         $load3    = "ultrascan3";
+         break;
+
+        case 'us3iab-node0':
+        case 'us3iab-node1':
+        case 'us3iab-devel':
+         $can_load = 0;
+         if ( $nodes > 1 )
+         {
+            $ppn      = $nodes * $ppn;
+            $nodes    = 1;
+         }
+         $libpath  = "/usr/local/lib64:/export/home/us3/cluster/lib:/usr/lib64/openmpi-1.10/lib:/opt/qt/lib";
+         $path     = "/export/home/us3/cluster/bin:/usr/lib64/openmpi-1.10/bin";
+         $ppn      = max( $ppn, 8 );
+         $wall     = 2880;
+         break;
+
+        default:
+         $libpath  = "/share/apps/openmpi/lib:/share/apps/qt/lib";
+         $path     = "/share/apps/openmpi/bin";
+         $ppn      = 2;
+         break;
+      }
+$this->message[] = "can_load=$can_load  ppn=$ppn";
+
+      if ( $can_load )
+      {  // Can use module load to set paths and environ
+         $plines  = 
+            "\n"                    .
+            "module load $load1 \n" .
+            "module load $load2 \n" .
+            "module load $load3 \n" .
+            "\n";
+      }
+
+      else
+      {  // Can't use module load; must set paths
+         $plines  = 
+            "\n"                                                  .
+            "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
+            "export PATH=$path:\$PATH\n"                          .
+            "\n";
+      }
+
+      $procs   = $nodes * $ppn;
+
+      $contents = 
+      "#! /bin/bash\n"                      .
+      "#\n"                                 .
+      "#SBATCH -p $quename\n"               .
+      "#SBATCH -J US3_Job_$requestID\n"     .
+      "#SBATCH -N $nodes\n"                 .
+      "#SBATCH -n $ppn\n"                   .
+      "#SBATCH -t $walltime\n"              .
+      "#SBATCH -o $workdir/stdout\n"        .
+      "#SBATCH -e $workdir/stderr\n"        .
+      "$plines"                             .
+      "\n"                                  .
+      "cd $workdir\n"                       .
+      "\n"                                  .
+      "$mpirun $mpiana -walltime $wallmins" .
+      " -mgroupcount $mgroupcount $tarfile\n";
+
+      $this->data[ 'pbsfile' ] = $contents;
+
+      $h = fopen( $slupath, "w" );
+      fwrite( $h, $contents );
+      fclose( $h );
+
+      return $slufile;
+   }
+
    // Schedule the job
    function submit_job()
    {
@@ -233,6 +348,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
       $is_us3iab = preg_match( "/us3iab/", $cluster );
       $no_us3iab = 1 - $is_us3iab;
+      $is_jetstr = preg_match( "/jetstream/", $cluster );
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
@@ -244,7 +360,10 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
                          $this->data['job']['requestID'] );
 
       // Submit job to the queue
-      $cmd   = "/usr/bin/qsub $workdir/us3.pbs 2>&1";
+      if ( $is_jetstr )
+         $cmd   = "sbatch $workdir/us3.slurm 2>&1";
+      else
+         $cmd   = "/usr/bin/qsub $workdir/us3.pbs 2>&1";
       if ( $no_us3iab )
          $cmd   = "ssh -p $port -x us3@$address " . $cmd;
 
@@ -252,6 +371,13 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
 
       // Save the job ID
 //      if ( $status == 0 )
+      if ( $is_jetstr )
+      {
+         $parts = preg_split( "/\s+/", $output[ 0 ] );
+         $this->data[ 'eprfile' ] = $parts[ 3 ];
+//$this->data[ 'eprfile' ] = $jobid;
+      }
+      else
          $this->data[ 'eprfile' ] = rtrim( $jobid );
 //      else
 $this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" . $status

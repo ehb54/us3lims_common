@@ -12,7 +12,7 @@ class jobsubmit
    protected $message = array();   // Errors and other messages
    protected $grid    = array();   // Information about the clusters
    protected $xmlfile = "";        // Base name of the experiment xml file
- 
+
    function __construct()
    {
       global $globaldbname;
@@ -20,7 +20,7 @@ class jobsubmit
       $subhost = "http://gridfarm005.ucs.indiana.edu";
       $subport = 8080;
 
-      $this->grid[ 'us3iab-node0' ] = array 
+      $this->grid[ 'us3iab-node0' ] = array
       (
         "name"       => "us3iab-node0.aucsolutions.com",
         "submithost" => "localhost",
@@ -36,7 +36,7 @@ class jobsubmit
         "maxproc"    => 16
       );
 
-      $this->grid[ 'us3iab-node1' ] = array 
+      $this->grid[ 'us3iab-node1' ] = array
       (
         "name"       => "us3iab-node1.aucsolutions.com",
         "submithost" => "localhost",
@@ -52,7 +52,7 @@ class jobsubmit
         "maxproc"    => 16
       );
 
-      $this->grid[ 'us3iab-devel' ] = array 
+      $this->grid[ 'us3iab-devel' ] = array
       (
         "name"       => "us3iab-devel.attlocal.net",
         "submithost" => "localhost",
@@ -67,8 +67,8 @@ class jobsubmit
         "ppbj"       => 8,
         "maxproc"    => 16
       );
-    
-      $this->grid[ 'bcf' ] = array 
+
+      $this->grid[ 'bcf' ] = array
       (
         "name"       => "bcf.uthscsa.edu",
         "submithost" => $subhost,
@@ -83,8 +83,8 @@ class jobsubmit
         "ppbj"       => 8,
         "maxproc"    => 12
       );
-    
-      $this->grid[ 'bcf-local' ] = array 
+
+      $this->grid[ 'bcf-local' ] = array
       (
         "name"       => "bcf.uthscsa.edu",
         "submithost" => $subhost,
@@ -100,7 +100,7 @@ class jobsubmit
         "maxproc"    => 12
       );
 
-      $this->grid[ 'jacinto' ] = array 
+      $this->grid[ 'jacinto' ] = array
       (
         "name"       => "jacinto.uthscsa.edu",
         "submithost" => $subhost,
@@ -115,8 +115,8 @@ class jobsubmit
         "ppbj"       => 8,
         "maxproc"    => 32
       );
-    
-      $this->grid[ 'jacinto-local' ] = array 
+
+      $this->grid[ 'jacinto-local' ] = array
       (
         "name"       => "jacinto.uthscsa.edu",
         "submithost" => $subhost,
@@ -132,7 +132,7 @@ class jobsubmit
         "maxproc"    => 32
       );
 
-      $this->grid[ 'alamo' ] = array 
+      $this->grid[ 'alamo' ] = array
       (
         "name"       => "alamo.uthscsa.edu",
         "submithost" => $subhost,
@@ -147,8 +147,8 @@ class jobsubmit
         "ppbj"       => 24,
         "maxproc"    => 48
       );
-    
-      $this->grid[ 'alamo-local' ] = array 
+
+      $this->grid[ 'alamo-local' ] = array
       (
         "name"       => "alamo.uthscsa.edu",
         "submithost" => $subhost,
@@ -180,7 +180,7 @@ class jobsubmit
         "maxproc"    => 72
       );
 
-      $this->grid[ 'gordon' ] = array 
+      $this->grid[ 'gordon' ] = array
       (
         "name"       => "gordon.sdsc.xsede.org",
         "submithost" => $subhost,
@@ -196,7 +196,7 @@ class jobsubmit
         "maxproc"    => 64
       );
 
-      $this->grid[ 'comet' ] = array 
+      $this->grid[ 'comet' ] = array
       (
         "name"       => "comet.sdsc.xsede.org",
         "submithost" => $subhost,
@@ -212,7 +212,7 @@ class jobsubmit
         "maxproc"    => 72
       );
 
-      $this->grid[ 'stampede' ] = array 
+      $this->grid[ 'stampede' ] = array
       (
         "name"       => "stampede.tacc.xsede.org",
         "submithost" => $subhost,
@@ -227,8 +227,56 @@ class jobsubmit
         "ppbj"       => 32,
         "maxproc"    => 64
       );
-    
-      $this->grid[ 'jureca' ] = array 
+
+      $this->grid[ 'stampede2' ] = array
+      (
+        "name"       => "stampede2.tacc.xsede.org",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/ogce-rest/job/runjob/async",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 1440,
+        "ppn"        => 32,
+        "ppbj"       => 32,
+        "maxproc"    => 64
+      );
+
+      $this->grid[ 'jetstream' ] = array
+      (
+        "name"       => "js-157-184.jetstream-cloud.org",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/N/us3_cluster/work",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 1440,
+        "ppn"        => 22,
+        "ppbj"       => 22,
+        "maxproc"    => 44
+      );
+
+      $this->grid[ 'jetstream-local' ] = array
+      (
+        "name"       => "js-157-184.jetstream-cloud.org",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/N/us3_cluster/work/local/",
+        "sshport"    => 22,
+        "queue"      => "normal",
+        "maxtime"    => 1440,
+        "ppn"        => 22,
+        "ppbj"       => 22,
+        "maxproc"    => 44
+      );
+
+      $this->grid[ 'jureca' ] = array
       (
         "name"       => "jureca.fz-juelich.de",
         "submithost" => $subhost,
@@ -243,9 +291,9 @@ class jobsubmit
         "ppbj"       => 24,
         "maxproc"    => 72
       );
-    
+
    }
-   
+
    // Deconstructor
    function __destruct()
    {
@@ -280,14 +328,14 @@ class jobsubmit
    function parse_input( $xmlfile )
    {
       $this->xmlfile = $xmlfile;          // Save for other methods
-      $contents = implode( "", file( $xmlfile ) ); 
- 
+      $contents = implode( "", file( $xmlfile ) );
+
       $parser = new XMLReader();
       $parser->xml( $contents );
- 
+
       while( $parser->read() )
       {
-         if ( $parser->nodeType == XMLReader::ELEMENT ) 
+         if ( $parser->nodeType == XMLReader::ELEMENT )
          {
             $tag = $parser->name;
 
@@ -296,11 +344,11 @@ class jobsubmit
                case 'US_JobSubmit':
                   $this->parse_submit( $parser );
                   break;
- 
+
                case 'job':
                   $this->parse_job( $parser );
                   break;
- 
+
                case 'dataset':
                   $this->parse_dataset( $parser );
                   break;
@@ -308,27 +356,27 @@ class jobsubmit
          }
       }
    }
- 
+
    function parse_submit( &$parser )
    {
       $this->data[ 'method'  ] = $parser->getAttribute( 'method'  );
       $this->data[ 'version' ] = $parser->getAttribute( 'version' );
    }
- 
+
    function parse_job( &$parser )
    {
       $job = array();
- 
+
       while ( $parser->read() )
       {
-         if ( $parser->nodeType == XMLReader::END_ELEMENT && 
-              $parser->name     == 'job' ) 
+         if ( $parser->nodeType == XMLReader::END_ELEMENT &&
+              $parser->name     == 'job' )
               break;
- 
-         if ( $parser->nodeType == XMLReader::ELEMENT ) 
+
+         if ( $parser->nodeType == XMLReader::ELEMENT )
          {
             $tag = $parser->name;
- 
+
             switch ( $tag )
             {
                case 'cluster':
@@ -336,135 +384,135 @@ class jobsubmit
                   $job[ 'cluster_shortname' ] = $parser->getAttribute( 'shortname' );
                   $job[ 'cluster_queue'     ] = $parser->getAttribute( 'queue' );
                   break;
- 
+
                case 'udp':
                   $job[ 'udp_server' ] = $parser->getAttribute( 'server' );
                   $job[ 'udp_port'   ] = $parser->getAttribute( 'port' );
                   break;
- 
+
                case 'directory':
                   $job[ 'directory' ] = $parser->getAttribute( 'name' );
                   break;
- 
+
                case 'datasetCount':
                   $job[ 'datasetCount' ] = $parser->getAttribute( 'value' );
                   break;
- 
+
                case 'request':
                   $job[ 'requestID' ] = $parser->getAttribute( 'id' );
                   break;
- 
+
                case 'database':
                   $this->parse_db( $parser );
                   break;
- 
+
                case 'jobParameters':
                   $this->parse_jobParameters( $parser, $job );
                   break;
             }
          }
       }
- 
+
       $this->data[ 'job' ] = $job;
    }
    function parse_db( &$parser )
    {
       $db = array();
- 
+
       while ( $parser->read() )
       {
-         if ( $parser->nodeType == XMLReader::END_ELEMENT && 
-              $parser->name     == 'database' ) 
+         if ( $parser->nodeType == XMLReader::END_ELEMENT &&
+              $parser->name     == 'database' )
               break;
- 
-         if ( $parser->nodeType == XMLReader::ELEMENT ) 
+
+         if ( $parser->nodeType == XMLReader::ELEMENT )
          {
             $tag = $parser->name;
-            
+
             switch ( $tag )
             {
                case 'name':
                   $db[ 'name' ] = $parser->getAttribute( 'value' );
                   break;
- 
+
                case 'host':
                   $db[ 'host' ] = $parser->getAttribute( 'value' );
                   break;
- 
+
                case 'user':
                   $db[ 'user' ] = $parser->getAttribute( 'email' );
                   break;
- 
+
                case 'submitter':
                   $db[ 'submitter' ] = $parser->getAttribute( 'email' );
                   break;
             }
          }
       }
- 
+
       $this->data[ 'db' ] = $db;
    }
- 
+
    function parse_jobParameters( &$parser, &$job )
    {
       $parameters = array();
- 
+
       while ( $parser->read() )
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'jobParameters' )
               break;
- 
+
          $tag = $parser->name;
          if ( $tag == "#text" ) continue;
- 
+
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
       }
- 
+
       $job[ 'jobParameters' ] = $parameters;
    }
- 
+
    function parse_dataset( &$parser )
    {
       $dataset = array();
- 
+
       if ( ! isset( $this->data[ 'dataset' ] ) ) $this->data[ 'dataset' ] = array();
- 
+
       while ( $parser->read() )
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'dataset' )
               break;
- 
+
          $tag = $parser->name;
- 
+
          switch ( $tag )
          {
             case 'files':
               $this->parse_files( $parser, $dataset );
               break;
- 
+
             case 'parameters':
               $this->parse_parameters( $parser, $dataset );
               break;
          }
       }
- 
-      array_push( $this->data[ 'dataset' ], $dataset ); 
+
+      array_push( $this->data[ 'dataset' ], $dataset );
    }
 
    function parse_files( &$parser, &$dataset )
    {
       $files = array();
- 
+
       while ( $parser->read() )
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'files' )
               break;
- 
+
          $tag = $parser->name;
- 
+
          switch ( $tag )
          {
             case 'experiment':
@@ -478,23 +526,23 @@ class jobsubmit
       }
       $dataset[ 'files' ] = $files;
    }
- 
+
    function parse_parameters( &$parser, &$dataset )
    {
       $parameters = array();
- 
+
       while ( $parser->read() )
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'parameters' )
               break;
- 
+
          $tag = $parser->name;
          if ( $tag == "#text" ) continue;
- 
+
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
       }
- 
+
       $dataset[ 'parameters' ] = $parameters;
    }
 
@@ -506,7 +554,7 @@ class jobsubmit
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
       $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
       $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
-                    ? $parameters[ 'tinoise_option' ] > 0 
+                    ? $parameters[ 'tinoise_option' ] > 0
                     : false;
       $ri_noise   = isset( $parameters[ 'rinoise_option' ] )
                     ? $parameters[ 'rinoise_option' ] > 0
@@ -515,7 +563,7 @@ class jobsubmit
                     ? $parameters[ 'max_iterations' ]
                     : 0;
 
- 
+
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {
          // Assume 1 sec a basic unit
@@ -527,7 +575,7 @@ class jobsubmit
          // minimization
 
          $time        = ( 125 + $population ) * $generations;
- 
+
          $time *= 1.2;  // Pad things a bit
          $time  = (int)( ($time + 59) / 60 ); // Round up to minutes
       }
@@ -572,9 +620,9 @@ class jobsubmit
             else if ( $mxiters > 0 )  $time *= 2;
          }
       }
- 
+
       $montecarlo = 1;
- 
+
       if ( isset( $parameters[ 'mc_iterations' ] ) )
       {
          $montecarlo = $parameters[ 'mc_iterations' ];
@@ -585,7 +633,7 @@ class jobsubmit
 
       $time *= $dset_count;                   // times number of datasets
       $time  = (int)( ( $time * 11 ) / 10 );  // Padding (+10%)
- 
+
       // Account for parallel group count in max walltime
       if ( $montecarlo > 1  ||  $dset_count > 1 )
       {
@@ -658,10 +706,10 @@ class jobsubmit
       {  // Maximum time is defined for each cluster
          $time        = min( $time, $max_time );
       }
- 
+
       return (int)$time;
    }
- 
+
    function nodes()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
@@ -670,7 +718,7 @@ class jobsubmit
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
       $ppbj       = $this->grid[ $cluster ][ 'ppbj'    ];
- 
+
       if ( $is_us3iab )
       {  // It is "us3iab"
          $mgroup     = 1;
@@ -706,7 +754,7 @@ class jobsubmit
          $this->grid[ $cluster ][ 'maxproc' ] = $max_procs;
          $this->grid[ $cluster ][ 'ppn'     ] = $ppn;
       }  // End: us3iab
- 
+
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {  // GA: procs is demes+1 rounded to procs-per-node
          $demes = $parameters[ 'demes' ];
@@ -755,7 +803,7 @@ class jobsubmit
       {   // Us3iab PMGs limited by max procs available
          $max_groups = $max_procs / 16;
       }
- 
+
       else if ( preg_match( "/alamo/", $cluster ) )
       {  // Alamo can have no more than 16 PMGs
          $max_groups = 16;

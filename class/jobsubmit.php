@@ -244,9 +244,10 @@ class jobsubmit
         "maxproc"    => 64
       );
 
+//        "name"       => "js-157-184.jetstream-cloud.org",
       $this->grid[ 'jetstream' ] = array
       (
-        "name"       => "js-157-184.jetstream-cloud.org",
+        "name"       => "static-cluster.jetstream-cloud.org",
         "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
@@ -255,14 +256,14 @@ class jobsubmit
         "sshport"    => 22,
         "queue"      => "normal",
         "maxtime"    => 1440,
-        "ppn"        => 22,
-        "ppbj"       => 22,
-        "maxproc"    => 44
+        "ppn"        => 24,
+        "ppbj"       => 24,
+        "maxproc"    => 48
       );
 
       $this->grid[ 'jetstream-local' ] = array
       (
-        "name"       => "js-157-184.jetstream-cloud.org",
+        "name"       => "js-169-137.jetstream-cloud.org",
         "submithost" => $subhost,
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
@@ -271,9 +272,9 @@ class jobsubmit
         "sshport"    => 22,
         "queue"      => "normal",
         "maxtime"    => 1440,
-        "ppn"        => 22,
-        "ppbj"       => 22,
-        "maxproc"    => 44
+        "ppn"        => 24,
+        "ppbj"       => 24,
+        "maxproc"    => 48
       );
 
       $this->grid[ 'jureca' ] = array
@@ -611,6 +612,14 @@ class jobsubmit
          }
 
          if ( $ti_noise || $ri_noise ) $time *= 2;
+
+         if (  isset( $parameters[ 's_grid_points' ] ) )
+         {
+            $pts_s  = $parameters[ 's_grid_points' ];
+            $pts_k  = $parameters[ 'ff0_grid_points' ];
+            if ( $pts_s > 1000  ||  $pts_k > 100 )
+               $time      *= 4;
+         }
 
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
          {

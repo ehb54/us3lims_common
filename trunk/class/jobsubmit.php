@@ -613,12 +613,18 @@ class jobsubmit
 
          if ( $ti_noise || $ri_noise ) $time *= 2;
 
-         if (  isset( $parameters[ 's_grid_points' ] ) )
+         if (  isset( $parameters[ 's_grid_points' ] )  &&
+               isset( $parameters[ 'ff0_grid_points' ] ) )
          {
-            $pts_s  = $parameters[ 's_grid_points' ];
-            $pts_k  = $parameters[ 'ff0_grid_points' ];
-            if ( $pts_s > 1000  ||  $pts_k > 100 )
+            $gpts_s     = $parameters[ 's_grid_points' ];
+            $gpts_k     = $parameters[ 'ff0_grid_points' ];
+            $gpts_t     = $gpts_s * $gpts_k;
+            if ( $gpts_t > 200000 )
+               $time      *= 8;
+            else if ( $gpts_t > 100000 )
                $time      *= 4;
+            else if ( $gpts_t > 50000 )
+               $time      *= 2;
          }
 
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )

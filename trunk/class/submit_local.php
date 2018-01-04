@@ -142,8 +142,8 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
          $can_load = 1;
          $load1    = "intel/2015/64";
          $load2    = "openmpi/intel/2.1.1";
-         $load3    = "qt5/5.6.2";
-         $load4    = "ultrascan3/3.5";
+         $load3    = "qt5/5.7.1";
+         $load4    = "ultrascan3/4.0";
          break;
 
         case 'us3iab-node0':
@@ -360,6 +360,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
                          $this->data['job']['requestID'] );
 
       // Submit job to the queue
+      $output    = array();
       if ( $is_jetstr )
          $cmd   = "sbatch $workdir/us3.slurm 2>&1";
       else

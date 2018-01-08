@@ -497,6 +497,7 @@ class airavata_jobsubmit
 
    function maxwall()
    {
+$spfact=7;
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
@@ -511,6 +512,7 @@ class airavata_jobsubmit
       $mxiters    = isset( $parameters[ 'max_iterations' ] )
                     ? $parameters[ 'max_iterations' ]
                     : 0;
+      $dsparams   = $this->data[ 'dataset' ][ 0 ][ 'parameters' ];
 
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )  // GA or DMGA
       {
@@ -571,6 +573,16 @@ class airavata_jobsubmit
             else if ( $gpts_t > 50000 )
                $time      *= 2;
          }
+
+         if ( isset( $dsparams[ 'simpoints' ] ) )
+         {
+            $simpts     = $dsparams[ 'simpoints' ];
+            if ( $simpts < 1 ) $simpts = 1;
+            $spfact     = (int)( ( $simpts + 999 ) / 1000 );
+            $time      *= $spfact;
+         }
+//else
+// $spfact=8;
 
          if ( $ti_noise || $ri_noise ) $time *= 2;
 
@@ -667,6 +679,9 @@ class airavata_jobsubmit
       {
          $time        = min( $time, $max_time ); // Maximum time is defined for each cluster
       }
+//$spfact=(int)$spfact;
+//if($time < 480) $time=$spfact * 100;
+//$time=$spfact * 100;
 
       return (int)$time;
    }

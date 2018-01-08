@@ -563,7 +563,7 @@ class jobsubmit
       $mxiters    = isset( $parameters[ 'max_iterations' ] )
                     ? $parameters[ 'max_iterations' ]
                     : 0;
-
+      $dsparams   = $this->data[ 'dataset' ][ 0 ][ 'parameters' ];
 
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {
@@ -625,6 +625,14 @@ class jobsubmit
                $time      *= 4;
             else if ( $gpts_t > 50000 )
                $time      *= 2;
+         }
+
+         if ( isset( $dsparams[ 'simpoints' ] ) )
+         {
+            $simpts     = $dsparams[ 'simpoints' ];
+            if ( $simpts < 1 ) $simpts = 1;
+            $spfact     = (int)( ( $simpts + 999 ) / 1000 );
+            $time      *= $spfact;
          }
 
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
@@ -721,6 +729,7 @@ class jobsubmit
       {  // Maximum time is defined for each cluster
          $time        = min( $time, $max_time );
       }
+//if($time < 480) $time=480;
 
       return (int)$time;
    }

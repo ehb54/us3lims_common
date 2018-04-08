@@ -121,7 +121,7 @@ class airavata_jobsubmit
         "sshport"    => 22,
         "queue"      => "normal",
         "maxtime"    => 1440,
-        "ppn"        => 12,
+        "ppn"        => 24,
         "ppbj"       => 24,
         "maxproc"    => 72
       );
@@ -327,6 +327,10 @@ class airavata_jobsubmit
 
             switch ( $tag )
             {
+               case 'gateway':
+                  $job[ 'gwhostid' ]   = $parser->getAttribute( 'id' );
+                  break;
+
                case 'cluster':
                   $job[ 'cluster_name'      ] = $parser->getAttribute( 'name' );
                   $job[ 'cluster_shortname' ] = $parser->getAttribute( 'shortname' );
@@ -650,7 +654,7 @@ $spfact=7;
             break;
 
          default :
-            $time = (int)( ( $time * 10 ) / ( ( $mgroupcount -1 ) * 10 ) );
+            $time = (int)( ( $time * 10 ) / ( ( $mgroupcount - 1 ) * 10 ) );
             break;
       }
 

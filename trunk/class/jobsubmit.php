@@ -175,7 +175,7 @@ class jobsubmit
         "sshport"    => 22,
         "queue"      => "normal",
         "maxtime"    => 1440,
-        "ppn"        => 12,
+        "ppn"        => 24,
         "ppbj"       => 24,
         "maxproc"    => 72
       );
@@ -380,6 +380,10 @@ class jobsubmit
 
             switch ( $tag )
             {
+               case 'gateway':
+                  $job[ 'gwhostid' ]   = $parser->getAttribute( 'id' );
+                  break;
+
                case 'cluster':
                   $job[ 'cluster_name'      ] = $parser->getAttribute( 'name' );
                   $job[ 'cluster_shortname' ] = $parser->getAttribute( 'shortname' );
@@ -701,7 +705,7 @@ class jobsubmit
             break;
 
          default :
-            $time = (int)( ( $time * 10 ) / ( ( $mgroupcount -1 ) * 10 ) );
+            $time = (int)( ( $time * 10 ) / ( ( $mgroupcount - 1 ) * 10 ) );
             break;
       }
 

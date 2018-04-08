@@ -132,6 +132,10 @@ class submit_airavata extends airavata_jobsubmit
                              $this->data[ 'job' ][ 'requestID' ] );
 
       $uslimsVMHost = gethostname();
+      if ( preg_match( "/scyld/", $uslimsVMHost ) )
+      {
+         $uslimsVMHost = "alamo.uthscsa.edu";
+      }
 
       $airavataWrapper = new AiravataWrapper();
 //var_dump( $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, $queue, $cores, $nodes,
@@ -190,17 +194,11 @@ echo "err-message=" . $expResult['message'];
       $xml       = isset( $this->data[ 'jobxmlfile' ] )
                    ?  $this->data[ 'jobxmlfile' ] : '';
 
-      $link      = mysql_connect( $host, $dbusername, $dbpasswd );
+      $link      = mysqli_connect( $host, $dbusername, $dbpasswd, $dbname );
 
       if ( !$link )
       {
-         $this->message[] = "Cannot open database on $host\n";
-         return;
-      }
-
-      if ( !mysql_select_db( $dbname, $link ) )
-      {
-         $this->message[] = "Cannot change to database $dbname\n";
+         $this->message[] = "Cannot open database on $host to $dbname\n";
          return;
       }
 
@@ -213,31 +211,25 @@ echo "err-message=" . $expResult['message'];
       $query  = "INSERT INTO HPCAnalysisResult SET " .
                 "HPCAnalysisRequestID='$requestID', " .
                 "queueStatus='$status', " .
-                "jobfile='" . mysql_real_escape_string($xml) . "', " .
+                "jobfile='" . mysqli_real_escape_string($link,$xml) . "', " .
                 "gfacID='$gfacID'";
 
-      $result = mysql_query( $query, $link );
+      $result = mysqli_query( $link, $query );
 
       if ( !$result )
       {
-         $this->message[] = "Invalid query:\n$query\n" . mysql_error($link) . "\n";
+         $this->message[] = "Invalid query:\n$query\n" . mysqli_error($link) . "\n";
          return;
       }
 
-      mysql_close( $link );
+      mysqli_close( $link );
 
       // Update global db
-      $gfac_link = mysql_connect( $host, $globaldbuser, $globaldbpasswd );
+      $gfac_link = mysqli_connect( $host, $globaldbuser, $globaldbpasswd, $globaldbname );
 
       if ( !$gfac_link )
       {
-         $this->message[] = "Cannot open global database on $host\n";
-         return;
-      }
-
-      if ( !mysql_select_db( $globaldbname, $gfac_link ) )
-      {
-         $this->message[] = "Cannot change to global database $globaldbname\n";
+         $this->message[] = "Cannot open global database on $host to $globaldbname\n";
          return;
       }
 
@@ -248,15 +240,15 @@ echo "err-message=" . $expResult['message'];
                  "cluster='$cluster', " .
                  "status='SUBMITTED', " .
                  "us3_db='$dbname'";
-      $result  = mysql_query( $query, $gfac_link );
+      $result  = mysqli_query( $gfac_link, $query );
 
       if ( !$result )
       {
-         $this->message[] = "Invalid query:\n$query\n" . mysql_error($gfac_link) . "\n";
+         $this->message[] = "Invalid query:\n$query\n" . mysqli_error($gfac_link) . "\n";
          return;
       }
 
-      mysql_close( $gfac_link );
+      mysqli_close( $gfac_link );
       $this->message[] = "Global database $globaldbname updated: gfacID = $gfacID";
    }
 

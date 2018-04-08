@@ -32,10 +32,14 @@ $this->message[] = "End of submit_local.php";
    function copy_files()
    {
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $is_us3iab = preg_match( "/us3iab/", $cluster );
+      $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
+      $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
+      $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
+                     preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
       $is_jetstr = preg_match( "/jetstream/", $cluster );
-$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_jetstr=$is_jetstr";
+//$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_jetstr=$is_jetstr";
+$this->message[] = "cluster=$cluster $clusname gwhostid=$gwhosid is_us3iab=$is_us3iab is_jetstr=$is_jetstr";
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
@@ -81,8 +85,14 @@ $this->message[] = "Files copied to $address:$workdir";
    // Create a pbs file
    function create_pbs()
    {
+      $output    = array();
+      exec( "ls -d ~us3/lims/work", $output, $status );
+      $pbswork   = $output[ 0 ];
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $is_us3iab = preg_match( "/us3iab/", $cluster );
+      $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
+      $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
+      $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
+                     preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
@@ -192,8 +202,10 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $procs   = $nodes * $ppn;
 
       $contents = 
-      "#! /bin/bash\n"                                      .
+      "#!/bin/bash\n"                                       .
       "#\n"                                                 .
+      "#PBS -S /bin/bash\n"                                 .
+      "#PBS -q batch\n"                                     .
       "#PBS -N US3_Job_$requestID\n"                        .
       "#PBS -l nodes=$nodes:ppn=$ppn,walltime=$walltime\n"  .
       "#PBS -V\n"                                           .
@@ -203,8 +215,8 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "$plines"                                             .
       "\n"                                                  .
       "cd $workdir\n"                                       .
-      "if [ -f \$PBS_O_HOME/work/aux.pbs ]; then\n"         .
-      " .  \$PBS_O_HOME/work/aux.pbs\n"                     .
+      "if [ -f $pbswork/aux.pbs ]; then\n"         .
+      " .  $pbswork/aux.pbs\n"                     .
       "fi\n"                                                .
       "\n"                                                  .
       "$mpirun -np $procs $mpiana -walltime $wallmins"      .
@@ -346,7 +358,10 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       date_default_timezone_set( "America/Chicago" );
  
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $is_us3iab = preg_match( "/us3iab/", $cluster );
+      $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
+      $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
+      $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
+                     preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
       $is_jetstr = preg_match( "/jetstream/", $cluster );
       $requestID = $this->data[ 'job' ][ 'requestID' ];
@@ -398,51 +413,39 @@ $this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" 
       global $dbname;
 
       $cluster   = $this->data['job']['cluster_shortname'];
-      $pbs       = mysql_real_escape_string( $this->data[ 'pbsfile' ] );
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $eprfile   = $this->data['eprfile'];
 
-      $link = mysql_connect( $dbhost, $dbusername, $dbpasswd );
+      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
  
       if ( ! $link )
       {
-         $this->message[] = "Cannot open database on $dbhost\n";
+         $this->message[] = "Cannot open $dbhost : $dbname\n";
          return;
       }
  
-      if ( ! mysql_select_db( $dbname, $link ) ) 
-      {
-         $this->message[] = "Cannot change to database $dbname\n";
-         return;
-      }
- 
+      $pbs       = mysqli_real_escape_string( $link, $this->data[ 'pbsfile' ] );
       $query = "INSERT INTO HPCAnalysisResult SET "  .
                "HPCAnalysisRequestID='$requestID', " .
                "jobfile='$pbs', "                    .
                "gfacID='$eprfile' ";
       
-      $result = mysql_query( $query, $link );
+      $result = mysqli_query( $link, $query );
  
       if ( ! $result )
       {
-         $this->message[] = "Invalid query:\n$query\n" . mysql_error( $link ) . "\n";
+         $this->message[] = "Invalid query:\n$query\n" . mysqli_error( $link ) . "\n";
          return;
       }
  
-      mysql_close( $link );
+      mysqli_close( $link );
 
       // Insert initial data into global DB
-      $gfac_link = mysql_connect( $globaldbhost, $globaldbuser, $globaldbpasswd );
+      $gfac_link = mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
  
       if ( ! $gfac_link )
       {
-         $this->message[] = "Cannot open database on $globaldbhost\n";
-         return;
-      }
- 
-      if ( ! mysql_select_db( $globaldbname, $gfac_link ) ) 
-      {
-         $this->message[] = "Cannot change to database $globaldbname\n";
+         $this->message[] = "Cannot open database on $globaldbhost : $globaldbname\n";
          return;
       }
 
@@ -451,15 +454,15 @@ $this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" 
                "cluster='$cluster', "      .
                "us3_db='$dbname'";
 
-      $result = mysql_query( $query, $gfac_link );
+      $result = mysqli_query( $gfac_link, $query );
  
       if ( ! $result )
       {
-         $this->message[] = "Invalid query:\n$query\n" . mysql_error( $gfac_link ) . "\n";
+         $this->message[] = "Invalid query:\n$query\n" . mysqli_error( $gfac_link ) . "\n";
          return;
       }
  
-      mysql_close( $gfac_link );
+      mysqli_close( $gfac_link );
 
 $this->message[] = "Database $dbname updated: requestID = $requestID";
    }

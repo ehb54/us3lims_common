@@ -20,13 +20,13 @@ include 'header.php';
    <table cellpadding='10' border='1'>
    <tr valign='top'>
       <td><b>Project Leader:</b></td>
-      <td><a href='mailto:demeler@biochem.uthscsa.edu'>Borries
+      <td><a href='mailto:borries.demeler@umontana.edu'>Borries
       	Demeler</a>, PhD<br/>
-	      Associate Professor<br/>
-         <a href='mailto:demeler@biochem.uthscsa.edu'>demeler@biochem.uthscsa.edu</a><br/>
+	      Professor<br/>
+         <a href='mailto:borries.demeler@umontana.edu'>borries.demeler@umontana.edu</a><br/>
          Website: <a href='http://www.demeler.uthscsa.edu'>http://www.demeler.uthscsa.edu</a><br/>
          Telephone: 210-767-3332<br/>
-         Fax: 210-567-1136<br/>
+         Fax: 403-329-2057<br/>
       </td>
    </tr>
    <tr valign='top'>
@@ -38,12 +38,11 @@ include 'header.php';
    <tr valign='top'>
       <td><b>Mailing Address:</b></td>
       <td>
-         7703 Floyd Curl Drive <br/> 
-	      <a href='http://www.biochem.uthscsa.edu'>Department of Biochemistry<br/>
+         4401 University Drive <br/> 
+	      <a href='http://www.uleth.ca'>Department of Chemistry and Biochemistry<br/>
          Mailcode 7760</a><br/>
-	      <a href='http://www.uthscsa.edu'>The University of Texas Health 
-         Science Center at San Antonio</a><br/>
-	      San Antonio, TX 78229-3901<br/>
+	      <a href='http://www.uleth.ca'>The University of Lethbridge,  Alberta</a><br/>
+	      Lethbridge, Alberta  T1K3M4<br/>
          USA
       </td>
    </tr>

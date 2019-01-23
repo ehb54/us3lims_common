@@ -235,13 +235,13 @@ class jobsubmit
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
         "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
+        "workdir"    => "/scratch/01623/us3/airavata-workingdirs",
         "sshport"    => 22,
-        "queue"      => "normal",
+        "queue"      => "skx-normal",
         "maxtime"    => 1440,
-        "ppn"        => 32,
-        "ppbj"       => 32,
-        "maxproc"    => 64
+        "ppn"        => 24,
+        "ppbj"       => 24,
+        "maxproc"    => 72
       );
 
 //        "name"       => "js-157-184.jetstream-cloud.org",
@@ -714,7 +714,8 @@ class jobsubmit
       if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
       {  // For alamo, $max_time is hardwired to 2160, and no PMG
          $time        = $max_time;
-         //$mgroupcount = min( 2, $mgroupcount );
+         // At most 4 pm groups on alamo
+         $mgroupcount = min( 4, $mgroupcount );
       }
 
       else if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )

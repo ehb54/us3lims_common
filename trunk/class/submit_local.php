@@ -39,7 +39,7 @@ $this->message[] = "End of submit_local.php";
       $no_us3iab = 1 - $is_us3iab;
       $is_jetstr = preg_match( "/jetstream/", $cluster );
 //$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_jetstr=$is_jetstr";
-$this->message[] = "cluster=$cluster $clusname gwhostid=$gwhosid is_us3iab=$is_us3iab is_jetstr=$is_jetstr";
+$this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$is_us3iab  is_jetstr=$is_jetstr";
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;

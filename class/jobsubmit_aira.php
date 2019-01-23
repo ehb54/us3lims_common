@@ -181,13 +181,13 @@ class airavata_jobsubmit
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
         "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
+        "workdir"    => "/scratch/01623/us3/airavata-workingdirs",
         "sshport"    => 22,
-        "queue"      => "normal",
+        "queue"      => "skx-normal",
         "maxtime"    => 1440,
-        "ppn"        => 32,
-        "ppbj"       => 32,
-        "maxproc"    => 64
+        "ppn"        => 24,
+        "ppbj"       => 24,
+        "maxproc"    => 72
       );
 
 //        "name"       => "js-157-184.jetstream-cloud.org",

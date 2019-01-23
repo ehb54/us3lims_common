@@ -132,9 +132,9 @@ class submit_airavata extends airavata_jobsubmit
                              $this->data[ 'job' ][ 'requestID' ] );
 
       $uslimsVMHost = gethostname();
-      if ( preg_match( "/scyld/", $uslimsVMHost ) )
+      if ( preg_match( "/noval/", $uslimsVMHost ) )
       {
-         $uslimsVMHost = "alamo.uthscsa.edu";
+         $uslimsVMHost = "uslims3.aucsolutions.com";
       }
 
       $airavataWrapper = new AiravataWrapper();

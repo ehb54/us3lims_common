@@ -240,6 +240,22 @@ class airavata_jobsubmit
         "maxproc"    => 72
       );
 
+      $this->grid[ 'juwels' ] = array
+      (
+        "name"       => "juwels.fz-juelich.de",
+        "submithost" => $subhost,
+        "userdn"     => "CN=_USER_, O=Ultrascan Gateway, C=DE",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/p/scratch/cpaj1846",
+        "sshport"    => 22,
+        "queue"      => "batch",
+        "maxtime"    => 1440,
+        "ppn"        => 24,
+        "ppbj"       => 24,
+        "maxproc"    => 72
+      );
+
    }
 
    // Deconstructor

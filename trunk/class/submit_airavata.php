@@ -42,6 +42,7 @@ class submit_airavata extends airavata_jobsubmit
       $nodes       = $tnodes * $mgroupcount;
       $clus_user   = 'us3';
       $clus_scrd   = 'NONE';
+      $clus_acct   = 'NONE';
 
       if ( $cluster == 'juwels' )
       {
@@ -50,14 +51,17 @@ class submit_airavata extends airavata_jobsubmit
          {
             case 'uslims3_cauma3':
                $clus_user   = 'gorbet1';
+               $clus_acct   = 'paj1846';
                break;
 
             case 'uslims3_cauma3d':
                $clus_user   = 'sureshmarru1';
+               $clus_acct   = 'paj1846';
                break;
 
             case 'uslims3_Uni_KN':
                $clus_user   = 'schneider3';
+               $clus_acct   = 'hkn00';
                break;
 
             case 'uslims3_HHU':
@@ -67,6 +71,7 @@ class submit_airavata extends airavata_jobsubmit
 
             case 'uslims3_FAU':
                $clus_user   = 'uttinger1';
+               $clus_acct   = 'her21';
                break;
 
             case 'uslims3_JSC':
@@ -142,7 +147,7 @@ var_dump('dumperr', $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, 
       $expResult  = $airavataWrapper->launch_airavata_experiment( $uslimsVMHost, $limsUser,
                        $exp_name, $expReqId,
                        $clus_host, $queue, $cores, $nodes, $mgroupcount,
-                       $maxWallTime, $clus_user, $clus_scrd,
+                       $maxWallTime, $clus_user, $clus_scrd, $clus_acct,
                        $inputTarFile, $outputDirName );
 
       $expId      = 0;

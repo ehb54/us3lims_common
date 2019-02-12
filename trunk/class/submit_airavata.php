@@ -141,8 +141,8 @@ class submit_airavata extends airavata_jobsubmit
       }
 
       $airavataWrapper = new AiravataWrapper();
-var_dump('dumperr', $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, $queue, $cores, $nodes,
-          $mgroupcount, $maxWallTime, $clus_user, $clus_scrd, $inputTarFile, $outputDirName );
+//var_dump('dumperr', $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, $queue, $cores, $nodes,
+//          $mgroupcount, $maxWallTime, $clus_user, $clus_scrd, $inputTarFile, $outputDirName );
 
       $expResult  = $airavataWrapper->launch_airavata_experiment( $uslimsVMHost, $limsUser,
                        $exp_name, $expReqId,

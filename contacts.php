@@ -25,8 +25,7 @@ include 'header.php';
 	      Professor<br/>
          <a href='mailto:borries.demeler@umontana.edu'>borries.demeler@umontana.edu</a><br/>
          Website: <a href='http://www.demeler.uthscsa.edu'>http://www.demeler.uthscsa.edu</a><br/>
-         Telephone: 210-767-3332<br/>
-         Fax: 403-329-2057<br/>
+         Telephone: 406-285-1935<br/>
       </td>
    </tr>
    <tr valign='top'>
@@ -39,10 +38,9 @@ include 'header.php';
       <td><b>Mailing Address:</b></td>
       <td>
          4401 University Drive <br/> 
-	      <a href='http://www.uleth.ca'>Department of Chemistry and Biochemistry<br/>
-         Mailcode 7760</a><br/>
-	      <a href='http://www.uleth.ca'>The University of Lethbridge,  Alberta</a><br/>
-	      Lethbridge, Alberta  T1K3M4<br/>
+	      <a href='http://www.umontana.edu'>Department of Chemistry<br/>
+	      <a href='http://www.umontana.edu'>The University of Montana</a><br/>
+	      Missoula, Montana  59812<br/>
          USA
       </td>
    </tr>

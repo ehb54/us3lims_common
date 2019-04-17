@@ -12,7 +12,7 @@ include 'header.php';
      <tr><td><img src='images/xsede.png' alt='XSEDE Logo' /></td>
          <td><img src='images/sdsc_logo.png' alt='SDSC Logo' /></td></tr>
      <tr><td><a href='http://www.xsede.org/'>XSEDE</a></td>
-	      <td><a href='http://www.sdsc.edu'>SDSC</a></td></tr>
+         <td><a href='http://www.sdsc.edu'>SDSC</a></td></tr>
      <tr><td><img src='images/teragrid.png' alt='Teragrid Logo' /></td>
          <td><img src='images/TACC.gif' alt='TACC Logo' /></td></tr>
      <tr><td><a href='http://www.teragrid.org/'>Teragrid</a></td>
@@ -26,8 +26,7 @@ include 'header.php';
      <tr><td><img src='images/prace_logo.png' alt='PRACE Logo' /></td>
          <td></td></tr>
      <tr><td><a href='http://www.prace-ri.eu/'>
-         Partnership for Advanced<br/>Computing in Europe</a></td>
-         <td></td></tr>
+         Partnership for Advanced<br/>Computing in Europe</a></td></tr>
   </table>
 
 </div>

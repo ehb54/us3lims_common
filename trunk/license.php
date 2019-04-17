@@ -7,7 +7,7 @@ include 'header.php';
 	<h1 class="title">Copyright and License information</h1>
 	<p>The <b><i>UltraScan</i></b> software is copyright protected
 	by international laws.  The copyright is owned by 
-   <a href='mailto:demeler@biochem.uthscsa.edu'>Borries
+   <a href='mailto:borries.demeler@umontana.edu'>Borries
 	Demeler, PhD</a> (1989-present) and <a href="http://www.uthscsa.edu">
    The University of Texas Health Science Center at San Antonio</a>
    (1997-present). All rights reserved.</p>

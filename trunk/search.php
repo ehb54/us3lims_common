@@ -54,22 +54,6 @@ Released      : 6/30/2011
 <div id="header" style='text-align:center;'>
    <table class='noborder'>
    <tr><td><img src='images/USLIMS3-banner.png' alt='USLims 3 banner' /></td>
-       <td style='vertical-align:middle;width:400px;'>
-
-       <div id="cse-search-form">Loading</div>
-       <script src="https://www.google.com/jsapi" type="text/javascript"></script>
-       <script type="text/javascript"> 
-         google.load('search', '1', {language : 'en', style : google.loader.themes.MINIMALIST});
-         google.setOnLoadCallback(function() {
-           var customSearchControl = new google.search.CustomSearchControl('007201445830912588415:jg05a0rix7y');
-           customSearchControl.setResultSetSize(google.search.Search.FILTERED_CSE_RESULTSET);
-           var options = new google.search.DrawOptions();
-           options.enableSearchboxOnly("https://$org_site/search.php");    
-           customSearchControl.draw('cse-search-form', options);
-         }, true);
-       </script>
-
-       </td>
    </tr>
    </table>
    <span style='font-size:20px;font-weight:bold;color:white;padding:0 1em;'>
@@ -79,46 +63,6 @@ HTML;
 
 include 'topmenu.php';
 
-echo<<<HTML
 </div>
 
-<!-- Begin page content -->
-<div id='search_page'>
-
-<!-- Begin page content -->
-<div id='search_content'>
-
-  <h1 class="title">Search Results</h1>
-  <!-- Place page content here -->
- 
-  <div id="cse" style="width: 90%;">Loading</div>
-  <script src="https://www.google.com/jsapi" type="text/javascript"></script>
-  <script type="text/javascript"> 
-    function parseQueryFromUrl () {
-      var queryParamName = "q";
-      var search = window.location.search.substr(1);
-      var parts = search.split('&');
-      for (var i = 0; i < parts.length; i++) {
-        var keyvaluepair = parts[i].split('=');
-        if (decodeURIComponent(keyvaluepair[0]) == queryParamName) {
-          return decodeURIComponent(keyvaluepair[1].replace(/\+/g, ' '));
-        }
-      }
-      return '';
-    }
-    google.load('search', '1', {language : 'en', style : google.loader.themes.MINIMALIST});
-    google.setOnLoadCallback(function() {
-      var customSearchControl = new google.search.CustomSearchControl('007201445830912588415:jg05a0rix7y');
-      customSearchControl.setResultSetSize(google.search.Search.FILTERED_CSE_RESULTSET);
-      customSearchControl.draw('cse');
-      var queryFromUrl = parseQueryFromUrl();
-      if (queryFromUrl) {
-        customSearchControl.execute(queryFromUrl);
-      }
-    }, true);
-  </script>
-    
-</div>
-
-HTML;
 ?>

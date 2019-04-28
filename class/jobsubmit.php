@@ -627,8 +627,17 @@ class jobsubmit
 
          if ( isset( $parameters[ 'meniscus_points' ] ) )
          {
-            $points = $parameters[ 'meniscus_points' ];
-            if ( $points > 0 )  $time *= $points;
+            $points     = $parameters[ 'meniscus_points' ];
+            if ( $points > 1 )
+            {  // If fit-meniscus|bottom, multiply by fit points
+               $time      *= $points;
+               if ( isset( $parameters[ 'fit_mb_select' ] ) )
+               {  // If fitting both meniscus and bottom, multiply again
+                  $fselect    = $parameters[ 'fit_mb_select' ];
+                  if ( $fselect == 3 )
+                     $time      *= $points;
+               }
+            }
          }
 
          if ( $ti_noise || $ri_noise ) $time *= 2;

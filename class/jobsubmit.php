@@ -641,6 +641,9 @@ class jobsubmit
          }
 
          if ( $ti_noise || $ri_noise ) $time *= 2;
+         // Double time for each noise option used
+         if ( $ti_noise )  $time *= 2;
+         if ( $ri_noise )  $time *= 2;
 
          if (  isset( $parameters[ 's_grid_points' ] )  &&
                isset( $parameters[ 'ff0_grid_points' ] ) )

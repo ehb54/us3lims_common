@@ -24,7 +24,7 @@ include 'header.php';
       	Demeler</a>, PhD<br/>
 	      Professor<br/>
          <a href='mailto:borries.demeler@umontana.edu'>borries.demeler@umontana.edu</a><br/>
-         Website: <a href='http://www.demeler.uthscsa.edu'>http://www.demeler.uthscsa.edu</a><br/>
+         Website: <a href='http://www.umontana.edu'>http://www.umontana.edu</a><br/>
          Telephone: 406-285-1935<br/>
       </td>
    </tr>
@@ -32,15 +32,16 @@ include 'header.php';
       <td><b>Website and Program Support:</b></td>
       <td><a href='mailto:gegorbet@gmail.com'>Gary Gorbet</a><br/>
           <a href='mailto:gegorbet@gmail.com'>gegorbet@gmail.com</a><br/>
+          832-466-9211 (<b>text only, please</b>)<br/>
       </td>
    </tr>
    <tr valign='top'>
       <td><b>Mailing Address:</b></td>
       <td>
-         4401 University Drive <br/> 
-	      <a href='http://www.umontana.edu'>Department of Chemistry<br/>
-	      <a href='http://www.umontana.edu'>The University of Montana</a><br/>
-	      Missoula, Montana  59812<br/>
+         <a href='http://hs.umt.edu/chemistry'>Department of Chemistry<br/>
+         <a href='http://www.umontana.edu'>The University of Montana</a><br/>
+         32 Campus Drive<br/>
+         Missoula, Montana  59812<br/>
          USA
       </td>
    </tr>

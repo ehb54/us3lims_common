@@ -174,6 +174,7 @@ class airavata_jobsubmit
         "maxproc"    => 64
       );
 
+//        "workdir"    => "/ogce-rest/job/runjob/async",
       $this->grid[ 'stampede2' ] = array
       (
         "name"       => "stampede2.tacc.xsede.org",
@@ -613,7 +614,10 @@ $spfact=7;
 //else
 // $spfact=8;
 
-         if ( $ti_noise || $ri_noise ) $time *= 2;
+         // Double time for each noise calculation
+//         if ( $ti_noise || $ri_noise ) $time *= 2;
+         if ( $ti_noise )  $time *= 2;
+         if ( $ri_noise )  $time *= 2;
 
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
          {

@@ -124,7 +124,10 @@ $this->message[] = "Files copied to $address:$workdir";
 
       $walltime = sprintf( "%02.2d:%02.2d:00", $hours, $mins );  // 01:09:00
       $wallmins = $hours * 60 + $mins;
+
       $can_load = 0;
+      $demeler3_load = 0;
+
       $plines   = "";
       $mpirun   = "mpirun --bind-to none";
       //$mpirun   = "mpirun";
@@ -154,6 +157,13 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
          $load2    = "openmpi/intel/2.1.1";
          $load3    = "qt5/5.7.1";
          $load4    = "ultrascan3/4.0";
+         break;
+
+	case 'demeler3-local':
+         $demeler3_load = 1;
+         $libpath  = "/home/us3/cluster/lib";
+         $path     = "/home/us3/cluster/bin";
+         $ppn      = max( $ppn, 8 );
          break;
 
         case 'us3iab-node0':
@@ -197,6 +207,13 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
             "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
             "export PATH=$path:\$PATH\n"                          .
             "\n";
+
+	    if( $demeler3_load )
+	    {
+ 	      $plines .= "\n" .
+	      "module load mpi/openmpi-x86_64 \n" .
+	      "\n";
+	    }
       }
 
       $procs   = $nodes * $ppn;
@@ -363,7 +380,10 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
+
       $is_jetstr = preg_match( "/jetstream/", $cluster );
+      $is_demeler3 = preg_match( "/demeler3/", $cluster );
+
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
@@ -394,7 +414,16 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
 //$this->data[ 'eprfile' ] = $jobid;
       }
       else
-         $this->data[ 'eprfile' ] = rtrim( $jobid );
+      {
+         if ( $is_demeler3 )
+         {
+	    $parts_b = preg_split( "/\./", rtrim( $jobid ) );
+	    $this->data[ 'eprfile' ] = $parts_b[0];
+	  }  
+	  else
+	    $this->data[ 'eprfile' ] = rtrim( $jobid );
+      }			     
+
 //      else
 $this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" . $status
  . " out0=" . $output[0];

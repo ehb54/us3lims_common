@@ -27,6 +27,8 @@ class submit_airavata extends airavata_jobsubmit
       global $user, $class_dir;
       $cluster     = $this->data[ 'job' ][ 'cluster_shortname' ];
       $limsHost    = $this->data[ 'db'  ][ 'host' ];
+      if ( preg_match( "/uslims.uleth/", $limsHost ) )
+         $limsHost    = 'demeler6.uleth.ca';
       if ( isset( $this->data[ 'db' ][ 'user_id' ] ) )
          $limsUser    = $this->data[ 'db' ][ 'user_id' ];
       else
@@ -138,6 +140,10 @@ class submit_airavata extends airavata_jobsubmit
       if ( preg_match( "/noval/", $uslimsVMHost ) )
       {
          $uslimsVMHost = "uslims3.aucsolutions.com";
+      }
+      if ( preg_match( "/uslims.uleth/", $uslimsVMHost ) )
+      {
+         $uslimsVMHost = "demeler6.uleth.ca";
       }
 
       $airavataWrapper = new AiravataWrapper();

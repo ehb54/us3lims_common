@@ -309,6 +309,22 @@ class jobsubmit
         "maxproc"    => 72
       );
 
+      $this->grid[ 'demeler3-local' ] = array
+      (
+        "name"       => "demeler3.uleth.ca",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/home/us3/work/",
+        "sshport"    => 22,
+        "queue"      => "batch",
+        "maxtime"    => 5760,
+        "ppn"        => 8,
+        "ppbj"       => 8,
+        "maxproc"    => 64
+      );
+
    }
 
    // Deconstructor
@@ -870,3 +886,4 @@ class jobsubmit
    }
 }
 ?>
+

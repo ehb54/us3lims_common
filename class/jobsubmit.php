@@ -320,9 +320,9 @@ class jobsubmit
         "sshport"    => 22,
         "queue"      => "batch",
         "maxtime"    => 5760,
-        "ppn"        => 8,
-        "ppbj"       => 8,
-        "maxproc"    => 64
+        "ppn"        => 36,
+        "ppbj"       => 9,
+        "maxproc"    => 36
       );
 
    }
@@ -836,9 +836,13 @@ class jobsubmit
             $demes = $ppbj - 1;
             if ( $is_us3iab )
                $demes = max( 15, $demes );
+            if ( $ppbj == 9 )
+               $demes = max( 17, $demes );
+            $ppbj  = $demes + 1;
+            $this->grid[ $cluster ][ 'ppbj' ] = $ppbj;
          }
-         $procs = $demes + $ppn;                  // Procs = demes+1
-         $procs = (int)( $procs / $ppn ) * $ppn;  // Rounded to procs-per-node
+         $procs = $demes + $ppbj;                  // Procs = demes+1
+         $procs = (int)( $procs / $ppbj ) * $ppbj;  // Rounded to procs-per-basejob
       }
       else if ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
       {  // 2DSA:  procs is max_procs, but no more than subgrid count
@@ -854,10 +858,11 @@ class jobsubmit
          $procs = min( $ppbj, $vsize );      // Procs = base or subgrid count
       }
 
-      $procs = max( $procs, $ppn );          // Minimum procs is procs-per-node
+      $procs = max( $procs, $ppbj );          // Minimum procs is procs-per-node
       $procs = min( $procs, $max_procs );    // Maximum procs depends on cluster
 
       $nodes = (int)$procs / $ppn;    // Return nodes, procs divided by procs-per-node
+      $nodes = max( 1, $nodes );
       return $nodes;
    }
 

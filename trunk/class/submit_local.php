@@ -163,7 +163,7 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
          $demeler3_load = 1;
          $libpath  = "/home/us3/cluster/lib";
          $path     = "/home/us3/cluster/bin";
-         $ppn      = max( $ppn, 8 );
+         $ppn      = max( $ppn, 9 );
          break;
 
         case 'us3iab-node0':
@@ -216,15 +216,18 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
 	    }
       }
 
-      $procs   = $nodes * $ppn;
+      $procs   = $nodes * $ppbj;
+      $quename = "batch";
+      if ( preg_match( "/us3iab-dev/", $cluster ) )
+         $quename = "normal";
 
       $contents = 
       "#!/bin/bash\n"                                       .
       "#\n"                                                 .
       "#PBS -S /bin/bash\n"                                 .
-      "#PBS -q batch\n"                                     .
+      "#PBS -q $quename\n"                                     .
       "#PBS -N US3_Job_$requestID\n"                        .
-      "#PBS -l nodes=$nodes:ppn=$ppn,walltime=$walltime\n"  .
+      "#PBS -l nodes=$nodes:ppn=$ppbj,walltime=$walltime\n"  .
       "#PBS -V\n"                                           .
       "#PBS -o $workdir/stdout\n"                           .
       "#PBS -e $workdir/stderr\n"                           .

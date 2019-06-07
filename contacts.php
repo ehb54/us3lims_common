@@ -11,7 +11,7 @@ include 'header.php';
       <td><b>Facility Administrator:</b></td>
       <td><a href='mailto:<?php echo $admin_email; ?>'><?php echo $admin; ?></a><br/>
          <a href='mailto:<?php echo $admin_email; ?>'><?php echo $admin_email; ?></a><br/>
-         Office/Telephone: <?php echo $admin_phone; ?><br/>
+         <?php echo $admin_phone; ?><br/>
       </td>
    </tr>
    </table>

@@ -596,12 +596,8 @@ $spfact=7;
             $gpts_s     = $parameters[ 's_grid_points' ];
             $gpts_k     = $parameters[ 'ff0_grid_points' ];
             $gpts_t     = $gpts_s * $gpts_k;
-            if ( $gpts_t > 200000 )
-               $time      *= 8;
-            else if ( $gpts_t > 100000 )
-               $time      *= 4;
-            else if ( $gpts_t > 50000 )
-               $time      *= 2;
+            $gp_fac     = (int)( ( $gpts_t + 4096 ) / 8192 );
+            $time      *= $gp_fac;
          }
 
          if ( isset( $dsparams[ 'simpoints' ] ) )

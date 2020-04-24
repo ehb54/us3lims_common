@@ -202,6 +202,7 @@ echo "err-message=" . $expResult['message'];
                    ?  $this->data[ 'eprfile' ] : '';
       $xml       = isset( $this->data[ 'jobxmlfile' ] )
                    ?  $this->data[ 'jobxmlfile' ] : '';
+      $dbpasswd  = password_field( $dbpasswd, "PW" );
 
       $link      = mysqli_connect( $host, $dbusername, $dbpasswd, $dbname );
 
@@ -234,6 +235,7 @@ echo "err-message=" . $expResult['message'];
       mysqli_close( $link );
 
       // Update global db
+      $globaldbpasswd  = password_field( $globaldbpasswd, "PW" );
       $gfac_link = mysqli_connect( $host, $globaldbuser, $globaldbpasswd, $globaldbname );
 
       if ( !$gfac_link )

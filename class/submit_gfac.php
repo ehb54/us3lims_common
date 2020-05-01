@@ -289,7 +289,6 @@ $this->message[] = preg_replace( "/&gt;/", "&gt;\n", $epr );
       $epr        = $this->data[ 'eprfile' ];
       $gfacID     = $this->getGfacID( $epr );
       $xml        = $this->data[ 'jobxmlfile' ];
-      $dbpasswd   = password_field( $dbpasswd, "PW" );
  
       $link = mysql_connect( $host, $dbusername, $dbpasswd );
  
@@ -327,7 +326,6 @@ $this->message[] = preg_replace( "/&gt;/", "&gt;\n", $epr );
       mysql_close( $link );
 
       // Update global db
-      $globaldbpasswd  = password_field( $globaldbpasswd, "PW" );
       $gfac_link = mysql_connect( $host, $globaldbuser, $globaldbpasswd );
 
       if ( ! $gfac_link )

@@ -13,8 +13,8 @@ COM_FILES="jobsubmit.php \
            submit_gfac.php \
            submit_local.php"
 
-# Do svn update of local-specific files
-svn up ${LOC_FILES}
+# Do update from repository of local-specific files
+git pull origin master
 
 # Copy all common files from ../class/
 for F in ${COM_FILES}; do cp -p ../class/$F .;done

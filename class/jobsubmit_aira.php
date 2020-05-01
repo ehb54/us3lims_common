@@ -644,18 +644,6 @@ $spfact=7;
       return $max_groups;
    }
 
-   function password_field( $pwkey, $pwfield )
-   {
-      $pwvalue  = $pwkey;
-      if ( preg_match( "/PASSW_/", $pwkey ) )
-      {
-         $mp_cmd   = exec( "ls ~us3/scripts/map_password" );
-         $pwvalue  = exec( "$mp_cmd $pwkey $pwfield" );
-      }
-
-      return $pwvalue;
-   }
-
 }
 ?>
 

@@ -447,7 +447,6 @@ $this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" 
       $cluster   = $this->data['job']['cluster_shortname'];
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $eprfile   = $this->data['eprfile'];
-      $dbpasswd  = password_field( $dbpasswd, "PW" );
 
       $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
  
@@ -474,7 +473,6 @@ $this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" 
       mysqli_close( $link );
 
       // Insert initial data into global DB
-      $globaldbpasswd  = password_field( $globaldbpasswd, "PW" );
       $gfac_link = mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
  
       if ( ! $gfac_link )

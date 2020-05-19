@@ -22,14 +22,14 @@ class jobsubmit
 
       $this->grid[ 'us3iab-node0' ] = array
       (
-        "name"       => "us3iab-node0.aucsolutions.com",
+        "name"       => "us3iab-node0.localdomain",
         "submithost" => "localhost",
         "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
         "submittype" => "http",
         "httpport"   => $subport,
-        "workdir"    => "/export/home/us3/lims/work/",
+        "workdir"    => "/home/us3/lims/work/",
         "sshport"    => 22,
-        "queue"      => "normal",
+        "queue"      => "batch",
         "maxtime"    => 2160,
         "ppn"        => 8,
         "ppbj"       => 8,
@@ -68,102 +68,6 @@ class jobsubmit
         "maxproc"    => 16
       );
 
-      $this->grid[ 'bcf' ] = array
-      (
-        "name"       => "bcf.uthscsa.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "default",
-        "maxtime"    => 60000,
-        "ppn"        => 2,
-        "ppbj"       => 8,
-        "maxproc"    => 12
-      );
-
-      $this->grid[ 'bcf-local' ] = array
-      (
-        "name"       => "bcf.uthscsa.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "local",
-        "httpport"   => $subport,
-        "workdir"    => "/home/us3/work/",  // Need trailing slash
-        "sshport"    => 22,
-        "queue"      => "default",
-        "maxtime"    => 60000,
-        "ppn"        => 2,
-        "ppbj"       => 8,
-        "maxproc"    => 12
-      );
-
-      $this->grid[ 'jacinto' ] = array
-      (
-        "name"       => "jacinto.uthscsa.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "default",
-        "maxtime"    => 2160,
-        "ppn"        => 4,
-        "ppbj"       => 8,
-        "maxproc"    => 32
-      );
-
-      $this->grid[ 'jacinto-local' ] = array
-      (
-        "name"       => "jacinto.uthscsa.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "local",
-        "httpport"   => $subport,
-        "workdir"    => "/home/us3/work/",  // Need trailing slash
-        "sshport"    => 22,
-        "queue"      => "default",
-        "maxtime"    => 2160,
-        "ppn"        => 4,
-        "ppbj"       => 8,
-        "maxproc"    => 32
-      );
-
-      $this->grid[ 'alamo' ] = array
-      (
-        "name"       => "alamo.uthscsa.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "batch",
-        "maxtime"    => 2160,
-        "ppn"        => 24,
-        "ppbj"       => 24,
-        "maxproc"    => 48
-      );
-
-      $this->grid[ 'alamo-local' ] = array
-      (
-        "name"       => "alamo.uthscsa.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "local",
-        "httpport"   => $subport,
-        "workdir"    => "/home/us3/lims/work/local/",  // Need trailing slash
-        "sshport"    => 22,
-        "queue"      => "batch",
-        "maxtime"    => 2160,
-        "ppn"        => 24,
-        "ppbj"       => 24,
-        "maxproc"    => 48
-      );
-
       $this->grid[ 'lonestar5' ] = array
       (
         "name"       => "ls5.tacc.utexas.edu",
@@ -180,22 +84,6 @@ class jobsubmit
         "maxproc"    => 72
       );
 
-      $this->grid[ 'gordon' ] = array
-      (
-        "name"       => "gordon.sdsc.xsede.org",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,
-        "ppn"        => 16,
-        "ppbj"       => 32,
-        "maxproc"    => 64
-      );
-
       $this->grid[ 'comet' ] = array
       (
         "name"       => "comet.sdsc.xsede.org",
@@ -210,22 +98,6 @@ class jobsubmit
         "ppn"        => 24,
         "ppbj"       => 24,
         "maxproc"    => 72
-      );
-
-      $this->grid[ 'stampede' ] = array
-      (
-        "name"       => "stampede.tacc.xsede.org",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,
-        "ppn"        => 16,
-        "ppbj"       => 32,
-        "maxproc"    => 64
       );
 
       $this->grid[ 'stampede2' ] = array
@@ -275,22 +147,6 @@ class jobsubmit
         "ppn"        => 24,
         "ppbj"       => 24,
         "maxproc"    => 48
-      );
-
-      $this->grid[ 'jureca' ] = array
-      (
-        "name"       => "jureca.fz-juelich.de",
-        "submithost" => $subhost,
-        "userdn"     => "CN=_USER_, O=Ultrascan Gateway, C=DE",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "batch",
-        "maxtime"    => 1440,
-        "ppn"        => 24,
-        "ppbj"       => 24,
-        "maxproc"    => 72
       );
 
       $this->grid[ 'juwels' ] = array
@@ -870,6 +726,8 @@ class jobsubmit
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
+      $parameters = $this->data[ 'job' ][ 'jobParameters' ];
+      $mciters    = $parameters[ 'mc_iterations' ];
       $max_groups = 32;
 
       if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
@@ -882,13 +740,14 @@ class jobsubmit
          $max_groups = $max_procs / 16;
       }
 
-      else if ( preg_match( "/alamo/", $cluster ) )
-      {  // Alamo can have no more than 16 PMGs
-         $max_groups = 16;
+      else if ( $mciters > 1 )
+      {  // No more PMGs than half of MC iterations
+         $max_groups = min( $max_groups, ( $mciters / 2 ) );
       }
 
       return $max_groups;
    }
 }
+
 ?>
 

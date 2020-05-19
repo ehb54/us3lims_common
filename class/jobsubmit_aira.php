@@ -596,8 +596,12 @@ $spfact=7;
             $gpts_s     = $parameters[ 's_grid_points' ];
             $gpts_k     = $parameters[ 'ff0_grid_points' ];
             $gpts_t     = $gpts_s * $gpts_k;
-            $gp_fac     = (int)( ( $gpts_t + 4096 ) / 8192 );
-            $time      *= $gp_fac;
+            if ( $gpts_t > 200000 )
+               $time      *= 8;
+            else if ( $gpts_t > 100000 )
+               $time      *= 4;
+            else if ( $gpts_t > 50000 )
+               $time      *= 2;
          }
 
          if ( isset( $dsparams[ 'simpoints' ] ) )
@@ -756,27 +760,28 @@ $spfact=7;
    function max_mgroupcount()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
-      $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
-      $groups     = 32;
-      if ( preg_match( "/jacinto/", $cluster ) )
-      {  // Jacinto can have no more than 2 PMGs
-        $groups = 2;
-      }
-      if ( $cluster == 'alamo' )
-      {  // Alamo can have no more than 16 PMGs
-        $groups = 16;
-      }
+      $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
+      $parameters = $this->data[ 'job' ][ 'jobParameters' ];
+      $mciters    = $parameters[ 'mc_iterations' ];
+      $max_groups = 32;
 
-      // Convert to 1/2/4/8/16/32
-      $power      = (int) ceil( log( $groups, 2 ) );
-      $max_groups = min( 32, pow( 2, $power ) );
-
-      // For 2DSA/PCSA composite, insure groups no more than datasets count
       if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
-        $max_groups = min( $max_groups, $dset_count );
+      {  // For 2DSA/PCSA, PMGs is always 1
+         $max_groups = 1;
+      }
+
+      else if ( preg_match( "/us3iab/", $cluster ) )
+      {   // Us3iab PMGs limited by max procs available
+         $max_groups = $max_procs / 16;
+      }
+
+      else if ( $mciters > 1 )
+      {  // No more PMGs than half of MC iterations
+         $max_groups = min( $max_groups, ( $mciters / 2 ) );
+      }
 
       return $max_groups;
    }
 }
 ?>
+

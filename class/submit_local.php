@@ -37,9 +37,10 @@ $this->message[] = "End of submit_local.php";
       $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
-      $is_jetstr = preg_match( "/jetstream/", $cluster );
-//$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_jetstr=$is_jetstr";
-$this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$is_us3iab  is_jetstr=$is_jetstr";
+      $is_slurm  = ( preg_match( "/jetstream/",    $cluster )  ||
+                     preg_match( "/us3iab-node0/", $cluster ) );
+//$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_slurm=$is_slurm";
+$this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$is_us3iab  is_slurm=$is_slurm";
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
@@ -64,7 +65,7 @@ if($status != 0)
  $this->message[] = "  ++++ output=$output[0]";
 
       //  Create pbs/slurm file, then copy it and tar file to work directory
-      if ( $is_jetstr )
+      if ( $is_slurm )
          $pbsfile  = $this->create_slurm();
       else
          $pbsfile  = $this->create_pbs();
@@ -256,9 +257,14 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
    {
       $quename   = "batch";
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
+      $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
+      $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
+                     preg_match( "/" . $clusname ."/", $gwhostid ) );
+      $no_us3iab = 1 - $is_us3iab;
       $tarfile   = sprintf( "hpcinput-%s-%s-%05d.tar",
                          $this->data['db']['host'],
                          $this->data['db']['name'],
@@ -275,7 +281,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $slufile = "us3.slurm";
       $slupath = $slufile;
       $wall    = $this->maxwall() * 3.0;
-       if ( $is_us3iab )
+      if ( $is_us3iab )
          $wall    = 2880.0;
       $nodes   = $this->nodes() * $mgroupcount;
 
@@ -296,70 +302,81 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
       switch( $cluster )
       {
         case 'jetstream-local':
-         $can_load = 1;
-         $load1    = "mpi";
-         $load2    = "qt5";
-         $load3    = "ultrascan3";
-         break;
+          $can_load = 1;
+          $load1    = "module load mpi \n";
+          $load2    = "module load qt5 \n";
+          $load3    = "module load ultrascan3 \n";
+          $load4    = "";
+          break;
 
         case 'us3iab-node0':
+          $can_load = 2;
+          $load1    = "module load mpi/mpich-x86_64 \n" ;
+          $load2    = "";
+          $load3    = "";
+          $load4    = "";
+          $libpath  = "/home/us3/cluster/lib:/usr/lib64/qt5";
+          $path     = "/home/us3/cluster/bin";
+          $plines   = "\n" .
+             $load1 . "\n" .
+             "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
+             "export PATH=$path:\$PATH\n" .
+             "export UCX_LOG_LEVEL=error\n" .
+             "export OMPI_MCA_btl=self\n" .
+             "export QT_LOGGING_RULES='*.debug=true'\n";
+          break;
+
         case 'us3iab-node1':
         case 'us3iab-devel':
-         $can_load = 0;
-         if ( $nodes > 1 )
-         {
-            $ppn      = $nodes * $ppn;
-            $nodes    = 1;
-         }
-         $libpath  = "/usr/local/lib64:/export/home/us3/cluster/lib:/usr/lib64/openmpi-1.10/lib:/opt/qt/lib";
-         $path     = "/export/home/us3/cluster/bin:/usr/lib64/openmpi-1.10/bin";
-         $ppn      = max( $ppn, 8 );
-         $wall     = 2880;
-         break;
+          $can_load = 0;
+          if ( $nodes > 1 )
+          {
+             $ppn      = $nodes * $ppn;
+             $nodes    = 1;
+          }
+          $libpath  = "/usr/local/lib64:/export/home/us3/cluster/lib:/usr/lib64/openmpi-1.10/lib:/opt/qt/lib";
+          $path     = "/export/home/us3/cluster/bin:/usr/lib64/openmpi-1.10/bin";
+          $ppn      = max( $ppn, 8 );
+          $wall     = 2880;
+          break;
 
         default:
-         $libpath  = "/share/apps/openmpi/lib:/share/apps/qt/lib";
-         $path     = "/share/apps/openmpi/bin";
-         $ppn      = 2;
-         break;
+          $libpath  = "/share/apps/openmpi/lib:/share/apps/qt/lib";
+          $path     = "/share/apps/openmpi/bin";
+          $ppn      = 2;
+          break;
       }
 $this->message[] = "can_load=$can_load  ppn=$ppn";
 
-      if ( $can_load )
+      if ( $can_load == 1 )
       {  // Can use module load to set paths and environ
-         $plines  = 
-            "\n"                    .
-            "module load $load1 \n" .
-            "module load $load2 \n" .
-            "module load $load3 \n" .
-            "\n";
+         $plines .= ( "\n" . $load1 . $load2 . $load3 . $load4 . "\n" );
       }
 
-      else
+      else if ( $can_load == 0 )
       {  // Can't use module load; must set paths
          $plines  = 
-            "\n"                                                  .
+            "\n" .
             "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
-            "export PATH=$path:\$PATH\n"                          .
+            "export PATH=$path:\$PATH\n" .
             "\n";
       }
 
       $procs   = $nodes * $ppn;
 
       $contents = 
-      "#! /bin/bash\n"                      .
-      "#\n"                                 .
-      "#SBATCH -p $quename\n"               .
-      "#SBATCH -J US3_Job_$requestID\n"     .
-      "#SBATCH -N $nodes\n"                 .
-      "#SBATCH -n $ppn\n"                   .
-      "#SBATCH -t $walltime\n"              .
-      "#SBATCH -o $workdir/stdout\n"        .
-      "#SBATCH -e $workdir/stderr\n"        .
-      "$plines"                             .
-      "\n"                                  .
-      "cd $workdir\n"                       .
-      "\n"                                  .
+      "#!/bin/bash\n" .
+      "#SBATCH --partition=$quename\n" .
+      "#SBATCH --job-name=US3_Job_$requestID\n" .
+      "#SBATCH --nodes=$nodes\n" .
+      "#SBATCH --ntasks-per-node=$ppn\n" .
+      "#SBATCH --time=$walltime\n" .
+      "#SBATCH --error=$workdir/stderr\n" .
+      "#SBATCH --output=$workdir/stdout\n" .
+      "$plines" .
+      "\n" .
+      "cd $workdir\n" .
+      "\n" .
       "$mpirun $mpiana -walltime $wallmins" .
       " -mgroupcount $mgroupcount $tarfile\n";
 
@@ -384,8 +401,9 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
 
-      $is_jetstr = preg_match( "/jetstream/", $cluster );
-      $is_demeler3 = preg_match( "/demeler3/", $cluster );
+      $is_slurm  = ( preg_match( "/jetstream/",    $cluster )  ||
+                     preg_match( "/us3iab-node0/", $cluster ) );
+      $is_demel3 = preg_match( "/demeler3/", $cluster );
 
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
@@ -399,18 +417,24 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
 
       // Submit job to the queue
       $output    = array();
-      if ( $is_jetstr )
-         $cmd   = "sbatch $workdir/us3.slurm 2>&1";
+      if ( $is_slurm )
+      {
+//         $uid   = exec( "id -u us3" );
+//         $sbarg = "--get-user-env=" . $uid . "L";
+//         $cmd   = "sbatch $sbarg $workdir/us3.slurm 2>&1";
+         $cmd   = "sbatch --get-user-env $workdir/us3.slurm 2>&1";
+      }
       else
          $cmd   = "/usr/bin/qsub $workdir/us3.pbs 2>&1";
       if ( $no_us3iab )
          $cmd   = "ssh -p $port -x us3@$address " . $cmd;
 
       $jobid = exec( $cmd, $output, $status );
+$this->message[] = "$cmd status=$status  jobid=$jobid";
 
       // Save the job ID
 //      if ( $status == 0 )
-      if ( $is_jetstr )
+      if ( $is_slurm )
       {
          $parts = preg_split( "/\s+/", $output[ 0 ] );
          $this->data[ 'eprfile' ] = $parts[ 3 ];
@@ -418,7 +442,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       }
       else
       {
-         if ( $is_demeler3 )
+         if ( $is_demel3 )
          {
 	    $parts_b = preg_split( "/\./", rtrim( $jobid ) );
 	    $this->data[ 'eprfile' ] = $parts_b[0];
@@ -428,8 +452,8 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       }			     
 
 //      else
-$this->message[] = "Job submitted; ID:" . $this->data[ 'eprfile' ] . " status=" . $status
- . " out0=" . $output[0];
+$this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ]
+ . " status=" . $status . " out0=" . $output[0];
    }
  
    function update_db()

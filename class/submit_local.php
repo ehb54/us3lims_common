@@ -140,27 +140,7 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
 
       switch( $cluster )
       {
-        case 'bcf-local':
-         $can_load = 0;
-         $libpath  = "/share/apps64/openmpi/lib";
-         $path     = "/share/apps64/openmpi/bin";
-         break;
-
-        case 'jacinto-local':
-         $can_load = 0;
-         $libpath  = "/share/apps/openmpi/lib";
-         $path     = "/share/apps/openmpi/bin";
-         break;
-
-        case 'alamo-local':
-         $can_load = 1;
-         $load1    = "intel/2015/64";
-         $load2    = "openmpi/intel/2.1.1";
-         $load3    = "qt5/5.7.1";
-         $load4    = "ultrascan3/4.0";
-         break;
-
-	case 'demeler3-local':
+        case 'demeler3-local':
          $demeler3_load = 1;
          $libpath  = "/home/us3/cluster/lib";
          $path     = "/home/us3/cluster/bin";
@@ -204,17 +184,13 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       else
       {  // Can't use module load; must set paths
          $plines  = 
-            "\n"                                                  .
-            "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
-            "export PATH=$path:\$PATH\n"                          .
-            "\n";
+            "\nexport LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
+            "export PATH=$path:\$PATH\n\n";
 
-	    if( $demeler3_load )
-	    {
- 	      $plines .= "\n" .
-	      "module load mpi/openmpi-x86_64 \n" .
-	      "\n";
-	    }
+         if ( $demeler3_load )
+         {
+            $plines .= "module load mpi/openmpi-x86_64 \n\n";
+         }
       }
 
       $procs   = $nodes * $ppbj;
@@ -289,6 +265,10 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $mins    = (int)( $wall % 60 );
       $ppn     = $this->grid[ $cluster ][ 'ppn' ]; 
       $ppbj    = $this->grid[ $cluster ][ 'ppbj' ]; 
+      // For GA analysis, procs-per-base-job may need to be doubled
+      if ( preg_match( "/GA/", $this->data[ 'method' ] )  &&
+           $ppbj < 16 )
+         $ppbj   *= 2;
 
       $walltime = sprintf( "%02.2d:%02.2d:00", $hours, $mins );  // 01:09:00
       $wallmins = $hours * 60 + $mins;
@@ -303,10 +283,37 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
       {
         case 'jetstream-local':
           $can_load = 1;
-          $load1    = "module load mpi \n";
-          $load2    = "module load qt5 \n";
-          $load3    = "module load ultrascan3 \n";
-          $load4    = "";
+          $load1    = "mpi";
+          $load2    = "qt5";
+          $load3    = "ultrascan3";
+          break;
+
+        case 'chinook-local':
+          $can_load = 0;
+          $load1    = "mpi";
+          $load2    = "";
+          $load3    = "";
+          $libpath  = "/home/us3/cluster/lib:/opt/qt/lib";
+          $path     = "/home/us3/cluster/bin";
+          $ppn      = max( $ppn, 8 );
+          $wall     = 2880;
+          break;
+
+        case 'umontana-local':
+          $can_load = 2;
+          $load1    = "use /home/bd142854e/local/modulefiles";
+          $load2    = "load rocks/openmpi";
+          $load3    = "load qt5";
+          $libpath  = "/home/bd142854e/cluster/lib";
+          $path     = "/home/bd142854e/cluster/bin";
+          $ppn      = max( $ppn, 8 );
+          $wall     = 2880;
+          $plines   = "\n" .
+                      "module $load1\n" .
+                      "module $load2\n" .
+                      "module $load3\n\n" .
+                      "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
+                      "export PATH=$path:\$PATH\n\n";
           break;
 
         case 'us3iab-node0':
@@ -320,10 +327,7 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
           $plines   = "\n" .
              $load1 . "\n" .
              "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
-             "export PATH=$path:\$PATH\n" .
-             "export UCX_LOG_LEVEL=error\n" .
-             "export OMPI_MCA_btl=self\n" .
-             "export QT_LOGGING_RULES='*.debug=true'\n";
+             "export PATH=$path:\$PATH\n\n";
           break;
 
         case 'us3iab-node1':
@@ -356,27 +360,26 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       else if ( $can_load == 0 )
       {  // Can't use module load; must set paths
          $plines  = 
-            "\n" .
-            "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
-            "export PATH=$path:\$PATH\n" .
-            "\n";
+            "\nexport LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
+            "export PATH=$path:\$PATH\n\n";
       }
 
       $procs   = $nodes * $ppn;
 
       $contents = 
       "#!/bin/bash\n" .
-      "#SBATCH --partition=$quename\n" .
-      "#SBATCH --job-name=US3_Job_$requestID\n" .
-      "#SBATCH --nodes=$nodes\n" .
-      "#SBATCH --ntasks-per-node=$ppn\n" .
-      "#SBATCH --time=$walltime\n" .
-      "#SBATCH --error=$workdir/stderr\n" .
-      "#SBATCH --output=$workdir/stdout\n" .
+      "#SBATCH -p $quename\n" .
+      "#SBATCH -J US3_Job_$requestID\n" .
+      "#SBATCH -N $nodes\n" .
+      "#SBATCH -n $ppbj\n" .
+      "#SBATCH -t $walltime\n" .
+      "#SBATCH -e $workdir/stderr\n" .
+      "#SBATCH -o $workdir/stdout\n" .
       "$plines" .
-      "\n" .
-      "cd $workdir\n" .
-      "\n" .
+      "export UCX_LOG_LEVEL=error\n" .
+      "export OMPI_MCA_btl=self,sm,tcp\n" .
+      "export QT_LOGGING_RULES='*.debug=true'\n\n" .
+      "cd $workdir\n\n" .
       "$mpirun $mpiana -walltime $wallmins" .
       " -mgroupcount $mgroupcount $tarfile\n";
 
@@ -397,13 +400,17 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
+      $subtype   = $this->grid[ $cluster ][ 'submittype' ];
       $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
 
-      $is_slurm  = ( preg_match( "/jetstream/",    $cluster )  ||
-                     preg_match( "/us3iab-node0/", $cluster ) );
+      $is_slurm  = preg_match( "/slurm/", $subtype );
       $is_demel3 = preg_match( "/demeler3/", $cluster );
+      $is_umont  = preg_match( "/umontana/", $cluster );
+      $ruser     = "us3";
+      if ( $is_umont )
+         $ruser     = "bd142854e";
 
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
@@ -419,15 +426,12 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $output    = array();
       if ( $is_slurm )
       {
-//         $uid   = exec( "id -u us3" );
-//         $sbarg = "--get-user-env=" . $uid . "L";
-//         $cmd   = "sbatch $sbarg $workdir/us3.slurm 2>&1";
          $cmd   = "sbatch --get-user-env $workdir/us3.slurm 2>&1";
       }
       else
          $cmd   = "/usr/bin/qsub $workdir/us3.pbs 2>&1";
       if ( $no_us3iab )
-         $cmd   = "ssh -p $port -x us3@$address " . $cmd;
+         $cmd   = "ssh -p $port -x $ruser@$address " . $cmd;
 
       $jobid = exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status  jobid=$jobid";
@@ -444,14 +448,12 @@ $this->message[] = "$cmd status=$status  jobid=$jobid";
       {
          if ( $is_demel3 )
          {
-	    $parts_b = preg_split( "/\./", rtrim( $jobid ) );
-	    $this->data[ 'eprfile' ] = $parts_b[0];
-	  }  
-	  else
-	    $this->data[ 'eprfile' ] = rtrim( $jobid );
+            $parts_b = preg_split( "/\./", rtrim( $jobid ) );
+            $this->data[ 'eprfile' ] = $parts_b[0];
+         }  
+         else
+            $this->data[ 'eprfile' ] = rtrim( $jobid );
       }			     
-
-//      else
 $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ]
  . " status=" . $status . " out0=" . $output[0];
    }

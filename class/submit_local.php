@@ -37,8 +37,8 @@ $this->message[] = "End of submit_local.php";
       $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
-      $is_slurm  = ( preg_match( "/jetstream/",    $cluster )  ||
-                     preg_match( "/us3iab-node0/", $cluster ) );
+      $is_slurm  = ( preg_match( "/jetstream/",   $cluster )  ||
+                     preg_match( "/us3iab-node/", $cluster ) );
 //$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_slurm=$is_slurm";
 $this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$is_us3iab  is_slurm=$is_slurm";
       $requestID = $this->data[ 'job' ][ 'requestID' ];
@@ -332,7 +332,12 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
 
         case 'us3iab-node1':
         case 'us3iab-devel':
-          $can_load = 0;
+          $can_load = 1;
+          $load1    = "module load mpi \n" ;
+          $load2    = "module load ultrascan/mpi";
+          $load3    = '';
+          $load4    = '';
+          
           if ( $nodes > 1 )
           {
              $ppn      = $nodes * $ppn;
@@ -470,9 +475,16 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
       global $dbhost;
       global $dbname;
 
+      global $ID;
+      global $is_cli;
+
       $cluster   = $this->data['job']['cluster_shortname'];
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $eprfile   = $this->data['eprfile'];
+      $autoflowID = 0;
+      if ( $is_cli ) {
+          $autoflowID = $ID;
+      }
 
       $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
  
@@ -496,6 +508,22 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
          return;
       }
  
+      if ( $autoflowID > 0 ) {
+          $query = "UPDATE autoflowAnalysis SET "       .
+                   "currentGfacID='$eprfile' "          .
+                   "WHERE requestID='$autoflowID'";
+
+          $result = mysqli_query( $link, $query );
+          
+          echo __FILE__ . " : update query $query\n";
+
+          if ( ! $result )
+          {
+              $this->message[] = "Invalid query:\n$query\n" . mysqli_error( $link ) . "\n";
+              return;
+          }
+      }
+
       mysqli_close( $link );
 
       // Insert initial data into global DB
@@ -507,13 +535,16 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
          return;
       }
 
-      $query = "INSERT INTO analysis SET " .
-               "gfacID='$eprfile', "       .
-               "cluster='$cluster', "      .
+      $query = "INSERT INTO analysis SET "          .
+               "gfacID='$eprfile', "                .
+               "autoflowAnalysisID='$autoflowID', " .
+               "cluster='$cluster', "               .
                "us3_db='$dbname'";
 
       $result = mysqli_query( $gfac_link, $query );
  
+      echo __FILE__ . " : intert query $query\n";
+      
       if ( ! $result )
       {
          $this->message[] = "Invalid query:\n$query\n" . mysqli_error( $gfac_link ) . "\n";

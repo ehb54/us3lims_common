@@ -509,8 +509,10 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
       }
  
       if ( $autoflowID > 0 ) {
-          $query = "UPDATE autoflowAnalysis SET "       .
-                   "currentGfacID='$eprfile' "          .
+          $query = "UPDATE autoflowAnalysis SET "  .
+                   "currentGfacID='$eprfile', "    .
+                   "status='SUBMITTED', "          .
+                   "statusMsg='Job submitted' "    .
                    "WHERE requestID='$autoflowID'";
 
           $result = mysqli_query( $link, $query );

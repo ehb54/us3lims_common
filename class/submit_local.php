@@ -511,6 +511,7 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
       if ( $autoflowID > 0 ) {
           $query = "UPDATE autoflowAnalysis SET "  .
                    "currentGfacID='$eprfile', "    .
+                   "currentHPCARID='$requestID', " .
                    "status='SUBMITTED', "          .
                    "statusMsg='Job submitted' "    .
                    "WHERE requestID='$autoflowID'";

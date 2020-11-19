@@ -333,9 +333,9 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
         case 'us3iab-node1':
         case 'us3iab-devel':
           $can_load = 1;
-          $load1    = "module load mpi \n" ;
-          $load2    = "module load ultrascan/mpi";
-          $load3    = '';
+          $load1    = "module purge \n";
+          $load2    = "module load mpi \n";
+          $load3    = "module load ultrascan/mpi";
           $load4    = '';
           
           if ( $nodes > 1 )

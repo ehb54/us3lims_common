@@ -546,7 +546,7 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
 
       $result = mysqli_query( $gfac_link, $query );
  
-      echo __FILE__ . " : intert query $query\n";
+      // echo __FILE__ . " : insert query $query\n";
       
       if ( ! $result )
       {

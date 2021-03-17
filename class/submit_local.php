@@ -37,8 +37,8 @@ $this->message[] = "End of submit_local.php";
       $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
-      $is_slurm  = ( preg_match( "/jetstream/",    $cluster )  ||
-                     preg_match( "/us3iab-node0/", $cluster ) );
+      $is_slurm  = ( preg_match( "/jetstream/",   $cluster )  ||
+                     preg_match( "/us3iab-node/", $cluster ) );
 //$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_slurm=$is_slurm";
 $this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$is_us3iab  is_slurm=$is_slurm";
       $requestID = $this->data[ 'job' ][ 'requestID' ];
@@ -317,22 +317,14 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
           break;
 
         case 'us3iab-node0':
-          $can_load = 2;
-          $load1    = "module load mpi/mpich-x86_64 \n" ;
-          $load2    = "";
-          $load3    = "";
-          $load4    = "";
-          $libpath  = "/home/us3/cluster/lib:/usr/lib64/qt5";
-          $path     = "/home/us3/cluster/bin";
-          $plines   = "\n" .
-             $load1 . "\n" .
-             "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
-             "export PATH=$path:\$PATH\n\n";
-          break;
-
         case 'us3iab-node1':
         case 'us3iab-devel':
-          $can_load = 0;
+          $can_load = 1;
+          $load1    = "module purge \n";
+          $load2    = "module load mpi/mpich-x86_64 \n";
+          $load3    = "module load ultrascan/mpi \n";
+          $load4    = '';
+          
           if ( $nodes > 1 )
           {
              $ppn      = $nodes * $ppn;
@@ -470,9 +462,16 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
       global $dbhost;
       global $dbname;
 
+      global $ID;
+      global $is_cli;
+
       $cluster   = $this->data['job']['cluster_shortname'];
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $eprfile   = $this->data['eprfile'];
+      $autoflowID = 0;
+      if ( $is_cli ) {
+          $autoflowID = $ID;
+      }
 
       $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
  
@@ -496,6 +495,25 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
          return;
       }
  
+      if ( $autoflowID > 0 ) {
+          $query = "UPDATE autoflowAnalysis SET "  .
+                   "currentGfacID='$eprfile', "    .
+                   "currentHPCARID='$requestID', " .
+                   "status='SUBMITTED', "          .
+                   "statusMsg='Job submitted' "    .
+                   "WHERE requestID='$autoflowID'";
+
+          $result = mysqli_query( $link, $query );
+          
+          echo __FILE__ . " : update query $query\n";
+
+          if ( ! $result )
+          {
+              $this->message[] = "Invalid query:\n$query\n" . mysqli_error( $link ) . "\n";
+              return;
+          }
+      }
+
       mysqli_close( $link );
 
       // Insert initial data into global DB
@@ -507,13 +525,16 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
          return;
       }
 
-      $query = "INSERT INTO analysis SET " .
-               "gfacID='$eprfile', "       .
-               "cluster='$cluster', "      .
+      $query = "INSERT INTO analysis SET "          .
+               "gfacID='$eprfile', "                .
+               "autoflowAnalysisID='$autoflowID', " .
+               "cluster='$cluster', "               .
                "us3_db='$dbname'";
 
       $result = mysqli_query( $gfac_link, $query );
  
+      // echo __FILE__ . " : insert query $query\n";
+      
       if ( ! $result )
       {
          $this->message[] = "Invalid query:\n$query\n" . mysqli_error( $gfac_link ) . "\n";

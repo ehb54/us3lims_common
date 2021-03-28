@@ -52,7 +52,54 @@ class airavata_jobsubmit
         "maxproc"    => 72
       );
 
-//        "workdir"    => "/ogce-rest/job/runjob/async",
+      $this->grid[ 'bridges2' ] = array
+      (
+        "name"       => "bridges2.psc.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/ocean/projects/mcb210002p/us3/airavata-workdirs",
+        "sshport"    => 22,
+        "queue"      => "RM-shared",
+        "maxtime"    => 2880,
+        "ppn"        => 128,
+        "ppbj"       => 32,
+        "maxproc"    => 1024
+      );
+
+      $this->grid[ 'expanse' ] = array
+      (
+        "name"       => "expanse.sdsc.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs",
+        "sshport"    => 22,
+        "queue"      => "shared",
+        "maxtime"    => 2880,
+        "ppn"        => 128,
+        "ppbj"       => 32,
+        "maxproc"    => 128
+      );
+
+      $this->grid[ 'expanse-gamc' ] = array
+      (
+        "name"       => "expanse.sdsc.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "http",
+        "httpport"   => $subport,
+        "workdir"    => "/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs",
+        "sshport"    => 22,
+        "queue"      => "compute",
+        "maxtime"    => 1440,
+        "ppn"        => 128,
+        "ppbj"       => 32,
+        "maxproc"    => 1024
+      );
+
       $this->grid[ 'stampede2' ] = array
       (
         "name"       => "stampede2.tacc.xsede.org",
@@ -116,6 +163,54 @@ class airavata_jobsubmit
         "ppn"        => 24,
         "ppbj"       => 24,
         "maxproc"    => 72
+      );
+
+      $this->grid[ 'demeler9-local' ] = array
+      (
+        "name"       => "demeler9.uleth.ca",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "slurm",
+        "httpport"   => $subport,
+        "workdir"    => "/home/us3/lims/work/",
+        "sshport"    => 22,
+        "queue"      => "batch",
+        "maxtime"    => 5760,
+        "ppn"        => 128,
+        "ppbj"       => 8,
+        "maxproc"    => 128
+      );
+
+      $this->grid[ 'chinook-local' ] = array
+      (
+        "name"       => "chinook.hs.umt.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "slurm",
+        "httpport"   => $subport,
+        "workdir"    => "/home/us3/lims/work/",
+        "sshport"    => 22,
+        "queue"      => "batch",
+        "maxtime"    => 5760,
+        "ppn"        => 64,
+        "ppbj"       => 8,
+        "maxproc"    => 64
+      );
+
+      $this->grid[ 'umontana-local' ] = array
+      (
+        "name"       => "login.gscc.umt.edu",
+        "submithost" => $subhost,
+        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
+        "submittype" => "slurm",
+        "httpport"   => $subport,
+        "workdir"    => "/home/bd142854e/cluster/work/",
+        "sshport"    => 22,
+        "queue"      => "griz_partition",
+        "maxtime"    => 5760,
+        "ppn"        => 72,
+        "ppbj"       => 36,
+        "maxproc"    => 144
       );
 
    }

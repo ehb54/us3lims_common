@@ -89,17 +89,6 @@ class submit_airavata extends airavata_jobsubmit
          $clus_scrd   = '/p/scratch/' . $clus_group . '/' . $clus_user;
       }
 
-      if ( $cluster == 'alamo'  &&  $nodes > 16 )
-      {  // If more nodes needed on Alamo than available, try to adjust
-         $hnode      = (int)($nodes / 2);
-         $tnode      = $hnode * 2;   // Test that nodes is an even number
-         if ( $tnode == $nodes )
-         {
-            $nodes      = $hnode;    // Half the number of nodes
-            $ppn       *= 2;         // Twice the processors per node
-            $this->grid[ $cluster ][ 'ppn' ] = $ppn;
-         }
-      }
       $cores      = $nodes * $ppn;
       if ( $cores < 1 )
       {
@@ -137,13 +126,27 @@ class submit_airavata extends airavata_jobsubmit
                              $this->data[ 'job' ][ 'requestID' ] );
 
       $uslimsVMHost = gethostname();
-      if ( preg_match( "/noval/", $uslimsVMHost ) )
+      if ( preg_match( "/lims4.noval/", $uslimsVMHost ) )
+      {
+         $uslimsVMHost = "uslims4.aucsolutions.com";
+      }
+      else if ( preg_match( "/noval/", $uslimsVMHost ) )
       {
          $uslimsVMHost = "uslims3.aucsolutions.com";
       }
-      if ( preg_match( "/uslims.uleth/", $uslimsVMHost ) )
+      else if ( preg_match( "/uslims.uleth/", $uslimsVMHost ) )
       {
          $uslimsVMHost = "demeler6.uleth.ca";
+      }
+
+      $memoryreq    = 0;
+      if ( preg_match( "/expanse/", $clus_host ) )
+      {
+         $memoryreq = (int)( ( $cores * 2000 ) / $nodes );
+
+         $memoryreq = (int)( $memoryreq + 999 );  // Rounded up multiple of 1000
+         $memoryreq = (int)( $memoryreq / 1000 );
+         $memoryreq = (int)( $memoryreq * 1000 );
       }
 
       $airavataWrapper = new AiravataWrapper();
@@ -154,7 +157,7 @@ class submit_airavata extends airavata_jobsubmit
                        $exp_name, $expReqId,
                        $clus_host, $queue, $cores, $nodes, $mgroupcount,
                        $maxWallTime, $clus_user, $clus_scrd, $clus_acct,
-                       $inputTarFile, $outputDirName );
+                       $inputTarFile, $outputDirName, $memoryreq );
 
       $expId      = 0;
 
@@ -165,7 +168,7 @@ class submit_airavata extends airavata_jobsubmit
          $this->message[] = "Experiment $expId created";
          $this->message[] = "    ppn=$ppn  tnodes=$tnodes  nodes=$nodes  cores=$cores";
          $this->message[] = "    uslimsVMHost=$uslimsVMHost  limsUser=$limsUser";
-         $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId";
+         $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId  memoryreq=$memoryreq";
          $this->message[] = "    clus_host=$clus_host  queue=$queue  clus_user=$clus_user  clus_scrd=$clus_scrd";
          $this->message[] = "    mgroupcount=$mgroupcount  maxWallTime=$maxWallTime";
          $this->message[] = "    inputTarFile=$inputTarFile";

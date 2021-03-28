@@ -7,6 +7,13 @@
  */
 require_once $class_dir . 'jobsubmit.php';
 
+function elog2( $msg )
+{
+   error_log( "$msg\n", 3, "/home/us3/lims/etc/elog2.txt" );
+}
+
+elog2( "submit_local from common_class start" );
+
 class submit_local extends jobsubmit
 { 
    // Submits data
@@ -34,11 +41,11 @@ $this->message[] = "End of submit_local.php";
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
+      $subtype   = $this->grid[ $cluster ][ 'submittype' ];
       $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
-      $is_slurm  = ( preg_match( "/jetstream/",   $cluster )  ||
-                     preg_match( "/us3iab-node/", $cluster ) );
+      $is_slurm  = preg_match( "/slurm/", $subtype );
 //$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_slurm=$is_slurm";
 $this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$is_us3iab  is_slurm=$is_slurm";
       $requestID = $this->data[ 'job' ][ 'requestID' ];
@@ -52,12 +59,16 @@ $this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$i
                          $this->data['db']['host'],
                          $this->data['db']['name'],
                          $this->data['job']['requestID'] );
+      $ruser     = preg_match( "/umontana/", $cluster ) ?
+                   "bd142854e" : "us3";
     
       // Create working directory
       $output    = array();
       $cmd       = "/bin/mkdir $workdir 2>&1";
       if ( $no_us3iab )
-         $cmd       = "/usr/bin/ssh -p $port -x us3@$address " . $cmd;
+      {
+         $cmd       = "/usr/bin/ssh -p $port -x $ruser@$address " . $cmd;
+      }
 
       exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status";
@@ -71,9 +82,13 @@ if($status != 0)
          $pbsfile  = $this->create_pbs();
 
       if ( $no_us3iab )
-         $cmd      = "/usr/bin/scp -P $port $tarfile $pbsfile us3@$address:$workdir 2>&1";
+      {
+	 $cmd      = "/usr/bin/scp -P $port $tarfile $pbsfile $ruser@$address:$workdir 2>&1";
+      }
       else
+      {
          $cmd      = "/bin/cp $tarfile $pbsfile $workdir/ 2>&1";
+      }
 
       exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status";
@@ -231,16 +246,17 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
    // Create a slurm file
    function create_slurm()
    {
-      $quename   = "batch";
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
+      $quename   = $this->grid[ $cluster ][ 'queue' ];
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
       $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
+elog2( "create slurm cluster $cluster clusname $clusname quename $quename" );
       $tarfile   = sprintf( "hpcinput-%s-%s-%05d.tar",
                          $this->data['db']['host'],
                          $this->data['db']['name'],
@@ -314,6 +330,24 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
                       "module $load3\n\n" .
                       "export LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
                       "export PATH=$path:\$PATH\n\n";
+          break;
+
+	case 'demeler9-local':
+          $can_load = 1;
+          $load1    = "module purge \n";
+          $load2    = "module load mpi/mpich-x86_64 \n";
+          $load3    = "module load ultrascan/mpi \n";
+          $load4    = '';
+          
+          if ( $nodes > 1 )
+          {
+             $ppn      = $nodes * $ppn;
+             $nodes    = 1;
+          }
+          $libpath  = "/usr/local/lib64:/export/home/us3/cluster/lib:/usr/lib64/openmpi-1.10/lib:/opt/qt/lib";
+          $path     = "/export/home/us3/cluster/bin:/usr/lib64/openmpi-1.10/bin";
+          $ppn      = max( $ppn, 8 );
+          $wall     = 2880;
           break;
 
         case 'us3iab-node0':
@@ -399,10 +433,8 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
 
       $is_slurm  = preg_match( "/slurm/", $subtype );
       $is_demel3 = preg_match( "/demeler3/", $cluster );
-      $is_umont  = preg_match( "/umontana/", $cluster );
-      $ruser     = "us3";
-      if ( $is_umont )
-         $ruser     = "bd142854e";
+      $ruser     = preg_match( "/umontana/", $cluster ) ?
+                   "bd142854e" : "us3";
 
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
@@ -421,10 +453,15 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
          $cmd   = "sbatch --get-user-env $workdir/us3.slurm 2>&1";
       }
       else
+      {
          $cmd   = "/usr/bin/qsub $workdir/us3.pbs 2>&1";
+      }
       if ( $no_us3iab )
+      {
          $cmd   = "ssh -p $port -x $ruser@$address " . $cmd;
+      }
 
+elog2( "submit_local cmd = $cmd" );
       $jobid = exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status  jobid=$jobid";
 
@@ -434,6 +471,7 @@ $this->message[] = "$cmd status=$status  jobid=$jobid";
       {
          $parts = preg_split( "/\s+/", $output[ 0 ] );
          $this->data[ 'eprfile' ] = $parts[ 3 ];
+elog2( "submit_local is_slurm" );
 //$this->data[ 'eprfile' ] = $jobid;
       }
       else
@@ -448,6 +486,7 @@ $this->message[] = "$cmd status=$status  jobid=$jobid";
       }			     
 $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ]
  . " status=" . $status . " out0=" . $output[0];
+elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
    }
  
    function update_db()

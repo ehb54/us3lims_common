@@ -680,16 +680,35 @@ $spfact=7;
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
-      $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
-      $ppbj       = $this->grid[ $cluster ][ 'ppbj'    ];
+      $ppn        = (int)$this->grid[ $cluster ][ 'ppn'     ];
+      $ppbj       = (int)$this->grid[ $cluster ][ 'ppbj'    ];
+      $montecarlo = (int)$parameters[ 'mc_iterations' ];
+      $mgroup     = 1;
+
 
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {  // GA: procs is demes+1 rounded to procs-per-node
          $demes = $parameters[ 'demes' ];
          if ( $demes == 1 )
-            $demes = $ppbj - 1;
-         $procs = $demes + $ppn;                  // Procs = demes+1
-         $procs = (int)( $procs / $ppn ) * $ppn;  // Rounded to procs-per-node
+            $demes      = $ppbj - 1;
+         $ppmg       = $demes + 1;           // Procs per group: demes plus one
+         $procs      = $demes + $ppmg - 1;
+         $procs      = (int)( $procs / $ppmg ) * $ppmg; // Rounded to procs-per-mgroup
+$mgkn1=-1;
+         if ( isset( $this->data[ 'job' ][ 'mgroupcount' ] ) )
+         {
+            $mgroup     = $this->data[ 'job' ][ 'mgroupcount' ];
+$mgkn1=$mgroup;
+            $mgroup     = max( 1, $mgroup );
+         }
+         else if ( isset( $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] ) )
+         {
+            $mgroup     = $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ];
+            $mgroup     = max( 1, $mgroup );
+            $this->data[ 'job' ][ 'mgroupcount' ] = $mgroup;
+         }
+         $procs *= $mgroup;                   // Total procs based on mgroup count
+$this->message[] = "GA mgroup=$mgkn1 $mgroup  procs=$procs  ppmg=$ppmg  demes=$demes";
       }
       else if ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
       {  // 2DSA:  procs is max_procs, but no more than subgrid count
@@ -705,11 +724,28 @@ $spfact=7;
          $procs = min( $ppbj, $vsize );      // Procs = base or subgrid count
       }
 
-      $procs = max( $procs, $ppn );          // Minimum procs is procs-per-node
-      $procs = min( $procs, $max_procs );    // Maximum procs depends on cluster
+      $procs = (int)max( $procs, $ppbj );         // Minimum procs is procs-per-basejob
+      $procs = (int)min( $procs, $max_procs );    // Maximum procs depends on cluster
+      if ( $procs < $ppn )
+      {
+$this->message[] = "nodes(): PROCS<PPN  ppn=$ppn  procs=$procs";
+         $ppn        = (int)$procs;
+         $mgroup     = 1;
+         $this->grid[ $cluster ][ 'ppn' ] = $ppn;
+      }
 
-      $nodes = (int)$procs / $ppn;    // Return nodes, procs divided by procs-per-node
-      $nodes = max( $nodes, 1 );      // Minimum nodes is 1
+      $nodes = (int)( $procs / $ppn ); // Return nodes, procs divided by procs-per-node
+      $tcore = (int)( $nodes * $ppn );
+      if ( $tcore != $procs  ||  $tcore == 0 )
+      {
+$this->message[] = "nodes(): TCORE<>PROCS  tcore=$tcore  procs=$procs";
+         $nodes += 1;                  // Bump nodes by 1 if ppn>ppbj
+         $ppn    = (int)( $procs / $nodes ); // Divide procs-per-node evenly among nodes
+         $this->grid[ $cluster ][ 'ppn' ] = $ppn;
+      }
+      $nodes = (int)max( $nodes, 1 );  // Minimum nodes is 1
+      $this->grid[ $cluster ][ 'ppn' ] = $ppn;
+$this->message[] = "nodes(): tcore=$tcore  ppn=$ppn  nodes=$nodes  procs=$procs";
       return $nodes;
    }
 

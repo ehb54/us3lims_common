@@ -39,9 +39,8 @@ class submit_airavata extends airavata_jobsubmit
       $dbname      = $this->data[ 'db'     ][ 'name' ];
       $mgroupcount = min( $this->max_mgroupcount(),
             $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
+      $nodes       = $this->nodes();
       $ppn         = $this->grid[ $cluster ][ 'ppn' ];
-      $tnodes      = $this->nodes();
-      $nodes       = $tnodes * $mgroupcount;
       $clus_user   = 'us3';
       $clus_scrd   = 'NONE';
       $clus_acct   = 'NONE';
@@ -92,11 +91,19 @@ class submit_airavata extends airavata_jobsubmit
       $cores      = $nodes * $ppn;
       if ( $cores < 1 )
       {
-         $this->message[] = "Requested cores is zero (ns=$nodes, pp=$ppn, n0=$tnodes, gc=$mgroupcount)";
+         $this->message[] = "Requested cores is zero (ns=$nodes, pp=$ppn, gc=$mgroupcount)";
       }
 
       $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
       $maxWallTime = $this->maxwall();
+
+      if ( preg_match( "/expanse/", $cluster )  &&
+           $mgroupcount > 1 )
+      {  // Switch expanse partition to "compute" if pmgc>1
+         $queue       = 'compute';
+      }
+
+
       if ( preg_match( "/swus/", $clus_user ) )
       {  // Development users on Jureca limited to 6 hours wall time
          $maxWallTime = min( $maxWallTime, 360 );
@@ -143,6 +150,7 @@ class submit_airavata extends airavata_jobsubmit
       if ( preg_match( "/expanse/", $clus_host ) )
       {
          $memoryreq = (int)( ( $cores * 2000 ) / $nodes );
+         $memoryreq = min( $memoryreq, 254000 );
 
          $memoryreq = (int)( $memoryreq + 999 );  // Rounded up multiple of 1000
          $memoryreq = (int)( $memoryreq / 1000 );
@@ -166,7 +174,7 @@ class submit_airavata extends airavata_jobsubmit
          $expId      = $expResult[ 'experimentId' ];
          //var_dump($expId);
          $this->message[] = "Experiment $expId created";
-         $this->message[] = "    ppn=$ppn  tnodes=$tnodes  nodes=$nodes  cores=$cores";
+         $this->message[] = "    ppn=$ppn  nodes=$nodes  cores=$cores";
          $this->message[] = "    uslimsVMHost=$uslimsVMHost  limsUser=$limsUser";
          $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId  memoryreq=$memoryreq";
          $this->message[] = "    clus_host=$clus_host  queue=$queue  clus_user=$clus_user  clus_scrd=$clus_scrd";

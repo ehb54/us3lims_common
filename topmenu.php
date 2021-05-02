@@ -1,12 +1,17 @@
+<?php
+
+$use_site = preg_replace( '/\/uslims3_.*$/', '', $org_site );
+
+echo<<<HTML
    <div id="globalnav">
    <ul class='level1'>
-      <li><a href="http://ultrascan.aucsolutions.com/index.php">Home</a></li>
+      <li><a href="http://$use_site/index.php">Home</a></li>
       <li><a href='http://www.ultrascan3.aucsolutions.com/index.php'>UltraScan III</a></li>
       <li><a href='http://www.ultrascan2.aucsolutions.com/index.php'>UltraScan II</a></li>
       <li class='submenu'><a href='http://www.uslims.aucsolutions.com'>LIMS</a>
          <ul class='level2'>
-            <li><a href="http://uslims3.aucsolutions.com">Main Website</a></li>
-            <li><a href="http://uslims3.aucsolutions.com/index.php">LIMS-III</a></li>
+            <li><a href="http://$use_site">Main Website</a></li>
+            <li><a href="http://$use_site/index.php">LIMS-III</a></li>
             <li><a href="http://www.uslims2.aucsolutions.com/index.php">LIMS-II</a></li>
          </ul></li>
       <li class='submenu'><a href='http://www.somo.aucsolutions.com/'>SOMO</a>
@@ -28,3 +33,4 @@
          </ul></li>
    </ul>
    </div>
+HTML;

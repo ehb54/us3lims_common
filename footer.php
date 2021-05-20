@@ -9,7 +9,11 @@
 
 date_default_timezone_set( 'America/Chicago' );
 $filename = basename( $_SERVER['PHP_SELF'] );
-$modtime = date( "F d, Y", filectime( $filename ) );
+if ( isset( $is_cli ) && $is_cli ) {
+   $modtime = "autoflow submitted";
+} else {
+   $modtime = date( "F d, Y", filectime( $filename ) );
+}
 
 echo<<<HTML
   <!-- end content -->

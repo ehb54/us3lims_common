@@ -3,34 +3,27 @@
 $use_site = preg_replace( '/\/uslims3_.*$/', '', $org_site );
 
 echo<<<HTML
-   <div id="globalnav">
-   <ul class='level1'>
-      <li><a href="http://$use_site/index.php">Home</a></li>
-      <li><a href='http://www.ultrascan3.aucsolutions.com/index.php'>UltraScan III</a></li>
-      <li><a href='http://www.ultrascan2.aucsolutions.com/index.php'>UltraScan II</a></li>
-      <li class='submenu'><a href='http://www.uslims.aucsolutions.com'>LIMS</a>
-         <ul class='level2'>
-            <li><a href="http://$use_site">Main Website</a></li>
-            <li><a href="http://$use_site/index.php">LIMS-III</a></li>
-            <li><a href="http://www.uslims2.aucsolutions.com/index.php">LIMS-II</a></li>
-         </ul></li>
-      <li class='submenu'><a href='http://www.somo.aucsolutions.com/'>SOMO</a>
-         <ul class='level2'>
-            <li><a href='http://www.beads.aucsolutions.com/'>Beadmodeling</a></li>
-            <li><a href='http://www.sas.aucsolutions.com/'>SAXS/SANS</a></li>
-            <li><a href='http://www.dynamics.aucsolutions.com/'>Mol. Dynamics</a></li>
-         </ul></li>
-      <li class='submenu'><a href='http://wiki.aucsolutions.com/'>Wiki</a>
-         <ul class='level2'>
-            <li><a href='http://wiki.aucsolutions.com/ultrascan/'>UltraScan-II</a></li>
-            <li><a href='http://wiki.aucsolutions.com/cauma/'>LIMS-II</a></li>
-            <li><a href='http://wiki.aucsolutions.com/ultrascan3/'>UltraScan-III</a></li>
-            <li><a href='http://wiki.aucsolutions.com/limsv3/'>LIMS-III</a></li>
-            <li><a href='http://wiki.aucsolutions.com/somo/'>US SOMO</a></li>
-            <li><a href='http://wiki.aucsolutions.com/dmd/'>DMD</a></li>
-            <li><a href='http://wiki.aucsolutions.com/cfa/'>CFA</a></li>
-            <li><a href='http://wiki.aucsolutions.com/aucmanual/'>AUC Manual</a></li>
-         </ul></li>
-   </ul>
-   </div>
+    <div id="globalnav">
+       <ul class='level1'>
+          <li><a target=_blank href="https://ultrascan.aucsolutions.com">Home</a></li>
+          <li><a target=_blank href='https://ultrascan3.aucsolutions.com/software.php'>Downloads</a></li>
+          <li><a target=_blank href='https://resources.aucsolutions.com/index.php'>Resources</a></li>
+    
+<!-- The first and third LIMS link should be custom and point to the local LIMS installation: -->
+
+          <li class='submenu'><a href='https://$use_site/index.php'>LIMS</a>
+          <ul class='level2'>
+             <li><a target=_blank href='https://uslims.aucsolutions.com/lims_servers.php'>All LIMS Servers</a></li>
+             <li><a href='https://$use_site/uslims3_newlims/request_new_instance.php'>Request New LIMS</a></li>
+          </ul></li>
+          <li><a target=_blank href='https://somo.aucsolutions.com/index.php'>SOMO</a></li>
+          <li class='submenu'><a href='https://wiki.aucsolutions.com/'>Wiki</a>
+          <ul class='level2'>
+             <li><a target=_blank href='https://wiki.aucsolutions.com/ultrascan3/'>UltraScan-III</a></li>
+             <li><a target=_blank href='https://wiki.aucsolutions.com/limsv3/'>LIMS-III</a></li>
+             <li><a target=_blank href='https://wiki.aucsolutions.com/somo/'>US SOMO</a></li>
+             <li><a target=_blank href='https://wiki.aucsolutions.com/openAUC/'>openAUC</a></li>
+          </ul></li>
+       </ul>
+    </div>
 HTML;

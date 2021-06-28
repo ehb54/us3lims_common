@@ -274,7 +274,7 @@ elog2( "create slurm cluster $cluster clusname $clusname quename $quename" );
       $slupath = $slufile;
       $wall    = $this->maxwall() * 3.0;
       if ( $is_us3iab )
-         $wall    = 2880.0;
+         $wall    = 999999;
       $nodes   = $this->nodes() * $mgroupcount;
 
       $hours   = (int)( $wall / 60 );
@@ -367,7 +367,9 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
           $libpath  = "/usr/local/lib64:/export/home/us3/cluster/lib:/usr/lib64/openmpi-1.10/lib:/opt/qt/lib";
           $path     = "/export/home/us3/cluster/bin:/usr/lib64/openmpi-1.10/bin";
           $ppn      = max( $ppn, 8 );
-          $wall     = 2880;
+          $wall     = 0; // no time limit
+          $walltime = "00:00:00";
+          $wallmins = 999999; // arbitrary limit for mpirun (~2 years!)
           break;
 
         default:

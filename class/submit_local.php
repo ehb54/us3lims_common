@@ -292,6 +292,7 @@ elog2( "create slurm cluster $cluster clusname $clusname quename $quename" );
       $plines   = "";
       $mpirun   = "mpirun";
       $mpiana   = "us_mpi_analysis";
+      $slurm332bug = "";
 
 $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
 
@@ -359,6 +360,7 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
           $load3    = "module load ultrascan/mpi \n";
           $load4    = '';
           
+          $slurm332bug = '-hosts=$SLURM_NODELIST -np $SLURM_NTASKS';
           if ( $nodes > 1 )
           {
              $ppn      = $nodes * $ppn;
@@ -406,7 +408,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "export OMPI_MCA_btl=self,sm,tcp\n" .
       "export QT_LOGGING_RULES='*.debug=true'\n\n" .
       "cd $workdir\n\n" .
-      "$mpirun $mpiana -walltime $wallmins" .
+      "$mpirun $slurm332bug $mpiana -walltime $wallmins" .
       " -mgroupcount $mgroupcount $tarfile\n";
 
       $this->data[ 'pbsfile' ] = $contents;

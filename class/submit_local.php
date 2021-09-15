@@ -405,6 +405,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "#SBATCH -t $walltime\n" .
       "#SBATCH -e $workdir/stderr\n" .
       "#SBATCH -o $workdir/stdout\n" .
+      "#SBATCH -O\n" .
       "$plines" .
       "export UCX_LOG_LEVEL=error\n" .
       "export OMPI_MCA_btl=self,sm,tcp\n" .
@@ -586,7 +587,16 @@ elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
  
       mysqli_close( $gfac_link );
 
+      
 $this->message[] = "Database $dbname updated: requestID = $requestID";
+
+      $cmd = "php /home/us3/lims/bin/jobmonitor/jobmonitor.php $dbname $eprfile $requestID 2>&1";
+      exec( $cmd, $null, $status );
+      $this->message[] = "$cmd status=$status";
+      if($status != 0) {
+          $this->message[] = "  ++++ output=$output[0]";
+      }
+
    }
 
    function close_transport( )

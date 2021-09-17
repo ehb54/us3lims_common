@@ -405,7 +405,6 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "#SBATCH -t $walltime\n" .
       "#SBATCH -e $workdir/stderr\n" .
       "#SBATCH -o $workdir/stdout\n" .
-      "#SBATCH -O\n" .
       "$plines" .
       "export UCX_LOG_LEVEL=error\n" .
       "export OMPI_MCA_btl=self,sm,tcp\n" .

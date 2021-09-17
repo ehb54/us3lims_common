@@ -271,7 +271,7 @@ echo "err-message=" . $expResult['message'];
       mysqli_close( $gfac_link );
       $this->message[] = "Global database $globaldbname updated: gfacID = $gfacID";
 
-      $cmd = "php /home/us3/lims/bin/jobmonitor/jobmonitor.php $dbname $eprfile $requestID 2>&1";
+      $cmd = "php /home/us3/lims/bin/jobmonitor/jobmonitor.php $dbname $gfacID $requestID 2>&1";
       exec( $cmd, $null, $status );
       $this->message[] = "$cmd status=$status";
       if($status != 0) {

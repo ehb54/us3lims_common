@@ -354,6 +354,7 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
         case 'us3iab-node0':
         case 'us3iab-node1':
         case 'us3iab-devel':
+        case 'demeler1-local':
           $can_load = 1;
           $load1    = "module purge \n";
           $load2    = "module load mpi/mpich-x86_64 \n";

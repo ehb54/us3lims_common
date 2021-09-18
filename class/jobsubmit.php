@@ -142,7 +142,7 @@ class jobsubmit
         "workdir"    => "/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs",
         "sshport"    => 22,
         "queue"      => "compute",
-        "maxtime"    => 1440,
+        "maxtime"    => 2880,
         "ppn"        => 128,
         "ppbj"       => 32,
         "maxproc"    => 1024

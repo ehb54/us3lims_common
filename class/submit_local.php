@@ -6,6 +6,7 @@
  *
  */
 require_once $class_dir . 'jobsubmit.php';
+include_once $class_dir . 'priority.php';
 
 function elog2( $msg )
 {
@@ -397,6 +398,11 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
 
       $procs   = $nodes * $ppn;
 
+      $priority_nice = priority_nice_string();
+      if ( strlen( $priority_nice ) ) {
+         $this->message[] = "Priority set " . str_replace( "\n", "; ", $priority_nice );
+      }
+ 
       $contents = 
       "#!/bin/bash\n" .
       "#SBATCH -p $quename\n" .
@@ -406,7 +412,8 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "#SBATCH -t $walltime\n" .
       "#SBATCH -e $workdir/stderr\n" .
       "#SBATCH -o $workdir/stdout\n" .
-      "$plines" .
+      "$priority_nice\n" .
+       "$plines" .
       "export UCX_LOG_LEVEL=error\n" .
       "export OMPI_MCA_btl=self,sm,tcp\n" .
       "export QT_LOGGING_RULES='*.debug=true'\n\n" .

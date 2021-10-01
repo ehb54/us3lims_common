@@ -6,6 +6,9 @@ us_submit_prog.ele = document.getElementById("_submitprogress");
 us_submit_prog.update = function( msg ) {
     us_submit_prog.ele.innerHTML=msg;
 }
+us_submit_prog.append = function( msg ) {
+    us_submit_prog.ele.innerHTML += "<br>" + msg;
+}
 us_submit_prog.show = function() {
     us_submit_prog.ele.style.display = "block";
 }

@@ -1,76 +1,9 @@
 <?php
 
-#    Her idea for a priorisation was:
-#    High priority: Fit noise in ordinary 2DSA analysis
-#    MidHigh priority: Iterative and MC method in ordinary 2DSA analysis, Fit Noise for MWL 2DSA
-#    Medium priority: Custom Grid analyses, Fit Noise for PCSA and GeneticAlgorithm
-#    MidLow priority: PCSA (except PCSA MC)
-#    Low priority: GeneticAlgorithm and PCSA MC
-    
 
 if ( file_exists( __DIR__ . "/../priority_config.php" ) ) {
     include_once( __DIR__ . "/../priority_config.php" );
 }
-
-## temp def to be put in priority_config.php
-$priority_config =
-    [
-# global options first
-     "defaultpriority"     => 10000
-     ,"datasetthreshold"   => 5
-     ,"iterationthreshold" => 4
-     ,"log"                => true
-     ,"logfile"            => "/tmp/priority.log"
-
-     ,"2DSA"               => 100
-     ,"2DSA-LD"            => 200
-     ,"2DSA-LD-FN"         => 300
-     ,"2DSA-LD-FN-IT"      => 400
-     ,"2DSA-LD-IT"         => 600
-     ,"2DSA-LD-IT-MC"      => 700
-     ,"2DSA-FN"            => 800
-     ,"2DSA-FN-IT"         => 900
-     ,"2DSA-IT"            => 1200
-     ,"2DSA-IT-MC"         => 1300
-     ,"2DSA-MC"            => 1400
-
-     ,"PCSA"               => 100
-     ,"PCSA-LD"            => 200
-     ,"PCSA-LD-FN"         => 300
-     ,"PCSA-LD-FN-IT"      => 400
-     ,"PCSA-LD-IT"         => 600
-     ,"PCSA-LD-IT-MC"      => 700
-     ,"PCSA-FN"            => 800
-     ,"PCSA-FN-IT"         => 900
-     ,"PCSA-IT"            => 1200
-     ,"PCSA-IT-MC"         => 1300
-     ,"PCSA-MC"            => 1400
-
-    ];
-
-## payload example
-##{
-##  "s_grid_points": 64,
-##  "ff0_grid_points": 64,
-##  "uniform_grid": 8,
-##  "s_min": "1",
-##  "s_max": "10",
-##  "ff0_min": "1",
-##  "ff0_max": "4",
-##  "mc_iterations": "3",
-##  "req_mgroupcount": 1,
-##  "tinoise_option": "0",
-##  "rinoise_option": "0",
-##  "fit_mb_select": "0",
-##  "meniscus_range": 0,
-##  "meniscus_points": 1,
-##  "max_iterations": "3",
-##  "debug_timings": 0,
-##  "debug_level": "0",
-##  "debug_text": "",
-##  "experimentID": "1",
-##  "timelast": "11047"
-##};
 
 function priority_nice_string() {
     global $priority_config;
@@ -126,7 +59,7 @@ function priority( $analysis_type, $datasets, $job_params ) {
     $matches[] = $match;
 
     if (
-        isset( $priority_config[ "datasetthershold" ] )
+        isset( $priority_config[ "datasetthreshold" ] )
         && $datasets > $priority_config[ "datasetthreshold" ]
         ) {
         $match .= "-LD";

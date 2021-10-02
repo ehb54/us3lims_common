@@ -1,0 +1,141 @@
+<?php
+
+#    Rose @ Konstanz idea for a priorisation:
+#    100 High priority: Fit noise in ordinary 2DSA analysis
+#    200 MidHigh priority: Iterative and MC method in ordinary 2DSA analysis, Fit Noise for MWL 2DSA
+#    300 Medium priority: Custom Grid analyses, Fit Noise for PCSA and GeneticAlgorithm
+#    400 MidLow priority: PCSA (except PCSA MC)
+#    500 Low priority: GeneticAlgorithm and PCSA MC
+# encoded below
+    
+$priority_config =
+    [
+     ###  global options
+     "defaultpriority"      => 1000                 ### for job types that find no match
+     ,"datasetthreshold"    => 20                   ### any jobs with more datasets then this will be considered large data -LD
+     ,"iterationthreshold"  => 4                    ### any jobs with more iterations than this will be considered iterative -IT 
+     ,"log"                 => true                 ### logging true or false
+     ,"logfile"             => "/tmp/priority.log"  ### logging output file, only used if "log" => true
+
+     ###  method options
+     ,"2DSA"                => 500                  ### 2DSA priority
+     ,"2DSA-LD"             => 200                  ### 2DSA large data
+     ,"2DSA-LD-FN"          => 200                  ### 2DSA large data + fit noise
+     ,"2DSA-LD-FN-IT"       => 500                  ### 2DSA large data + fit noise + iterative
+     ,"2DSA-LD-IT"          => 500                  ### 2DSA large data + iterative
+     ,"2DSA-LD-IT-MC"       => 500                  ### 2DSA large data + iterative + monte carlo
+     ,"2DSA-FN"             => 100                  ### 2DSA fit noise
+     ,"2DSA-FN-IT"          => 500                  ### 2DSA fit noise + iterative
+     ,"2DSA-IT"             => 200                  ### 2DSA iterative
+     ,"2DSA-IT-MC"          => 200                  ### 2DSA iterative + monte carlo
+     ,"2DSA-MC"             => 200                  ### 2DSA monte carlo
+
+     ,"2DSA-GF"             => 500                  ### 2DSA global fit priorities
+     ,"2DSA-GF-LD"          => 500
+     ,"2DSA-GF-LD-FN"       => 500
+     ,"2DSA-GF-LD-FN-IT"    => 500
+     ,"2DSA-GF-LD-IT"       => 500
+     ,"2DSA-GF-LD-IT-MC"    => 500
+     ,"2DSA-GF-FN"          => 500
+     ,"2DSA-GF-FN-IT"       => 500
+     ,"2DSA-GF-IT"          => 500 
+     ,"2DSA-GF-IT-MC"       => 500 
+     ,"2DSA-GF-MC"          => 500 
+
+     ,"2DSA-CG"             => 300                  ### 2DSA custom grid priorities
+     ,"2DSA-CG-LD"          => 300
+     ,"2DSA-CG-LD-FN"       => 300
+     ,"2DSA-CG-LD-FN-IT"    => 300
+     ,"2DSA-CG-LD-IT"       => 300
+     ,"2DSA-CG-LD-IT-MC"    => 300
+     ,"2DSA-CG-FN"          => 300
+     ,"2DSA-CG-FN-IT"       => 300
+     ,"2DSA-CG-IT"          => 300 
+     ,"2DSA-CG-IT-MC"       => 300 
+     ,"2DSA-CG-MC"          => 300 
+
+     ,"2DSA-CG-GF"          => 500                  ### 2DSA-CG custom grid priorities
+     ,"2DSA-CG-GF-LD"       => 500
+     ,"2DSA-CG-GF-LD-FN"    => 500
+     ,"2DSA-CG-GF-LD-FN-IT" => 500
+     ,"2DSA-CG-GF-LD-IT"    => 500
+     ,"2DSA-CG-GF-LD-IT-MC" => 500
+     ,"2DSA-CG-GF-FN"       => 500
+     ,"2DSA-CG-GF-FN-IT"    => 500
+     ,"2DSA-CG-GF-IT"       => 500 
+     ,"2DSA-CG-GF-IT-MC"    => 500 
+     ,"2DSA-CG-GF-MC"       => 500 
+
+     ,"PCSA"                => 400                  ### PCSA priorities
+     ,"PCSA-LD"             => 400
+     ,"PCSA-LD-FN"          => 400
+     ,"PCSA-LD-FN-IT"       => 400
+     ,"PCSA-LD-IT"          => 400
+     ,"PCSA-LD-IT-MC"       => 400
+     ,"PCSA-FN"             => 300
+     ,"PCSA-FN-IT"          => 400
+     ,"PCSA-IT"             => 400 
+     ,"PCSA-IT-MC"          => 400 
+     ,"PCSA-MC"             => 500 
+
+     ,"PCSA-GF"             => 500                  ### PCSA global fit priorities
+     ,"PCSA-GF-LD"          => 500
+     ,"PCSA-GF-LD-FN"       => 500
+     ,"PCSA-GF-LD-FN-IT"    => 500
+     ,"PCSA-GF-LD-IT"       => 500
+     ,"PCSA-GF-LD-IT-MC"    => 500
+     ,"PCSA-GF-FN"          => 500
+     ,"PCSA-GF-FN-IT"       => 500
+     ,"PCSA-GF-IT"          => 500 
+     ,"PCSA-GF-IT-MC"       => 500 
+     ,"PCSA-GF-MC"          => 500 
+
+     ,"GA"                  => 500                  ### GA priorities
+     ,"GA-LD"               => 500
+     ,"GA-LD-FN"            => 500
+     ,"GA-LD-FN-IT"         => 500
+     ,"GA-LD-IT"            => 500
+     ,"GA-LD-IT-MC"         => 500
+     ,"GA-FN"               => 300
+     ,"GA-FN-IT"            => 500
+     ,"GA-IT"               => 500 
+     ,"GA-IT-MC"            => 500 
+     ,"GA-MC"               => 500 
+
+     ,"GA-GF"               => 500                  ### GA global fit priorities
+     ,"GA-GF-LD"            => 500
+     ,"GA-GF-LD-FN"         => 500
+     ,"GA-GF-LD-FN-IT"      => 500
+     ,"GA-GF-LD-IT"         => 500
+     ,"GA-GF-LD-IT-MC"      => 500
+     ,"GA-GF-FN"            => 500
+     ,"GA-GF-FN-IT"         => 500
+     ,"GA-GF-IT"            => 500 
+     ,"GA-GF-IT-MC"         => 500 
+     ,"GA-GF-MC"            => 500 
+
+     ,"DMGA"                => 500                  ### DMGA priorities
+     ,"DMGA-LD"             => 500
+     ,"DMGA-LD-FN"          => 500
+     ,"DMGA-LD-FN-IT"       => 500
+     ,"DMGA-LD-IT"          => 500
+     ,"DMGA-LD-IT-MC"       => 500
+     ,"DMGA-FN"             => 500
+     ,"DMGA-FN-IT"          => 500
+     ,"DMGA-IT"             => 500 
+     ,"DMGA-IT-MC"          => 500 
+     ,"DMGA-MC"             => 500 
+
+     ,"DMGA-GF"             => 500                  ### DMGA global fit priorities
+     ,"DMGA-GF-LD"          => 500
+     ,"DMGA-GF-LD-FN"       => 500
+     ,"DMGA-GF-LD-FN-IT"    => 500
+     ,"DMGA-GF-LD-IT"       => 500
+     ,"DMGA-GF-LD-IT-MC"    => 500
+     ,"DMGA-GF-FN"          => 500
+     ,"DMGA-GF-FN-IT"       => 500
+     ,"DMGA-GF-IT"          => 500 
+     ,"DMGA-GF-IT-MC"       => 500 
+     ,"DMGA-GF-MC"          => 500 
+
+    ];

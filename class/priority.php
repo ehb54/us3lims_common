@@ -125,25 +125,38 @@ function priority( $analysis_type, $datasets, $job_params ) {
     $match     = $analysis_type;
     $matches[] = $match;
 
-    if ( $datasets > $priority_config[ "datasetthreshold" ] ) {
+    if (
+        isset( $priority_config[ "datasetthershold" ] )
+        && $datasets > $priority_config[ "datasetthreshold" ]
+        ) {
         $match .= "-LD";
         $matches[] = $match;
     }
 
-    if ( $job_params[ "tinoise_option" ] != "0"
-         || $job_params[ "rinoise_option" ] != "0" ) {
+    if (
+        ( isset( $job_params[ "tinoise_option" ] )
+          && $job_params[ "tinoise_option" ] != "0" )
+        || ( isset( $job_params[ "rinoise_option" ] )
+             && $job_params[ "rinoise_option" ] != "0" )
+        ) {
         $match .= "-FN";
         $matches[] = $match;
     }
     
-    if ( $job_params[ "max_iterations" ] > $priority_config[ "iterationthreshold" ] 
-         || $job_params[ "gfit_iterations" ] > $priority_config[ "iterationthreshold" ]
+    if (
+        ( isset( $job_params[ "max_iterations" ] )
+          && $job_params[ "max_iterations" ] > $priority_config[ "iterationthreshold" ] )
+        || ( isset( $job_params[ "gfit_iterations" ] )
+             && $job_params[ "gfit_iterations" ] > $priority_config[ "iterationthreshold" ] )
         ) {
         $match .= "-IT";
         $matches[] = $match;
     }
 
-    if ( $job_params[ "mc_iterations" ] > 1 ) {
+    if (
+        isset( $job_params[ "mc_iterations" ] )
+        && $job_params[ "mc_iterations" ] > 1
+        ) {
         $match .= "-MC";
         $matches[] = $match;
     }

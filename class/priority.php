@@ -1,6 +1,5 @@
 <?php
 
-
 if ( file_exists( __DIR__ . "/../priority_config.php" ) ) {
     include_once( __DIR__ . "/../priority_config.php" );
 }
@@ -31,7 +30,9 @@ function priority_nice( $p, $msg = "" ) {
 
 function priority_log( $msg ) {
     global $priority_config;
-    if ( !array_key_exists( "log", $priority_config )
+    if ( !isset( $priority_config )
+         || !is_array( $priority_config )
+         || !array_key_exists( "log", $priority_config )
          || !$priority_config[ "log" ]
          || !array_key_exists( "logfile", $priority_config )
         ) {

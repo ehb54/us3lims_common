@@ -54,7 +54,7 @@ $priority_config =
      ,"2DSA-CG-IT-MC"       => 300 
      ,"2DSA-CG-MC"          => 300 
 
-     ,"2DSA-CG-GF"          => 500                  ### 2DSA-CG custom grid priorities
+     ,"2DSA-CG-GF"          => 500                  ### 2DSA custom grid + global fit priorities
      ,"2DSA-CG-GF-LD"       => 500
      ,"2DSA-CG-GF-LD-FN"    => 500
      ,"2DSA-CG-GF-LD-FN-IT" => 500

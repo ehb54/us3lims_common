@@ -597,7 +597,7 @@ elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
       
 $this->message[] = "Database $dbname updated: requestID = $requestID";
 
-      $cmd = "php /home/us3/lims/bin/jobmonitor/jobmonitor.php $dbname $eprfile $requestID 2>&1";
+      $cmd = "nice -15 php /home/us3/lims/bin/jobmonitor/jobmonitor.php $dbname $eprfile $requestID 2>&1";
       exec( $cmd, $null, $status );
       $this->message[] = "$cmd status=$status";
       if($status != 0) {

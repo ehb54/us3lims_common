@@ -550,6 +550,7 @@ class jobsubmit
 
          $time *= 1.2;  // Pad things a bit
          $time  = (int)( ($time + 59) / 60 ); // Round up to minutes
+         $time  = max( $time, 1440 );         // GA at least 24 hours
       }
 
       else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )  // PCSA

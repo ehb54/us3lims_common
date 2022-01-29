@@ -505,6 +505,7 @@ $spfact=7;
 
          $time *= 1.2;  // Pad things a bit
          $time  = (int)( ($time + 59) / 60 ); // Round up to minutes
+         $time  = max( $time, 720 );          // GA at least 12 hours
       }
 
       else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )  // PCSA

@@ -6,6 +6,7 @@
  *
  */
 require_once $class_dir . 'jobsubmit.php';
+include_once $class_dir . 'priority.php';
 
 function elog2( $msg )
 {
@@ -16,10 +17,10 @@ elog2( "submit_local from common_class start" );
 
 class submit_local extends jobsubmit
 { 
-   // Submits data
+   ## Submits data
    function submit()
    {
-      // a preliminary test to see if data is still defined
+      ## a preliminary test to see if data is still defined
       if ( ! isset( $this->data[ 'job' ][ 'cluster_shortname' ] ) )
       {
         $this->message[] = "Data profile is not defined. Return to Queue Setup.\n";
@@ -35,7 +36,7 @@ class submit_local extends jobsubmit
 $this->message[] = "End of submit_local.php";
    }
  
-   // Copy needed files to supercomputer
+   ## Copy needed files to supercomputer
    function copy_files()
    {
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
@@ -46,7 +47,7 @@ $this->message[] = "End of submit_local.php";
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
       $is_slurm  = preg_match( "/slurm/", $subtype );
-//$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_slurm=$is_slurm";
+##$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_slurm=$is_slurm";
 $this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$is_us3iab  is_slurm=$is_slurm";
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
@@ -62,7 +63,7 @@ $this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$i
       $ruser     = preg_match( "/umontana/", $cluster ) ?
                    "bd142854e" : "us3";
     
-      // Create working directory
+      ## Create working directory
       $output    = array();
       $cmd       = "/bin/mkdir $workdir 2>&1";
       if ( $no_us3iab )
@@ -75,7 +76,7 @@ $this->message[] = "$cmd status=$status";
 if($status != 0)
  $this->message[] = "  ++++ output=$output[0]";
 
-      //  Create pbs/slurm file, then copy it and tar file to work directory
+      ##  Create pbs/slurm file, then copy it and tar file to work directory
       if ( $is_slurm )
          $pbsfile  = $this->create_slurm();
       else
@@ -98,7 +99,7 @@ if($status != 0)
 $this->message[] = "Files copied to $address:$workdir";
    }
  
-   // Create a pbs file
+   ## Create a pbs file
    function create_pbs()
    {
       $output    = array();
@@ -138,7 +139,7 @@ $this->message[] = "Files copied to $address:$workdir";
       $ppn     = $this->grid[ $cluster ][ 'ppn' ]; 
       $ppbj    = $this->grid[ $cluster ][ 'ppbj' ]; 
 
-      $walltime = sprintf( "%02.2d:%02.2d:00", $hours, $mins );  // 01:09:00
+      $walltime = sprintf( "%02.2d:%02.2d:00", $hours, $mins );  ## 01:09:00
       $wallmins = $hours * 60 + $mins;
 
       $can_load = 0;
@@ -146,9 +147,9 @@ $this->message[] = "Files copied to $address:$workdir";
 
       $plines   = "";
       $mpirun   = "mpirun --bind-to none";
-      //$mpirun   = "mpirun";
-      //$mpirun   = "mpirun --bind-to-core";
-      //$mpiana   = "/home/us3/cluster/bin/us_mpi_analysis";
+      ##$mpirun   = "mpirun";
+      ##$mpirun   = "mpirun --bind-to-core";
+      ##$mpiana   = "/home/us3/cluster/bin/us_mpi_analysis";
       $mpiana   = "us_mpi_analysis";
 
 $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
@@ -186,7 +187,7 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
 $this->message[] = "can_load=$can_load  ppn=$ppn";
 
       if ( $can_load )
-      {  // Can use module load to set paths and environ
+      {  ## Can use module load to set paths and environ
          $plines  = 
             "\n"                    .
             "module load $load1 \n" .
@@ -197,7 +198,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       }
 
       else
-      {  // Can't use module load; must set paths
+      {  ## Can't use module load; must set paths
          $plines  = 
             "\nexport LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
             "export PATH=$path:\$PATH\n\n";
@@ -243,7 +244,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       return $pbsfile;
    }
 
-   // Create a slurm file
+   ## Create a slurm file
    function create_slurm()
    {
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
@@ -281,12 +282,12 @@ elog2( "create slurm cluster $cluster clusname $clusname quename $quename" );
       $mins    = (int)( $wall % 60 );
       $ppn     = $this->grid[ $cluster ][ 'ppn' ]; 
       $ppbj    = $this->grid[ $cluster ][ 'ppbj' ]; 
-      // For GA analysis, procs-per-base-job may need to be doubled
+      ## For GA analysis, procs-per-base-job may need to be doubled
       if ( preg_match( "/GA/", $this->data[ 'method' ] )  &&
            $ppbj < 16 )
          $ppbj   *= 2;
 
-      $walltime = sprintf( "%02.2d:%02.2d:00", $hours, $mins );  // 01:09:00
+      $walltime = sprintf( "%02.2d:%02.2d:00", $hours, $mins );  ## 01:09:00
       $wallmins = $hours * 60 + $mins;
       $can_load = 0;
       $plines   = "";
@@ -354,6 +355,7 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
         case 'us3iab-node0':
         case 'us3iab-node1':
         case 'us3iab-devel':
+        case 'demeler1-local':
           $can_load = 1;
           $load1    = "module purge \n";
           $load2    = "module load mpi/mpich-x86_64 \n";
@@ -369,9 +371,9 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
           $libpath  = "/usr/local/lib64:/export/home/us3/cluster/lib:/usr/lib64/openmpi-1.10/lib:/opt/qt/lib";
           $path     = "/export/home/us3/cluster/bin:/usr/lib64/openmpi-1.10/bin";
           $ppn      = max( $ppn, 8 );
-          $wall     = 0; // no time limit
+          $wall     = 0; ## no time limit
           $walltime = "00:00:00";
-          $wallmins = 999999; // arbitrary limit for mpirun (~2 years!)
+          $wallmins = 999999; ## arbitrary limit for mpirun (~2 years!)
           break;
 
         default:
@@ -383,12 +385,12 @@ $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
 $this->message[] = "can_load=$can_load  ppn=$ppn";
 
       if ( $can_load == 1 )
-      {  // Can use module load to set paths and environ
+      {  ## Can use module load to set paths and environ
          $plines .= ( "\n" . $load1 . $load2 . $load3 . $load4 . "\n" );
       }
 
       else if ( $can_load == 0 )
-      {  // Can't use module load; must set paths
+      {  ## Can't use module load; must set paths
          $plines  = 
             "\nexport LD_LIBRARY_PATH=$libpath:\$LD_LIBRARY_PATH\n" .
             "export PATH=$path:\$PATH\n\n";
@@ -396,6 +398,14 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
 
       $procs   = $nodes * $ppn;
 
+      $priority_nice = priority_nice_string();
+      if ( strlen( $priority_nice ) ) {
+         $this->message[] = "Priority set " . str_replace( "\n", "; ", $priority_nice );
+      }
+
+      ### for low core machine, set here
+      # $ppbj = 2;
+ 
       $contents = 
       "#!/bin/bash\n" .
       "#SBATCH -p $quename\n" .
@@ -405,7 +415,8 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "#SBATCH -t $walltime\n" .
       "#SBATCH -e $workdir/stderr\n" .
       "#SBATCH -o $workdir/stdout\n" .
-      "$plines" .
+      "$priority_nice\n" .
+       "$plines" .
       "export UCX_LOG_LEVEL=error\n" .
       "export OMPI_MCA_btl=self,sm,tcp\n" .
       "export QT_LOGGING_RULES='*.debug=true'\n\n" .
@@ -422,7 +433,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       return $slufile;
    }
 
-   // Schedule the job
+   ## Schedule the job
    function submit_job()
    {
       date_default_timezone_set( "America/Chicago" );
@@ -450,7 +461,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
                          $this->data['db']['name'],
                          $this->data['job']['requestID'] );
 
-      // Submit job to the queue
+      ## Submit job to the queue
       $output    = array();
       if ( $is_slurm )
       {
@@ -469,14 +480,14 @@ elog2( "submit_local cmd = $cmd" );
       $jobid = exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status  jobid=$jobid";
 
-      // Save the job ID
-//      if ( $status == 0 )
+      ## Save the job ID
+##      if ( $status == 0 )
       if ( $is_slurm )
       {
          $parts = preg_split( "/\s+/", $output[ 0 ] );
          $this->data[ 'eprfile' ] = $parts[ 3 ];
 elog2( "submit_local is_slurm" );
-//$this->data[ 'eprfile' ] = $jobid;
+##$this->data[ 'eprfile' ] = $jobid;
       }
       else
       {
@@ -559,7 +570,7 @@ elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
 
       mysqli_close( $link );
 
-      // Insert initial data into global DB
+      ## Insert initial data into global DB
       $gfac_link = mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
  
       if ( ! $gfac_link )
@@ -576,7 +587,7 @@ elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
 
       $result = mysqli_query( $gfac_link, $query );
  
-      // echo __FILE__ . " : insert query $query\n";
+      ## echo __FILE__ . " : insert query $query\n";
       
       if ( ! $result )
       {
@@ -586,12 +597,20 @@ elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
  
       mysqli_close( $gfac_link );
 
+      
 $this->message[] = "Database $dbname updated: requestID = $requestID";
+
+      $cmd = "nice -15 php /home/us3/lims/bin/jobmonitor/jobmonitor.php $dbname $eprfile $requestID 2>&1";
+      exec( $cmd, $null, $status );
+      $this->message[] = "$cmd status=$status";
+      if($status != 0) {
+          $this->message[] = "  ++++ output=$output[0]";
+      }
+
    }
 
    function close_transport( )
-   {  // Dummy function since new class functions have already closed
+   {  ## Dummy function since new class functions have already closed
    }
 
 }
-?>

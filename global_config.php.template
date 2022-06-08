@@ -1,0 +1,349 @@
+<?php
+
+{};
+
+## define global admin list here
+## can be overriden in dbinst specific cluster_config.php
+
+$admin_list = [
+    'gegorbet@gmail.com'
+    ,'demeler@umontana.edu'
+    ,'alexsav.science@gmail.com'
+    ,'emre.brookes@umontana.edu'
+    ];
+
+## define all possible clusters for this server
+## can be overriden in dbinst specific cluster_config.php
+
+$subhost = 'http://gridfarm005.ucs.indiana.edu';
+$subport = 8080;
+
+$cluster_details =
+    [
+     'anvil' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'anvil.rcac.purdue.edu'
+         ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/anvil/scratch/x-us3/work'
+         ,'sshport'            => 22
+         ,'queue'              => 'shared'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 128
+         ,'ppbj'               => 32
+         ,'maxproc'            => 32
+     ]
+     ,'anvil-bigmem' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'anvil.rcac.purdue.edu'
+         ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/anvil/scratch/x-us3/work'
+         ,'sshport'            => 22
+         ,'queue'              => 'shared'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 128
+         ,'ppbj'               => 32
+         ,'maxproc'            => 32
+         ,'compute_memoryreq'  => true
+         ,'mempercore'         => 3000
+     ]
+     ,'anvil-gamc' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'anvil.rcac.purdue.edu'
+         ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/anvil/scratch/x-us3/work'
+         ,'sshport'            => 22
+         ,'queue'              => 'standard'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 128
+         ,'ppbj'               => 32
+         ,'maxproc'            => 2048
+         ,'pmg'                => true
+         ,'pmgonly'            => true
+     ]
+     ,'bridges2' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'bridges2.psc.edu'
+         ,'login'              => 'us3@bridges2.psc.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/ocean/projects/mcb210002p/us3/airavata-workdirs'
+         ,'sshport'            => 22
+         ,'queue'              => 'RM-shared'
+         ,'maxtime'            => 2880
+         ,'ppn'                => 32
+         ,'ppbj'               => 32
+         ,'maxproc'            => 1024
+     ]
+     ,'bridges2-gamc' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'bridges2.psc.edu'
+         ,'login'              => 'us3@bridges2.psc.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/ocean/projects/mcb210002p/us3/airavata-workdirs'
+         ,'sshport'            => 22
+         ,'queue'              => 'RM'
+         ,'maxtime'            => 2880
+         ,'ppn'                => 128
+         ,'ppbj'               => 32
+         ,'maxproc'            => 1024
+         ,'pmg'                => true
+         ,'pmgonly'            => true
+     ]
+     ,'chinook-local' => [
+         'active'              => true
+         ,'airavata'           => false
+         ,'name'               => 'chinook.hs.umt.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'slurm'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/home/us3/lims/work/'
+         ,'sshport'            => 22
+         ,'queue'              => 'batch'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 64
+         ,'ppbj'               => 8
+         ,'maxproc'            => 64
+
+     ]
+     ,'expanse' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'expanse.sdsc.edu'
+         ,'login'              => 'us3@login.expanse.sdsc.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
+         ,'sshport'            => 22
+         ,'queue'              => 'shared'
+         ,'maxtime'            => 2880
+         ,'ppn'                => 32
+         ,'ppbj'               => 32
+         ,'maxproc'            => 128
+         ,'compute_memoryreq'  => true
+     ]
+     ,'expanse-bigmem' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'expanse.sdsc.edu'
+         ,'login'              => 'us3@login.expanse.sdsc.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
+         ,'sshport'            => 22
+         ,'queue'              => 'shared'
+         ,'maxtime'            => 2880
+         ,'ppn'                => 32
+         ,'ppbj'               => 32
+         ,'maxproc'            => 32
+         ,'compute_memoryreq'  => true
+         ,'mempercore'         => 3000
+     ]
+     ,'expanse-gamc' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'expanse.sdsc.edu'
+         ,'login'              => 'us3@login.expanse.sdsc.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
+         ,'sshport'            => 22
+         ,'queue'              => 'compute'
+         ,'maxtime'            => 2880
+         ,'ppn'                => 128
+         ,'ppbj'               => 32
+         ,'maxproc'            => 1024
+         ,'maxmem'             => 249000
+         ,'pmg'                => true
+         ,'pmgonly'            => true
+         ,'compute_memoryreq'  => true
+     ]
+     ,'demeler1-local' => [
+         'active'              => true
+         ,'airavata'           => false
+         ,'name'               => 'demeler1.uleth.ca'
+         ,'login'              => 'us3@demeler1.uleth.ca'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'slurm'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/home/us3/lims/work/'
+         ,'sshport'            => 22
+         ,'queue'              => 'batch'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 128
+         ,'ppbj'               => 8
+         ,'maxproc'            => 128
+         ,'pmg'                => true
+
+     ]
+     ,'demeler9-local' => [
+         'active'              => true
+         ,'airavata'           => false
+         ,'name'               => 'demeler9.uleth.ca'
+         ,'login'              => 'us3@demeler9.uleth.ca'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'slurm'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/home/us3/lims/work/'
+         ,'sshport'            => 22
+         ,'queue'              => 'batch'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 128
+         ,'ppbj'               => 8
+         ,'maxproc'            => 128
+         ,'pmg'                => true
+     ]
+     ,'jetstream' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'static-cluster.jetstream-cloud.org' ## js-169-137.jetstream-cloud.org'
+         ,'login'              => 'us3@js-169-137.jetstream-cloud.org'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/N/us3_cluster/work'
+         ,'sshport'            => 22
+         ,'queue'              => 'batch'
+         ,'maxtime'            => 1440
+         ,'ppn'                => 24
+         ,'ppbj'               => 24
+         ,'maxproc'            => 48
+     ]
+     ,'lonestar6-gamc' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'ls6.tacc.utexas.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/scratch/01623/us3/work'
+         ,'sshport'            => 22
+         ,'queue'              => 'normal'
+         ,'maxtime'            => 2880
+         ,'ppn'                => 128
+         ,'ppbj'               => 32
+         ,'maxproc'            => 8192
+         ,'pmg'                => true
+         ,'pmgonly'            => true
+     ]
+     ,'stampede2' => [
+         'active'              => true
+         ,'airavata'           => true
+         ,'name'               => 'stampede2.tacc.xsede.org'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/scratch/01623/us3/airavata-workingdirs'
+         ,'sshport'            => 22
+         ,'queue'              => 'skx-normal'
+         ,'maxtime'            => 2880
+         ,'ppn'                => 96
+         ,'ppbj'               => 32
+         ,'maxproc'            => 6144
+         ,'pmg'                => true
+         ,'pmgonly'            => true
+     ]
+     ,'umontana-local' => [
+         'active'              => true
+         ,'airavata'           => false
+         ,'name'               => 'login.gscc.umt.edu'
+         ,'login'              => 'bd142854e@login.gscc.umt.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'slurm'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/home/bd142854e/cluster/work/'
+         ,'sshport'            => 22
+         ,'queue'              => 'griz_partition'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 72
+         ,'ppbj'               => 36
+         ,'maxproc'            => 144
+     ]
+     ,'us3iab-devel' => [
+         'active'              => false
+         ,'airavata'           => false
+         ,'name'               => 'us3iab-devel.attlocal.net'
+         ,'submithost'         => 'localhost'
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'pbs'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/export/home/us3/lims/work/'
+         ,'sshport'            => 22
+         ,'queue'              => 'normal'
+         ,'maxtime'            => 2160
+         ,'ppn'                => 8
+         ,'ppbj'               => 8
+         ,'maxproc'            => 16
+     ]
+     ,'us3iab-node0' => [
+         'active'              => true
+         ,'airavata'           => false
+         ,'name'               => 'us3iab-node0.localhost'
+         ,'queue'              => 'batch'
+         ,'submithost'         => 'localhost'
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'slurm'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/home/us3/lims/work/'
+         ,'sshport'            => 22
+         ,'queue'              => 'batch'
+         ,'maxtime'            => 60000
+         ,'ppn'                => 8
+         ,'ppbj'               => 8
+         ,'maxproc'            => 16
+         ,'pmg'                => true
+         ,'usemaxtime'         => true
+     ]
+     ,'us3iab-node1' => [
+         'active'              => false
+         ,'airavata'           => false
+         ,'name'               => 'us3iab-node1.localhost'
+         ,'queue'              => 'normal'
+         ,'submithost'         => 'localhost'
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'slurm'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/home/us3/lims/work/'
+         ,'sshport'            => 22
+         ,'queue'              => 'normal'
+         ,'maxtime'            => 2160
+         ,'ppn'                => 8
+         ,'ppbj'               => 8
+         ,'maxproc'            => 16
+         ,'pmg'                => true
+     ]
+    ];

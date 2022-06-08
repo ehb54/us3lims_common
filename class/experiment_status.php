@@ -10,12 +10,11 @@ use SCIGAP\AiravataWrapper;
  */
 function getExperimentStatus($expId)
 {
-
-    $airavataWrapper = new AiravataWrapper();
-
+    try {
+        $airavataWrapper = new AiravataWrapper();
+    } catch (Exception $e) {
+        return 'UNKNOWN';
+    }
     return $airavataWrapper->get_experiment_status($expId);
-
 }
-
-?>
 

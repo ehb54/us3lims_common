@@ -7,268 +7,159 @@
  */
 class jobsubmit
 {
-   protected $data    = array();   // Global parsed input
-   protected $jobfile = "";        // Global string
-   protected $message = array();   // Errors and other messages
-   protected $grid    = array();   // Information about the clusters
-   protected $xmlfile = "";        // Base name of the experiment xml file
+   protected $data    = array();   ## Global parsed input
+   protected $jobfile = "";        ## Global string
+   protected $message = array();   ## Errors and other messages
+   protected $grid    = array();   ## Information about the clusters
+   protected $xmlfile = "";        ## Base name of the experiment xml file
 
    function __construct()
    {
-      global $globaldbname;
+       global $full_path;
+       global $class_dir;
 
-      $subhost = "http://gridfarm005.ucs.indiana.edu";
-      $subport = 8080;
+       $debug = false;
 
-      $this->grid[ 'us3iab-node0' ] = array
-      (
-        "name"       => "us3iab-node0.localdomain",
-        "submithost" => "localhost",
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "slurm",
-        "httpport"   => $subport,
-        "workdir"    => "/home/us3/lims/work/",
-        "sshport"    => 22,
-        "queue"      => "batch",
-        "maxtime"    => 2160,
-        "ppn"        => 8,
-        "ppbj"       => 8,
-        "maxproc"    => 16
-      );
+       ## anonymous error message function - local in scope
 
-      $this->grid[ 'us3iab-node1' ] = array
-      (
-        "name"       => "us3iab-node1.aucsolutions.com",
-        "submithost" => "localhost",
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "slurm",
-        "httpport"   => $subport,
-        "workdir"    => "/home/us3/lims/work/",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 2160,
-        "ppn"        => 8,
-        "ppbj"       => 8,
-        "maxproc"    => 16
-      );
+       $error_msg = function( $msg ) {
+           $emsg = "ERROR: class/jobsubmit.php : $msg";
+           echo "$emsg<br>";
+           error_log( $emsg );
+       };
 
-      $this->grid[ 'us3iab-devel' ] = array
-      (
-        "name"       => "us3iab-devel.attlocal.net",
-        "submithost" => "localhost",
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "pbs",
-        "httpport"   => $subport,
-        "workdir"    => "/export/home/us3/lims/work/",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 2160,
-        "ppn"        => 8,
-        "ppbj"       => 8,
-        "maxproc"    => 16
-      );
+       ## anonymous info message function - local in scope
 
-      $this->grid[ 'lonestar5' ] = array
-      (
-        "name"       => "ls5.tacc.utexas.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,
-        "ppn"        => 24,
-        "ppbj"       => 24,
-        "maxproc"    => 72
-      );
+       $debug_msg = function( $msg, $debug ) {
+           if ( $debug ) {
+               $emsg = "info: class/jobsubmit.php : $msg";
+               echo "$emsg<br>";
+           }
+       };
+       
+       if ( !isset( $class_dir ) ) {
+           $error_msg( "\$class_dir is not set" );
+           return;
+       }
 
-      $this->grid[ 'comet' ] = array
-      (
-        "name"       => "comet.sdsc.xsede.org",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ogce-rest/job/runjob/async",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,
-        "ppn"        => 24,
-        "ppbj"       => 24,
-        "maxproc"    => 72
-      );
+       if ( !is_dir( $class_dir ) ) {
+           $error_msg( "\$class_dir [$class_dir] is not a directory" );
+           return;
+       }
 
-      $this->grid[ 'bridges2' ] = array
-      (
-        "name"       => "bridges2.psc.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/ocean/projects/mcb210002p/us3/airavata-workdirs",
-        "sshport"    => 22,
-        "queue"      => "RM-shared",
-        "maxtime"    => 2880,
-        "ppn"        => 128,
-        "ppbj"       => 32,
-        "maxproc"    => 128
-      );
+       if ( !isset( $full_path ) ) {
+           $error_msg( "\$full_path is not set" );
+           return;
+       }
 
-      $this->grid[ 'expanse' ] = array
-      (
-        "name"       => "expanse.sdsc.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs",
-        "sshport"    => 22,
-        "queue"      => "shared",
-        "maxtime"    => 2880,
-        "ppn"        => 128,
-        "ppbj"       => 32,
-        "maxproc"    => 128
-      );
+       if ( !is_dir( $full_path ) ) {
+           $error_msg( "\$full_path [$full_path] is not a directory" );
+           return;
+       }
 
-      $this->grid[ 'expanse-gamc' ] = array
-      (
-        "name"       => "expanse.sdsc.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs",
-        "sshport"    => 22,
-        "queue"      => "compute",
-        "maxtime"    => 1440,
-        "ppn"        => 128,
-        "ppbj"       => 32,
-        "maxproc"    => 1024
-      );
+       ## dbinst specific configs
 
-      $this->grid[ 'stampede2' ] = array
-      (
-        "name"       => "stampede2.tacc.xsede.org",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/scratch/01623/us3/airavata-workingdirs",
-        "sshport"    => 22,
-        "queue"      => "skx-normal",
-        "maxtime"    => 1440,
-        "ppn"        => 24,
-        "ppbj"       => 24,
-        "maxproc"    => 72
-      );
+       $dbinst_config_file = '$full_path/cluster_config.php';
 
-      $this->grid[ 'jetstream' ] = array
-      (
-        "name"       => "static-cluster.jetstream-cloud.org",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/N/us3_cluster/work",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,
-        "ppn"        => 24,
-        "ppbj"       => 24,
-        "maxproc"    => 48
-      );
+       if ( !file_exists( $dbinst_config_file ) ) {
+           $dbinst_config_file = '../uslims3_newlims/cluster_config.php';
+           if ( !file_exists( $dbinst_config_file ) ) {
+               $error_msg( "no cluster_config.php file found" );
+               return;
+           }
+       }
 
-      $this->grid[ 'jetstream-local' ] = array
-      (
-        "name"       => "static-cluster.jetstream-cloud.org",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/N/us3_cluster/work/local/",
-        "sshport"    => 22,
-        "queue"      => "normal",
-        "maxtime"    => 1440,
-        "ppn"        => 24,
-        "ppbj"       => 24,
-        "maxproc"    => 48
-      );
+       ## global configs
 
-      $this->grid[ 'juwels' ] = array
-      (
-        "name"       => "juwels.fz-juelich.de",
-        "submithost" => $subhost,
-        "userdn"     => "CN=_USER_, O=Ultrascan Gateway, C=DE",
-        "submittype" => "http",
-        "httpport"   => $subport,
-        "workdir"    => "/p/scratch/cpaj1846",
-        "sshport"    => 22,
-        "queue"      => "batch",
-        "maxtime"    => 1440,
-        "ppn"        => 24,
-        "ppbj"       => 24,
-        "maxproc"    => 72
-      );
+       $global_config_file = "$class_dir/../global_config.php";
 
-      $this->grid[ 'demeler9-local' ] = array
-      (
-        "name"       => "demeler9.uleth.ca",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "slurm",
-        "httpport"   => $subport,
-        "workdir"    => "/home/us3/lims/work/",
-        "sshport"    => 22,
-        "queue"      => "batch",
-        "maxtime"    => 5760,
-        "ppn"        => 128,
-        "ppbj"       => 8,
-        "maxproc"    => 128
-      );
+       if ( !file_exists( $global_config_file ) ) {
+           $error_msg("\$global_config_file_dir [$global_config_file] does not exist");
+           return;
+       }
+       
+       ## read global config first, so dbinst overrides
 
-      $this->grid[ 'chinook-local' ] = array
-      (
-        "name"       => "chinook.hs.umt.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "slurm",
-        "httpport"   => $subport,
-        "workdir"    => "/home/us3/lims/work/",
-        "sshport"    => 22,
-        "queue"      => "batch",
-        "maxtime"    => 5760,
-        "ppn"        => 64,
-        "ppbj"       => 8,
-        "maxproc"    => 64
-      );
+       try {
+           include( $global_config_file );
+       } catch ( Exception $e ) {
+           $error_msg( "including $global_config_file " . $e->getMessage() );
+           return;
+       }
 
-      $this->grid[ 'umontana-local' ] = array
-      (
-        "name"       => "login.gscc.umt.edu",
-        "submithost" => $subhost,
-        "userdn"     => "/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User",
-        "submittype" => "slurm",
-        "httpport"   => $subport,
-        "workdir"    => "/home/bd142854e/cluster/work/",
-        "sshport"    => 22,
-        "queue"      => "griz_partition",
-        "maxtime"    => 5760,
-        "ppn"        => 72,
-        "ppbj"       => 36,
-        "maxproc"    => 144
-      );
+       try {
+           include( $dbinst_config_file );
+       } catch ( Exception $e ) {
+           $error_msg ( "including $dbinst_config_file " . $e->getMessage() );
+           return;
+       }
+       
+       if ( !isset( $cluster_configuration ) || !is_array( $cluster_configuration ) ) {
+           $error_msg( "\$cluster_configuration not set or is not an array" );
+           return;
+       }
 
+       if ( !isset( $cluster_details ) || !is_array( $cluster_details ) ) {
+           $error_msg( "\$cluster_details not set or is not an array" );
+           return;
+       }
+
+       $reqkey = [
+           'active'
+           ,'airavata'
+           ,'name'
+           ,'submithost'
+           ,'userdn'
+           ,'submittype'
+           ,'httpport'
+           ,'workdir'
+           ,'sshport'
+           ,'queue'
+           ,'maxtime'
+           ,'ppn'
+           ,'ppbj'
+           ,'maxproc'
+           ];
+
+       foreach ( $cluster_details as $k => $v ) {
+           $ok = true;
+
+           ## do all required keys exist for this cluster?
+
+           if ( array_key_exists( 'active', $v ) && !$v['active'] ) {
+               $debug_msg( "cluster $k not active", $debug );
+               continue;
+           }
+
+           foreach ( $reqkey as $key ) {
+               if ( !array_key_exists( $key, $v ) ) {
+                   $error_msg( "\$cluster_details for cluster $k is missing required key $key" );
+                   $ok = false;
+                   continue;
+               }
+           }
+           if ( !$ok ) {
+               continue;
+           }
+
+           if ( $v['airavata'] ) {
+               $debug_msg( "cluster $k airavata, skipped", $debug );
+               continue;
+           }
+
+           ## go with entry
+
+           $this->grid[ $k ] = $v;
+       }
    }
 
-   // Deconstructor
+   ## Deconstructor
    function __destruct()
    {
       $this->clear();
    }
 
-   // Clear out data for another request
+   ## Clear out data for another request
    function clear()
    {
       $this->data    = array();
@@ -277,7 +168,7 @@ class jobsubmit
       $this->xmlfile = "";
    }
 
-   // Request status
+   ## Request status
    function status()
    {
       if ( isset( $this->data['dataset']['status'] ) )
@@ -286,16 +177,16 @@ class jobsubmit
       return 'Status unavailable';
    }
 
-   // Return any messages
+   ## Return any messages
    function get_messages()
    {
       return $this->message;
    }
 
-   // Read and parse submitted xml file
+   ## Read and parse submitted xml file
    function parse_input( $xmlfile )
    {
-      $this->xmlfile = $xmlfile;          // Save for other methods
+      $this->xmlfile = $xmlfile;          ## Save for other methods
       $contents = implode( "", file( $xmlfile ) );
 
       $parser = new XMLReader();
@@ -538,23 +429,22 @@ class jobsubmit
 
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {
-         // Assume 1 sec a basic unit
+         ## Assume 1 sec a basic unit
 
          $generations = $parameters[ 'generations' ];
          $population  = $parameters[ 'population' ];
 
-         // The constant 125 is an empirical value from doing a Hessian
-         // minimization
+         ## The constant 125 is an empirical value from doing a Hessian
+         ## minimization
 
          $time        = ( 125 + $population ) * $generations;
 
-         $time *= 1.2;  // Pad things a bit
-         $time  = (int)( ($time + 59) / 60 ); // Round up to minutes
-         $time  = max( $time, 1440 );         // GA at least 24 hours
+         $time *= 1.2;  ## Pad things a bit
+         $time  = (int)( ($time + 59) / 60 ); ## Round up to minutes
       }
 
-      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )  // PCSA
-      {  // PCSA
+      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )  ## PCSA
+      {  ## PCSA
          $vsize      = isset( $parameters[ 'vars_count' ] )
                        ? $parameters[ 'vars_count' ]
                        : 1;
@@ -569,22 +459,22 @@ class jobsubmit
          else
             $time       = $vsize * $vsize * $gfiters;
          if ( $ti_noise || $ri_noise ) $time *= 2;
-         $time       = $time / 4;        // Base time is 15 seconds
-         $time       = max( $time, 30 ); // Minimum PCSA time is 30 minutes
+         $time       = $time / 4;        ## Base time is 15 seconds
+         $time       = max( $time, 30 ); ## Minimum PCSA time is 30 minutes
       }
 
-      else // 2DSA or 2DSA-CG
+      else ## 2DSA or 2DSA-CG
       {
-         $time       = 5;  // Base time in minutes
+         $time       = 5;  ## Base time in minutes
 
          if ( isset( $parameters[ 'meniscus_points' ] ) )
          {
             $points     = $parameters[ 'meniscus_points' ];
             if ( $points > 1 )
-            {  // If fit-meniscus|bottom, multiply by fit points
+            {  ## If fit-meniscus|bottom, multiply by fit points
                $time      *= $points;
                if ( isset( $parameters[ 'fit_mb_select' ] ) )
-               {  // If fitting both meniscus and bottom, multiply again
+               {  ## If fitting both meniscus and bottom, multiply again
                   $fselect    = $parameters[ 'fit_mb_select' ];
                   if ( $fselect == 3 )
                      $time      *= $points;
@@ -593,7 +483,7 @@ class jobsubmit
          }
 
          if ( $ti_noise || $ri_noise ) $time *= 2;
-         // Double time for each noise option used
+         ## Double time for each noise option used
          if ( $ti_noise )  $time *= 2;
          if ( $ri_noise )  $time *= 2;
 
@@ -638,10 +528,10 @@ class jobsubmit
 
       if ( $mxiters > 0 )  $time *= $mxiters;
 
-      $time *= $dset_count;                   // times number of datasets
-      $time  = (int)( ( $time * 11 ) / 10 );  // Padding (+10%)
+      $time *= $dset_count;                   ## times number of datasets
+      $time  = (int)( ( $time * 11 ) / 10 );  ## Padding (+10%)
 
-      // Account for parallel group count in max walltime
+      ## Account for parallel group count in max walltime
       if ( $montecarlo > 1  ||  $dset_count > 1 )
       {
          if ( isset( $this->data[ 'job' ][ 'mgroupcount' ] ) )
@@ -654,7 +544,7 @@ class jobsubmit
 
       $mgroupcount = max( $mgroupcount, 1 );
 
-      // Adjust max wall time down based on parallel group count
+      ## Adjust max wall time down based on parallel group count
       switch ( $mgroupcount )
       {
          case 1  :
@@ -689,32 +579,46 @@ class jobsubmit
             break;
       }
 
-      $time = max( $time, 5 );         // Minimum time is 5 minutes
+      $time = max( $time, 5 );         ## Minimum time is 5 minutes
 
-      if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
-      {  // For alamo, $max_time is hardwired to 2160, and no PMG
-         $time        = $max_time;
-         // At most 4 pm groups on alamo
-         $mgroupcount = min( 4, $mgroupcount );
-      }
+      ## pmg is only enabled on clusters that have it set
 
-      else if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
-      {  // For jacinto, $max_time is hardwired to 2160, and no PMG
-         $time        = $max_time;
-         $mgroupcount = min( 2, $mgroupcount );
-      }
+      if ( !array_key_exists( 'pmg', $this->grid[ $cluster ] ) ||
+           !$this->grid[ $cluster ]['pmg'] ) {
+          $mgroupcount = 1;
+      }          
 
-      else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
-      {  // For bcf, hardwire $max_time to 240 (4 hours), and no PMG
-         $time        = $max_time;
-         $mgroupcount = 1;
-      }
+      ## if usemaxtime is set, use the max time
 
-      else
-      {  // Maximum time is defined for each cluster
-         $time        = min( $time, $max_time );
-      }
-//if($time < 480) $time=480;
+      if ( array_key_exists( 'usemaxtime', $this->grid[ $cluster ] ) &&
+           $this->grid[ $cluster ]['usemaxtime'] ) {
+          $time = $max_time;
+      }          
+
+      ## if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
+      ## {  ## For alamo, $max_time is hardwired to 2160, and no PMG
+      ## $time        = $max_time;
+      ## ## At most 4 pm groups on alamo
+      ## $mgroupcount = min( 4, $mgroupcount );
+      ## }
+
+      ## else if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
+      ## {  ## For jacinto, $max_time is hardwired to 2160, and no PMG
+      ## $time        = $max_time;
+      ## $mgroupcount = min( 2, $mgroupcount );
+      ## }
+
+      ## else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
+      ## {  ## For bcf, hardwire $max_time to 240 (4 hours), and no PMG
+      ## $time        = $max_time;
+      ## $mgroupcount = 1;
+      ## }
+
+      ## else
+      ## {  ## Maximum time is defined for each cluster
+      ## $time        = min( $time, $max_time );
+      ## }
+##if($time < 480) $time=480;
 
       return (int)$time;
    }
@@ -729,19 +633,19 @@ class jobsubmit
       $ppbj       = $this->grid[ $cluster ][ 'ppbj'    ];
 
       if ( $is_us3iab )
-      {  // It is "us3iab"
+      {  ## It is "us3iab"
          $mgroup     = 1;
          $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
          $montecarlo = $parameters[ 'mc_iterations' ];
 
          if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
-         {  // GA or DMGA
+         {  ## GA or DMGA
             if ( $montecarlo < 2 )
-            {  // Non-MC GA
+            {  ## Non-MC GA
                $ppn        = 16;
             }
             else
-            {  // GA-MC
+            {  ## GA-MC
                if ( isset( $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] ) )
                {
                   $mgroup     = $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ];
@@ -762,10 +666,10 @@ class jobsubmit
          $max_procs  = $ppn;
          $this->grid[ $cluster ][ 'maxproc' ] = $max_procs;
          $this->grid[ $cluster ][ 'ppn'     ] = $ppn;
-      }  // End: us3iab
+      }  ## End: us3iab
 
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
-      {  // GA: procs is demes+1 rounded to procs-per-node
+      {  ## GA: procs is demes+1 rounded to procs-per-node
          $demes = $parameters[ 'demes' ];
          if ( $demes == 1 )
          {
@@ -777,27 +681,27 @@ class jobsubmit
             $ppbj  = $demes + 1;
             $this->grid[ $cluster ][ 'ppbj' ] = $ppbj;
          }
-         $procs = $demes + $ppbj;                  // Procs = demes+1
-         $procs = (int)( $procs / $ppbj ) * $ppbj;  // Rounded to procs-per-basejob
+         $procs = $demes + $ppbj;                  ## Procs = demes+1
+         $procs = (int)( $procs / $ppbj ) * $ppbj;  ## Rounded to procs-per-basejob
       }
       else if ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
-      {  // 2DSA:  procs is max_procs, but no more than subgrid count
+      {  ## 2DSA:  procs is max_procs, but no more than subgrid count
          $gsize = $parameters[ 'uniform_grid' ];
-         $gsize = $gsize * $gsize;           // Subgrid count
-         $procs = min( $ppbj, $gsize );      // Procs = base or subgrid count
+         $gsize = $gsize * $gsize;           ## Subgrid count
+         $procs = min( $ppbj, $gsize );      ## Procs = base or subgrid count
       }
       else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
-      {  // PCSA:  procs is max_procs, but no more than vars_count
+      {  ## PCSA:  procs is max_procs, but no more than vars_count
          $vsize = $parameters[ 'vars_count' ];
          if ( $parameters[ 'curve_type' ] != 'HL' )
-            $vsize = $vsize * $vsize;        // Variations count
-         $procs = min( $ppbj, $vsize );      // Procs = base or subgrid count
+            $vsize = $vsize * $vsize;        ## Variations count
+         $procs = min( $ppbj, $vsize );      ## Procs = base or subgrid count
       }
 
-      $procs = max( $procs, $ppbj );          // Minimum procs is procs-per-node
-      $procs = min( $procs, $max_procs );    // Maximum procs depends on cluster
+      $procs = max( $procs, $ppbj );          ## Minimum procs is procs-per-node
+      $procs = min( $procs, $max_procs );    ## Maximum procs depends on cluster
 
-      $nodes = (int)$procs / $ppn;    // Return nodes, procs divided by procs-per-node
+      $nodes = (int)$procs / $ppn;    ## Return nodes, procs divided by procs-per-node
       $nodes = max( 1, $nodes );
       return $nodes;
    }
@@ -811,23 +715,20 @@ class jobsubmit
       $max_groups = 32;
 
       if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
-      {  // For 2DSA/PCSA, PMGs is always 1
+      {  ## For 2DSA/PCSA, PMGs is always 1
          $max_groups = 1;
       }
 
       else if ( preg_match( "/us3iab/", $cluster ) )
-      {   // Us3iab PMGs limited by max procs available
+      {   ## Us3iab PMGs limited by max procs available
          $max_groups = $max_procs / 16;
       }
 
       else if ( $mciters > 1 )
-      {  // No more PMGs than half of MC iterations
+      {  ## No more PMGs than half of MC iterations
          $max_groups = min( $max_groups, ( $mciters / 2 ) );
       }
 
       return $max_groups;
    }
 }
-
-?>
-

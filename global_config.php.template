@@ -21,7 +21,7 @@ $subport = 8080;
 $cluster_details =
     [
      'anvil' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'anvil.rcac.purdue.edu'
          ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
@@ -29,16 +29,16 @@ $cluster_details =
          ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
          ,'submittype'         => 'http'
          ,'httpport'           => $subport
-         ,'workdir'            => '/anvil/scratch/x-us3/work'
+         ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
          ,'maxtime'            => 5760
-         ,'ppn'                => 128
+         ,'ppn'                => 32
          ,'ppbj'               => 32
          ,'maxproc'            => 32
      ]
      ,'anvil-bigmem' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'anvil.rcac.purdue.edu'
          ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
@@ -46,18 +46,18 @@ $cluster_details =
          ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
          ,'submittype'         => 'http'
          ,'httpport'           => $subport
-         ,'workdir'            => '/anvil/scratch/x-us3/work'
+         ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
          ,'maxtime'            => 5760
-         ,'ppn'                => 128
+         ,'ppn'                => 32
          ,'ppbj'               => 32
          ,'maxproc'            => 32
          ,'compute_memoryreq'  => true
          ,'mempercore'         => 3000
      ]
      ,'anvil-gamc' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'anvil.rcac.purdue.edu'
          ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
@@ -65,9 +65,9 @@ $cluster_details =
          ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
          ,'submittype'         => 'http'
          ,'httpport'           => $subport
-         ,'workdir'            => '/anvil/scratch/x-us3/work'
+         ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
          ,'sshport'            => 22
-         ,'queue'              => 'standard'
+         ,'queue'              => 'wholenode'
          ,'maxtime'            => 5760
          ,'ppn'                => 128
          ,'ppbj'               => 32
@@ -75,8 +75,27 @@ $cluster_details =
          ,'pmg'                => true
          ,'pmgonly'            => true
      ]
+     ,'anvil-gamc-bigmem' => [
+         'active'              => false
+         ,'airavata'           => true
+         ,'name'               => 'anvil.rcac.purdue.edu'
+         ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
+         ,'submithost'         => $subhost
+         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
+         ,'submittype'         => 'http'
+         ,'httpport'           => $subport
+         ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
+         ,'sshport'            => 22
+         ,'queue'              => 'wholenode'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 64
+         ,'ppbj'               => 32
+         ,'maxproc'            => 2048
+         ,'pmg'                => true
+         ,'pmgonly'            => true
+     ]
      ,'bridges2' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'bridges2.psc.edu'
          ,'login'              => 'us3@bridges2.psc.edu'
@@ -93,7 +112,7 @@ $cluster_details =
          ,'maxproc'            => 1024
      ]
      ,'bridges2-gamc' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'bridges2.psc.edu'
          ,'login'              => 'us3@bridges2.psc.edu'
@@ -112,7 +131,7 @@ $cluster_details =
          ,'pmgonly'            => true
      ]
      ,'chinook-local' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => false
          ,'name'               => 'chinook.hs.umt.edu'
          ,'submithost'         => $subhost
@@ -129,7 +148,7 @@ $cluster_details =
 
      ]
      ,'expanse' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'expanse.sdsc.edu'
          ,'login'              => 'us3@login.expanse.sdsc.edu'
@@ -147,7 +166,7 @@ $cluster_details =
          ,'compute_memoryreq'  => true
      ]
      ,'expanse-bigmem' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'expanse.sdsc.edu'
          ,'login'              => 'us3@login.expanse.sdsc.edu'
@@ -166,7 +185,7 @@ $cluster_details =
          ,'mempercore'         => 3000
      ]
      ,'expanse-gamc' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'expanse.sdsc.edu'
          ,'login'              => 'us3@login.expanse.sdsc.edu'
@@ -187,7 +206,7 @@ $cluster_details =
          ,'compute_memoryreq'  => true
      ]
      ,'demeler1-local' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => false
          ,'name'               => 'demeler1.uleth.ca'
          ,'login'              => 'us3@demeler1.uleth.ca'
@@ -206,7 +225,7 @@ $cluster_details =
 
      ]
      ,'demeler9-local' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => false
          ,'name'               => 'demeler9.uleth.ca'
          ,'login'              => 'us3@demeler9.uleth.ca'
@@ -224,7 +243,7 @@ $cluster_details =
          ,'pmg'                => true
      ]
      ,'jetstream' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'static-cluster.jetstream-cloud.org' ## js-169-137.jetstream-cloud.org'
          ,'login'              => 'us3@js-169-137.jetstream-cloud.org'
@@ -241,14 +260,15 @@ $cluster_details =
          ,'maxproc'            => 48
      ]
      ,'lonestar6-gamc' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'ls6.tacc.utexas.edu'
+         ,'login'              => 'us3@ls6.tacc.utexas.edu'
          ,'submithost'         => $subhost
          ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
          ,'submittype'         => 'http'
          ,'httpport'           => $subport
-         ,'workdir'            => '/scratch/01623/us3/work'
+         ,'workdir'            => '/work/01623/us3/ls6/us3'
          ,'sshport'            => 22
          ,'queue'              => 'normal'
          ,'maxtime'            => 2880
@@ -259,7 +279,7 @@ $cluster_details =
          ,'pmgonly'            => true
      ]
      ,'stampede2' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => true
          ,'name'               => 'stampede2.tacc.xsede.org'
          ,'submithost'         => $subhost
@@ -277,7 +297,7 @@ $cluster_details =
          ,'pmgonly'            => true
      ]
      ,'umontana-local' => [
-         'active'              => true
+         'active'              => false
          ,'airavata'           => false
          ,'name'               => 'login.gscc.umt.edu'
          ,'login'              => 'bd142854e@login.gscc.umt.edu'

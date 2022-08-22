@@ -406,6 +406,10 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       ### for low core machine, set here
       # $ppbj = 2;
  
+      if ( isset( $this->grid[ $cluster ][ 'mempercore' ] ) ) {
+          $sbatch_mempercore = "#SBATCH --mem-per-cpu=" . $this->grid[ $cluster ][ 'mempercore' ];
+      }
+
       $contents = 
       "#!/bin/bash\n" .
       "#SBATCH -p $quename\n" .
@@ -415,6 +419,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       "#SBATCH -t $walltime\n" .
       "#SBATCH -e $workdir/stderr\n" .
       "#SBATCH -o $workdir/stdout\n" .
+      "$sbatch_mempercore\n" .
       "$priority_nice\n" .
        "$plines" .
       "export UCX_LOG_LEVEL=error\n" .

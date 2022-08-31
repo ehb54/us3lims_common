@@ -12,6 +12,15 @@ $admin_list = [
     ,'emre.brookes@umontana.edu'
     ];
 
+## maximum queue times and run times
+## these times are in hours *since last status update*
+## status updates generally happen somewhat frequently
+## if UDP messaging from the cluster isn't working, then status updates will be missed
+## set to zero to disable
+
+$global_max_queue_time_hours = 24;
+$global_max_run_time_hours   = 24;
+
 ## define all possible clusters for this server
 ## can be overriden in dbinst specific cluster_config.php
 
@@ -242,23 +251,6 @@ $cluster_details =
          ,'maxproc'            => 128
          ,'pmg'                => true
      ]
-     ,'jetstream' => [
-         'active'              => false
-         ,'airavata'           => true
-         ,'name'               => 'static-cluster.jetstream-cloud.org' ## js-169-137.jetstream-cloud.org'
-         ,'login'              => 'us3@js-169-137.jetstream-cloud.org'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
-         ,'workdir'            => '/N/us3_cluster/work'
-         ,'sshport'            => 22
-         ,'queue'              => 'batch'
-         ,'maxtime'            => 1440
-         ,'ppn'                => 24
-         ,'ppbj'               => 24
-         ,'maxproc'            => 48
-     ]
      ,'lonestar6-gamc' => [
          'active'              => false
          ,'airavata'           => true
@@ -333,8 +325,8 @@ $cluster_details =
          'active'              => true
          ,'airavata'           => false
          ,'name'               => 'us3iab-node0.localhost'
-         ,'queue'              => 'batch'
          ,'submithost'         => 'localhost'
+         ,'localhost'          => true
          ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
          ,'submittype'         => 'slurm'
          ,'httpport'           => $subport
@@ -352,7 +344,7 @@ $cluster_details =
          'active'              => false
          ,'airavata'           => false
          ,'name'               => 'us3iab-node1.localhost'
-         ,'queue'              => 'normal'
+         ,'queue'              => 'batch'
          ,'submithost'         => 'localhost'
          ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
          ,'submittype'         => 'slurm'

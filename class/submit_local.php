@@ -43,7 +43,7 @@ $this->message[] = "End of submit_local.php";
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
       $subtype   = $this->grid[ $cluster ][ 'submittype' ];
-      $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
+      $is_us3iab = ( preg_match( "/us3iab-node0/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
       $is_slurm  = preg_match( "/slurm/", $subtype );
@@ -108,7 +108,7 @@ $this->message[] = "Files copied to $address:$workdir";
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
-      $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
+      $is_us3iab = ( preg_match( "/us3iab-node0/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
       $requestID = $this->data[ 'job' ][ 'requestID' ];
@@ -447,7 +447,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
       $subtype   = $this->grid[ $cluster ][ 'submittype' ];
-      $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
+      $is_us3iab = ( preg_match( "/us3iab-node0/", $cluster )  ||
                      preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
 

@@ -43,8 +43,8 @@ $this->message[] = "End of submit_local.php";
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
       $subtype   = $this->grid[ $cluster ][ 'submittype' ];
-      $is_us3iab = ( preg_match( "/us3iab-node0/", $cluster )  ||
-                     preg_match( "/" . $clusname ."/", $gwhostid ) );
+      $is_us3iab = preg_match( "/us3iab-node0/", $cluster );
+      ## || preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
       $is_slurm  = preg_match( "/slurm/", $subtype );
 ##$this->message[] = "cluster=$cluster is_us3iab=$is_us3iab is_slurm=$is_slurm";
@@ -53,6 +53,7 @@ $this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$i
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
       $address   = $this->grid[ $cluster ][ 'name' ];
+      $login     = isset( $this->grid[ $cluster ][ 'login' ] ) ? $this->grid[ $cluster ][ 'login' ] : $address;
       if ( $is_us3iab )
          $address   = "localhost";
       $port      = $this->grid[ $cluster ][ 'sshport' ]; 
@@ -60,15 +61,13 @@ $this->message[] = "cluster=$cluster $clusname  gwhostid=$gwhostid  is_us3iab=$i
                          $this->data['db']['host'],
                          $this->data['db']['name'],
                          $this->data['job']['requestID'] );
-      $ruser     = preg_match( "/umontana/", $cluster ) ?
-                   "bd142854e" : "us3";
     
       ## Create working directory
       $output    = array();
       $cmd       = "/bin/mkdir $workdir 2>&1";
       if ( $no_us3iab )
       {
-         $cmd       = "/usr/bin/ssh -p $port -x $ruser@$address " . $cmd;
+         $cmd       = "/usr/bin/ssh -p $port -x $login " . $cmd;
       }
 
       exec( $cmd, $output, $status );
@@ -84,7 +83,7 @@ if($status != 0)
 
       if ( $no_us3iab )
       {
-	 $cmd      = "/usr/bin/scp -P $port $tarfile $pbsfile $ruser@$address:$workdir 2>&1";
+	 $cmd      = "/usr/bin/scp -P $port $tarfile $pbsfile $login:$workdir 2>&1";
       }
       else
       {
@@ -108,8 +107,8 @@ $this->message[] = "Files copied to $address:$workdir";
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
-      $is_us3iab = ( preg_match( "/us3iab-node0/", $cluster )  ||
-                     preg_match( "/" . $clusname ."/", $gwhostid ) );
+      $is_us3iab = preg_match( "/us3iab-node0/", $cluster );
+      ## || preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
@@ -254,8 +253,8 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $quename   = $this->grid[ $cluster ][ 'queue' ];
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
-      $is_us3iab = ( preg_match( "/us3iab/", $cluster )  ||
-                     preg_match( "/" . $clusname ."/", $gwhostid ) );
+      $is_us3iab = preg_match( "/us3iab/", $cluster );
+      ## || preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
 elog2( "create slurm cluster $cluster clusname $clusname quename $quename" );
       $tarfile   = sprintf( "hpcinput-%s-%s-%05d.tar",
@@ -296,6 +295,8 @@ elog2( "create slurm cluster $cluster clusname $clusname quename $quename" );
       $slurm332bug = "";
 
 $this->message[] = "cluster=$cluster  ppn=$ppn  ppbj=$ppbj  wall=$wall";
+
+      ## details should all be moved to global_config.php
 
       switch( $cluster )
       {
@@ -447,19 +448,18 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
       $subtype   = $this->grid[ $cluster ][ 'submittype' ];
-      $is_us3iab = ( preg_match( "/us3iab-node0/", $cluster )  ||
-                     preg_match( "/" . $clusname ."/", $gwhostid ) );
+      $is_us3iab = preg_match( "/us3iab-node0/", $cluster );
+      ## preg_match( "/" . $clusname ."/", $gwhostid ) );
       $no_us3iab = 1 - $is_us3iab;
 
       $is_slurm  = preg_match( "/slurm/", $subtype );
       $is_demel3 = preg_match( "/demeler3/", $cluster );
-      $ruser     = preg_match( "/umontana/", $cluster ) ?
-                   "bd142854e" : "us3";
 
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
       $workdir   = $this->grid[ $cluster ][ 'workdir' ] . $jobid;
       $address   = $this->grid[ $cluster ][ 'name' ];
+      $login     = isset( $this->grid[ $cluster ][ 'login' ] ) ? $this->grid[ $cluster ][ 'login' ] : $address;
       $port      = $this->grid[ $cluster ][ 'sshport' ]; 
       $tarfile   = sprintf( "hpcinput-%s-%s-%05d.tar",
                          $this->data['db']['host'],
@@ -478,7 +478,7 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
       }
       if ( $no_us3iab )
       {
-         $cmd   = "ssh -p $port -x $ruser@$address " . $cmd;
+         $cmd   = "ssh -p $port -x $login " . $cmd;
       }
 
 elog2( "submit_local cmd = $cmd" );

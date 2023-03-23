@@ -11,7 +11,7 @@ use SCIGAP\AiravataWrapper;
 
 class submit_airavata extends airavata_jobsubmit
 {
-    protected $testing = true;
+    protected $testing = false;
 
     ## Submits data
     function submit()
@@ -63,9 +63,8 @@ class submit_airavata extends airavata_jobsubmit
                     $ppn[]         = $this->grid[ $v ][ 'ppn' ];
                     $ppbj[]        = $this->grid[ $v ][ 'ppbj' ];
 
-                    ## $this->nodes() & $this->max_mgroupcount() need to be updated
-                    $nodes[]       = $this->nodes();
-                    $mgroupcount[] = min( $this->max_mgroupcount(),
+                    $nodes[]       = $this->nodes( $v );
+                    $mgroupcount[] = min( $this->max_mgroupcount( $v ),
                                           $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
                     $cores[]       = end( $nodes ) * end( $ppn );
 
@@ -97,7 +96,7 @@ class submit_airavata extends airavata_jobsubmit
                     
                     $memoryreq[]   = $use_memoryreq;
 
-                    $maxWallTime[] = $this->maxwall();
+                    $maxWallTime[] = $this->maxwall( $v );
                 }
             }
         } else {
@@ -108,8 +107,8 @@ class submit_airavata extends airavata_jobsubmit
             $queue[]       = $this->grid[ $cluster ][ 'queue' ];
             $ppn[]         = $this->grid[ $cluster ][ 'ppn' ];
             $ppbj[]        = $this->grid[ $cluster ][ 'ppbj' ];
-            $nodes[]       = $this->nodes();
-            $mgroupcount[] = min( $this->max_mgroupcount(),
+            $nodes[]       = $this->nodes( $cluster );
+            $mgroupcount[] = min( $this->max_mgroupcount( $cluster ),
                                   $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
             $cores[]       = end( $nodes ) * end( $ppn );
 
@@ -141,7 +140,7 @@ class submit_airavata extends airavata_jobsubmit
             
             $memoryreq[]   = $use_memoryreq;
 
-            $maxWallTime[] = $this->maxwall();
+            $maxWallTime[] = $this->maxwall( $cluster );
         }
             
         # global
@@ -150,6 +149,8 @@ class submit_airavata extends airavata_jobsubmit
         $clus_user   = 'us3';
         $clus_scrd   = 'NONE';
         $clus_acct   = 'NONE';
+
+        # remove below for production or wrap with $this->testing
 
         $this->message[] = "grid:" . json_encode( $this->grid, JSON_PRETTY_PRINT );
         $this->message[] = "data:" . json_encode( $this->data, JSON_PRETTY_PRINT );
@@ -175,7 +176,7 @@ class submit_airavata extends airavata_jobsubmit
                      #,"clusterScratch"           => "/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs"
                      ,"clusterAllocationAccount" => $clus_acct
                      #,"clusterAllocationAccount" => "uot111"
-                     ,"extimatedMaxWallTime"     => $maxWallTime[$i]
+                     #,"extimatedMaxWallTime"     => $maxWallTime[$i]
                      ,"memreq"                   => $memoryreq  [$i]
                     ]
                     ;
@@ -192,7 +193,6 @@ class submit_airavata extends airavata_jobsubmit
         ## more likely goes into HPCAnalysisRequest or Result (?)
 
         $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount[0];
-        $maxWallTime                          = $this->maxwall();
         $this->data[ 'cores'       ]          = $cores[0];
         $this->data[ 'nodes'       ]          = $nodes[0];
         $this->data[ 'ppn'         ]          = $ppn[0];
@@ -225,23 +225,34 @@ class submit_airavata extends airavata_jobsubmit
         ##var_dump('dumperr', $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, $queue, $cores, $nodes,
         ##          $mgroupcount, $maxWallTime, $clus_user, $clus_scrd, $inputTarFile, $outputDirName );
 
+        $this->message[] = "computeClusters:" . json_encode( $computeClusters, JSON_PRETTY_PRINT );
+        
         if ( $this->testing ) {
+            $this->message[] = "    ppn=" . implode( ":", $ppn ) . " nodes=" . implode( ":", $nodes ) . "  cores=" . implode( ":", $cores );
+            $this->message[] = "    uslimsVMHost=$uslimsVMHost  limsUser=$limsUser";
+            $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId  memoryreq=" . implode( ":", $memoryreq );
+            $this->message[] = "    clus_host=" . implode( ":", $clus_host ) . " queue=" . implode( ":", $queue ) . " clus_user=$clus_user  clus_scrd=$clus_scrd";
+            $this->message[] = "    mgroupcount=" . implode( ":", $mgroupcount ) . " maxWallTime=" . implode( ":", $maxWallTime );
+            $this->message[] = "    inputTarFile=$inputTarFile";
+            $this->message[] = "    outputDirName=$outputDirName";
+
             echo
                 'testing on, submission disabled<br>'
                 ;
-            $this->message[] = "computeClusters:" . json_encode( $computeClusters, JSON_PRETTY_PRINT );
+            return 0;
         } else {
-## setup for a single computeCluster (e.g. as previously done)
 
+## always submit to metascheduler
 
-            $this->message[] = json_encode( json_decode( $computeClusters ), JSON_PRETTY_PRINT );
+            $computeClustersEnc = json_encode( $computeClusters );
+            $this->message[] = "computeClustersEnc: $computeClustersEnc";
 
             $expResult  = $airavataWrapper->launch_autoscheduled_airavata_experiment(
                 $uslimsVMHost
                 ,$limsUser
                 ,$exp_name
                 ,$expReqId
-                ,$computeClusters
+                ,$computeClustersEnc
                 ,$inputTarFile
                 ,$outputDirName
                 );
@@ -253,6 +264,7 @@ class submit_airavata extends airavata_jobsubmit
 #                                                                        $maxWallTime, $clus_user, $clus_scrd, $clus_acct,
 #                                                                        $inputTarFile, $outputDirName, $memoryreq );
                          
+            $this->message[] = "exp result " . json_encode( $expResult, JSON_PRETTY_PRINT );
         }
 
         $expId      = 0;
@@ -262,11 +274,11 @@ class submit_airavata extends airavata_jobsubmit
             $expId      = $expResult[ 'experimentId' ];
             ##var_dump($expId);
             $this->message[] = "Experiment $expId created";
-            $this->message[] = "    ppn=$ppn nodes=$nodes  cores=$cores";
+            $this->message[] = "    ppn=" . implode( ":", $ppn ) . " nodes=" . implode( ":", $nodes ) . "  cores=" . implode( ":", $cores );
             $this->message[] = "    uslimsVMHost=$uslimsVMHost  limsUser=$limsUser";
-            $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId  memoryreq=$memoryreq";
-            $this->message[] = "    clus_host=$clus_host  queue=$queue  clus_user=$clus_user  clus_scrd=$clus_scrd";
-            $this->message[] = "    mgroupcount=$mgroupcount  maxWallTime=$maxWallTime";
+            $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId  memoryreq=" . implode( ":", $memoryreq );
+            $this->message[] = "    clus_host=" . implode( ":", $clus_host ) . " queue=" . implode( ":", $queue ) . " clus_user=$clus_user  clus_scrd=$clus_scrd";
+            $this->message[] = "    mgroupcount=" . implode( ":", $mgroupcount ) . " maxWallTime=" . implode( ":", $maxWallTime );
             $this->message[] = "    inputTarFile=$inputTarFile";
             $this->message[] = "    outputDirName=$outputDirName";
         }

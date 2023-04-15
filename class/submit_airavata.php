@@ -11,7 +11,14 @@ use SCIGAP\AiravataWrapper;
 
 class submit_airavata extends airavata_jobsubmit
 {
-    protected $testing = false;
+    protected $testing      = false;
+
+    protected $debug_arrays = [
+        "grid"              => false
+        ,"data"             => false
+        ,"clusters"         => false
+        ,"clusters_encoded" => true
+        ];
 
     ## Submits data
     function submit()
@@ -150,10 +157,15 @@ class submit_airavata extends airavata_jobsubmit
         $clus_scrd   = 'NONE';
         $clus_acct   = 'NONE';
 
-        # remove below for production or wrap with $this->testing
-
-        $this->message[] = "grid:" . json_encode( $this->grid, JSON_PRETTY_PRINT );
-        $this->message[] = "data:" . json_encode( $this->data, JSON_PRETTY_PRINT );
+        if ( array_key_exists( 'grid', $this->debug_arrays ) &&
+            $this->debug_arrays[ 'grid' ] ) {
+            $this->message[] = "grid:" . json_encode( $this->grid, JSON_PRETTY_PRINT );
+        }
+        
+        if ( array_key_exists( 'data', $this->debug_arrays ) &&
+            $this->debug_arrays[ 'data' ] ) {
+            $this->message[] = "data:" . json_encode( $this->data, JSON_PRETTY_PRINT );
+        }
 
         ## build $computeClusters array
 
@@ -225,7 +237,11 @@ class submit_airavata extends airavata_jobsubmit
         ##var_dump('dumperr', $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, $queue, $cores, $nodes,
         ##          $mgroupcount, $maxWallTime, $clus_user, $clus_scrd, $inputTarFile, $outputDirName );
 
-        $this->message[] = "computeClusters:" . json_encode( $computeClusters, JSON_PRETTY_PRINT );
+
+        if ( array_key_exists( 'clusters', $this->debug_arrays ) &&
+            $this->debug_arrays[ 'clusters' ] ) {
+            $this->message[] = "computeClusters:" . json_encode( $computeClusters, JSON_PRETTY_PRINT );
+        }
         
         if ( $this->testing ) {
             $this->message[] = "    ppn=" . implode( ":", $ppn ) . " nodes=" . implode( ":", $nodes ) . "  cores=" . implode( ":", $cores );
@@ -245,7 +261,11 @@ class submit_airavata extends airavata_jobsubmit
 ## always submit to metascheduler
 
             $computeClustersEnc = json_encode( $computeClusters );
-            $this->message[] = "computeClustersEnc: $computeClustersEnc";
+
+            if ( array_key_exists( 'clusters_encoded', $this->debug_arrays ) &&
+                 $this->debug_arrays[ 'clusters_encoded' ] ) {
+                $this->message[] = "computeClustersEnc: $computeClustersEnc";
+            }
 
             $expResult  = $airavataWrapper->launch_autoscheduled_airavata_experiment(
                 $uslimsVMHost

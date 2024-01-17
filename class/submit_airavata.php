@@ -28,6 +28,10 @@ class submit_airavata extends airavata_jobsubmit
     function createExperiment()
     {
         global $user, $class_dir;
+
+        static $airavataWrapper;
+        static $wrapper_set = false;
+        
         $cluster     = $this->data[ 'job' ][ 'cluster_shortname' ];
         $limsHost    = $this->data[ 'db'  ][ 'host' ];
         ##      if ( preg_match( "/uslims.uleth/", $limsHost ) )
@@ -176,7 +180,11 @@ class submit_airavata extends airavata_jobsubmit
             $memoryreq = $this->grid[ $cluster ][ 'maxmem' ];
         }
 
-        $airavataWrapper = new AiravataWrapper();
+        if ( !$wrapper_set ) {
+            $airavataWrapper = new AiravataWrapper();
+            $wrapper_set     = true;
+        }
+            
         ##var_dump('dumperr', $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, $queue, $cores, $nodes,
         ##          $mgroupcount, $maxWallTime, $clus_user, $clus_scrd, $inputTarFile, $outputDirName );
 

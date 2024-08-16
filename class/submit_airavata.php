@@ -35,6 +35,10 @@ class submit_airavata extends airavata_jobsubmit
     function createExperiment()
     {
         global $user, $class_dir;
+
+        static $airavataWrapper;
+        static $wrapper_set = false;
+
         $cluster     = $this->data[ 'job' ][ 'cluster_shortname' ];
         $limsHost    = $this->data[ 'db'  ][ 'host' ];
         if ( isset( $this->data[ 'db' ][ 'user_id' ] ) )
@@ -84,7 +88,7 @@ class submit_airavata extends airavata_jobsubmit
                         if ( isset( $this->grid[ $v ][ 'mempercore' ] ) ) {
                             $use_mem_per_core = $this->grid[ $v ][ 'mempercore' ];
                         }
-                        
+
                         $use_memoryreq = (int)( ( end( $cores ) * $use_mem_per_core ) / end($nodes) );
 
                         $use_memoryreq = (int)( $use_memoryreq + 999 );  ## Rounded up multiple of 1000
@@ -100,7 +104,7 @@ class submit_airavata extends airavata_jobsubmit
                         ) {
                         $use_memoryreq = $this->grid[ $v ][ 'maxmem' ];
                     }
-                    
+
                     $memoryreq[]   = $use_memoryreq;
 
                     $maxWallTime[] = $this->maxwall( $v );
@@ -128,7 +132,7 @@ class submit_airavata extends airavata_jobsubmit
                 if ( isset( $this->grid[ $cluster ][ 'mempercore' ] ) ) {
                     $use_mem_per_core = $this->grid[ $cluster ][ 'mempercore' ];
                 }
-                
+
                 $use_memoryreq = (int)( ( end( $cores ) * $use_mem_per_core ) / end($nodes) );
 
                 $use_memoryreq = (int)( $use_memoryreq + 999 );  ## Rounded up multiple of 1000
@@ -144,12 +148,12 @@ class submit_airavata extends airavata_jobsubmit
                 ) {
                 $use_memoryreq = $this->grid[ $cluster ][ 'maxmem' ];
             }
-            
+
             $memoryreq[]   = $use_memoryreq;
 
             $maxWallTime[] = $this->maxwall( $cluster );
         }
-            
+
         # global
         $dbname      = $this->data[ 'db'     ][ 'name' ];
 
@@ -161,7 +165,7 @@ class submit_airavata extends airavata_jobsubmit
             $this->debug_arrays[ 'grid' ] ) {
             $this->message[] = "grid:" . json_encode( $this->grid, JSON_PRETTY_PRINT );
         }
-        
+
         if ( array_key_exists( 'data', $this->debug_arrays ) &&
             $this->debug_arrays[ 'data' ] ) {
             $this->message[] = "data:" . json_encode( $this->data, JSON_PRETTY_PRINT );
@@ -175,7 +179,7 @@ class submit_airavata extends airavata_jobsubmit
             if ( $cores[$i] < 1 ) {
                 $this->message[] = "Requested cores for $clus_host[$i] is zero (ns=$nodes[$i], pp=$ppn[$i], gc=$mgroupcount[$i])";
             } else {
-                $computeClusters[] = 
+                $computeClusters[] =
                     [
                      "name"                      => $clus_host  [$i]
                      ,"queue"                    => $queue      [$i]
@@ -198,7 +202,7 @@ class submit_airavata extends airavata_jobsubmit
         if ( !count( $computeClusters ) ) {
             $this->message[] = "No compute resource available";
         }
-            
+
 
         ## does this data get written somewhere?
         ## could be a major complication if contained in input
@@ -233,7 +237,52 @@ class submit_airavata extends airavata_jobsubmit
 
         $uslimsVMHost = gethostname();
 
-        $airavataWrapper = new AiravataWrapper();
+        ## removed cluster specific resets
+        ## these first 2 appear to be remenants for running lims servers on jetstream1
+        ## if ( preg_match( "/lims4.noval/", $uslimsVMHost ) )
+        ## {
+        ## $uslimsVMHost = "uslims4.aucsolutions.com";
+        ## }
+        ## else if ( preg_match( "/noval/", $uslimsVMHost ) )
+        ## {
+        ## $uslimsVMHost = "uslims3.aucsolutions.com";
+        ## }
+        ##      else if ( preg_match( "/uslims.uleth/", $uslimsVMHost ) )
+        ##      {
+        ##         $uslimsVMHost = "demeler6.uleth.ca";
+        ##      }
+
+        $memoryreq    = 0;
+
+        ## compute memoryreq if compute_memoryreq set
+
+        if ( isset( $this->grid[ $cluster ][ 'compute_memoryreq' ] ) ) {
+            $use_mem_per_core = 2000;
+            if ( isset( $this->grid[ $cluster ][ 'mempercore' ] ) ) {
+                $use_mem_per_core = $this->grid[ $cluster ][ 'mempercore' ];
+            }
+            
+            $memoryreq = (int)( ( $cores * $use_mem_per_core ) / $nodes );
+
+            $memoryreq = (int)( $memoryreq + 999 );  ## Rounded up multiple of 1000
+            $memoryreq = (int)( $memoryreq / 1000 );
+            $memoryreq = (int)( $memoryreq * 1000 );
+        }
+
+        ## maximum memory limit if maxmem limit set
+
+        if (
+            isset( $this->grid[ $cluster ][ 'maxmem' ] ) &&
+            $memoryreq > $this->grid[ $cluster ][ 'maxmem' ]
+            ) {
+            $memoryreq = $this->grid[ $cluster ][ 'maxmem' ];
+        }
+
+        if ( !$wrapper_set ) {
+            $airavataWrapper = new AiravataWrapper();
+            $wrapper_set     = true;
+        }
+
         ##var_dump('dumperr', $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, $queue, $cores, $nodes,
         ##          $mgroupcount, $maxWallTime, $clus_user, $clus_scrd, $inputTarFile, $outputDirName );
 
@@ -242,7 +291,7 @@ class submit_airavata extends airavata_jobsubmit
             $this->debug_arrays[ 'clusters' ] ) {
             $this->message[] = "computeClusters:" . json_encode( $computeClusters, JSON_PRETTY_PRINT );
         }
-        
+
         if ( $this->testing ) {
             $this->message[] = "    ppn=" . implode( ":", $ppn ) . " nodes=" . implode( ":", $nodes ) . "  cores=" . implode( ":", $cores );
             $this->message[] = "    uslimsVMHost=$uslimsVMHost  limsUser=$limsUser";
@@ -283,7 +332,7 @@ class submit_airavata extends airavata_jobsubmit
 #                                                                        $clus_host, $queue, $cores, $nodes, $mgroupcount,
 #                                                                        $maxWallTime, $clus_user, $clus_scrd, $clus_acct,
 #                                                                        $inputTarFile, $outputDirName, $memoryreq );
-                         
+
             $this->message[] = "exp result " . json_encode( $expResult, JSON_PRETTY_PRINT );
         }
 

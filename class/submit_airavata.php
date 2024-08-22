@@ -252,31 +252,32 @@ class submit_airavata extends airavata_jobsubmit
         ##         $uslimsVMHost = "demeler6.uleth.ca";
         ##      }
 
-        $memoryreq    = 0;
+        ### --- removed this scalar value memoryreq calc as it is done in an array version above
+        ###        $memoryreq    = 0;
 
-        ## compute memoryreq if compute_memoryreq set
+        ###        ## compute memoryreq if compute_memoryreq set
 
-        if ( isset( $this->grid[ $cluster ][ 'compute_memoryreq' ] ) ) {
-            $use_mem_per_core = 2000;
-            if ( isset( $this->grid[ $cluster ][ 'mempercore' ] ) ) {
-                $use_mem_per_core = $this->grid[ $cluster ][ 'mempercore' ];
-            }
+        ###        if ( isset( $this->grid[ $cluster ][ 'compute_memoryreq' ] ) ) {
+        ###            $use_mem_per_core = 2000;
+        ###            if ( isset( $this->grid[ $cluster ][ 'mempercore' ] ) ) {
+        ###                $use_mem_per_core = $this->grid[ $cluster ][ 'mempercore' ];
+        ###            }
             
-            $memoryreq = (int)( ( $cores * $use_mem_per_core ) / $nodes );
+        ###            $memoryreq = (int)( ( $cores * $use_mem_per_core ) / $nodes );
 
-            $memoryreq = (int)( $memoryreq + 999 );  ## Rounded up multiple of 1000
-            $memoryreq = (int)( $memoryreq / 1000 );
-            $memoryreq = (int)( $memoryreq * 1000 );
-        }
+        ###            $memoryreq = (int)( $memoryreq + 999 );  ## Rounded up multiple of 1000
+        ###            $memoryreq = (int)( $memoryreq / 1000 );
+        ###            $memoryreq = (int)( $memoryreq * 1000 );
+        ###        }
 
-        ## maximum memory limit if maxmem limit set
+        ###        ## maximum memory limit if maxmem limit set
 
-        if (
-            isset( $this->grid[ $cluster ][ 'maxmem' ] ) &&
-            $memoryreq > $this->grid[ $cluster ][ 'maxmem' ]
-            ) {
-            $memoryreq = $this->grid[ $cluster ][ 'maxmem' ];
-        }
+        ###        if (
+        ###            isset( $this->grid[ $cluster ][ 'maxmem' ] ) &&
+        ###            $memoryreq > $this->grid[ $cluster ][ 'maxmem' ]
+        ###            ) {
+        ###            $memoryreq = $this->grid[ $cluster ][ 'maxmem' ];
+        ###        }
 
         if ( !$wrapper_set ) {
             $airavataWrapper = new AiravataWrapper();

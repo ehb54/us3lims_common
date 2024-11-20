@@ -17,7 +17,8 @@ class submit_airavata extends airavata_jobsubmit
         "grid"              => false
         ,"data"             => false
         ,"clusters"         => false
-        ,"clusters_encoded" => true
+        ,"clusters_encoded" => false
+        ,"exp_result"       => false
         ];
 
     ## Submits data
@@ -334,7 +335,10 @@ class submit_airavata extends airavata_jobsubmit
 #                                                                        $maxWallTime, $clus_user, $clus_scrd, $clus_acct,
 #                                                                        $inputTarFile, $outputDirName, $memoryreq );
 
-            $this->message[] = "exp result " . json_encode( $expResult, JSON_PRETTY_PRINT );
+            if ( array_key_exists( 'exp_result', $this->debug_arrays ) &&
+                 $this->debug_arrays[ 'exp_result' ] ) {
+                 $this->message[] = "exp result " . json_encode( $expResult, JSON_PRETTY_PRINT );
+            }
         }
 
         $expId      = 0;

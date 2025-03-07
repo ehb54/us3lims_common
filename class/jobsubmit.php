@@ -121,6 +121,13 @@ class jobsubmit
            ,'maxproc'
            ];
 
+        $reqkey_metascheduler = [
+            'active'
+            ,'name'
+            ,'airavata'
+            ,'clusters'
+            ];
+
        foreach ( $cluster_details as $k => $v ) {
            $ok = true;
 
@@ -131,13 +138,17 @@ class jobsubmit
                continue;
            }
 
-           foreach ( $reqkey as $key ) {
+           foreach ( array_key_exists( "clusters", $v )
+                     ? $reqkey_metascheduler
+                     : $reqkey
+                     as $key ) {
                if ( !array_key_exists( $key, $v ) ) {
                    $error_msg( "\$cluster_details for cluster $k is missing required key $key" );
                    $ok = false;
                    continue;
                }
            }
+
            if ( !$ok ) {
                continue;
            }

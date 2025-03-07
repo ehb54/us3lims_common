@@ -11,7 +11,15 @@ use SCIGAP\AiravataWrapper;
 
 class submit_airavata extends airavata_jobsubmit
 {
-    protected $testing = false;
+    protected $testing      = false;
+
+    protected $debug_arrays = [
+        "grid"              => false
+        ,"data"             => false
+        ,"clusters"         => false
+        ,"clusters_encoded" => false
+        ,"exp_result"       => false
+        ];
 
     ## Submits data
     function submit()
@@ -31,100 +39,191 @@ class submit_airavata extends airavata_jobsubmit
 
         static $airavataWrapper;
         static $wrapper_set = false;
-        
+
         $cluster     = $this->data[ 'job' ][ 'cluster_shortname' ];
         $limsHost    = $this->data[ 'db'  ][ 'host' ];
-        ##      if ( preg_match( "/uslims.uleth/", $limsHost ) )
-        ##         $limsHost    = 'demeler6.uleth.ca';
         if ( isset( $this->data[ 'db' ][ 'user_id' ] ) )
             $limsUser    = $this->data[ 'db' ][ 'user_id' ];
         else
             $limsUser    = 'Gary_Gorbet_1234';
-        $clus_host   = $this->grid[ $cluster ][ 'name' ];
-        $userdn      = $this->grid[ $cluster ][ 'userdn' ];
-        $queue       = $this->data[ 'job'    ][ 'cluster_queue' ];
-        $dbname      = $this->data[ 'db'     ][ 'name' ];
-        $mgroupcount = min( $this->max_mgroupcount(),
-                            $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
-        $ppn         = $this->grid[ $cluster ][ 'ppn' ];
-        $ppbj        = $this->grid[ $cluster ][ 'ppbj' ];
+
+        ## not used / deprecated
+        # $userdn      = $this->grid[ $cluster ][ 'userdn' ];
+        ## should come from grid, not job
+        # $queue       = $this->data[ 'job'    ][ 'cluster_queue' ];
+        ## note needs $mgroupcount defined first
         ## $tnodes      = $this->nodes();
         ## $nodes       = $tnodes * $mgroupcount;
-        $nodes       = $this->nodes();
+
+        ## arrays for metascheduler values
+
+        $clus_host   = [];
+        $queue       = [];
+        $ppn         = [];
+        $ppbj        = [];
+        $nodes       = [];
+        $mgroupcount = [];
+        $cores       = [];
+        $maxWallTime = [];
+        $memoryreq   = [];
+
+        if ( array_key_exists( 'clusters', $this->grid[ $cluster ] ) ) {
+            foreach ( $this->grid[ $cluster ][ 'clusters' ] as $v ) {
+                if ( array_key_exists( $v, $this->grid ) ) {
+                    $clus_host[]   = $this->grid[ $v ][ 'name' ];
+                    $queue[]       = $this->grid[ $v ][ 'queue' ];
+                    $ppn[]         = $this->grid[ $v ][ 'ppn' ];
+                    $ppbj[]        = $this->grid[ $v ][ 'ppbj' ];
+
+                    $nodes[]       = $this->nodes( $v );
+                    $mgroupcount[] = min( $this->max_mgroupcount( $v ),
+                                          $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
+                    $cores[]       = end( $nodes ) * end( $ppn );
+
+                    ## compute memoryreq if compute_memoryreq set
+
+                    $use_memoryreq = 0;
+
+                    if ( isset( $this->grid[ $v ][ 'compute_memoryreq' ] ) ) {
+                        $use_mem_per_core = 2000;
+                        if ( isset( $this->grid[ $v ][ 'mempercore' ] ) ) {
+                            $use_mem_per_core = $this->grid[ $v ][ 'mempercore' ];
+                        }
+
+                        $use_memoryreq = (int)( ( end( $cores ) * $use_mem_per_core ) / end($nodes) );
+
+                        $use_memoryreq = (int)( $use_memoryreq + 999 );  ## Rounded up multiple of 1000
+                        $use_memoryreq = (int)( $use_memoryreq / 1000 );
+                        $use_memoryreq = (int)( $use_memoryreq * 1000 );
+                    }
+
+                    ## maximum memory limit if maxmem limit set
+
+                    if (
+                        isset( $this->grid[ $v ][ 'maxmem' ] ) &&
+                        $use_memoryreq > $this->grid[ $v ][ 'maxmem' ]
+                        ) {
+                        $use_memoryreq = $this->grid[ $v ][ 'maxmem' ];
+                    }
+
+                    $memoryreq[]   = $use_memoryreq;
+
+                    $maxWallTime[] = $this->maxwall( $v );
+                }
+            }
+        } else {
+
+            # one grid target specified
+
+            $clus_host[]   = $this->grid[ $cluster ][ 'name' ];
+            $queue[]       = $this->grid[ $cluster ][ 'queue' ];
+            $ppn[]         = $this->grid[ $cluster ][ 'ppn' ];
+            $ppbj[]        = $this->grid[ $cluster ][ 'ppbj' ];
+            $nodes[]       = $this->nodes( $cluster );
+            $mgroupcount[] = min( $this->max_mgroupcount( $cluster ),
+                                  $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] );
+            $cores[]       = end( $nodes ) * end( $ppn );
+
+            ## compute memoryreq if compute_memoryreq set
+
+            $use_memoryreq = 0;
+
+            if ( isset( $this->grid[ $cluster ][ 'compute_memoryreq' ] ) ) {
+                $use_mem_per_core = 2000;
+                if ( isset( $this->grid[ $cluster ][ 'mempercore' ] ) ) {
+                    $use_mem_per_core = $this->grid[ $cluster ][ 'mempercore' ];
+                }
+
+                $use_memoryreq = (int)( ( end( $cores ) * $use_mem_per_core ) / end($nodes) );
+
+                $use_memoryreq = (int)( $use_memoryreq + 999 );  ## Rounded up multiple of 1000
+                $use_memoryreq = (int)( $use_memoryreq / 1000 );
+                $use_memoryreq = (int)( $use_memoryreq * 1000 );
+            }
+
+            ## maximum memory limit if maxmem limit set
+
+            if (
+                isset( $this->grid[ $cluster ][ 'maxmem' ] ) &&
+                $use_memoryreq > $this->grid[ $cluster ][ 'maxmem' ]
+                ) {
+                $use_memoryreq = $this->grid[ $cluster ][ 'maxmem' ];
+            }
+
+            $memoryreq[]   = $use_memoryreq;
+
+            $maxWallTime[] = $this->maxwall( $cluster );
+        }
+
+        # global
+        $dbname      = $this->data[ 'db'     ][ 'name' ];
+
         $clus_user   = 'us3';
         $clus_scrd   = 'NONE';
         $clus_acct   = 'NONE';
 
-        ## removed juwels group account specific details
-        ## left as a hint in case the need recurs in the future
-
-        ## if ( $cluster == 'juwels' )
-        ## {
-        ## $clus_group  = 'cpaj1846';
-        ## switch ( $dbname )
-        ## {
-        ## case 'uslims3_cauma3':
-        ## $clus_user   = 'gorbet1';
-        ## $clus_acct   = 'paj1846';
-        ## break;
-        ## 
-        ## case 'uslims3_cauma3d':
-        ## $clus_user   = 'sureshmarru1';
-        ## $clus_acct   = 'paj1846';
-        ## break;
-        ## 
-        ## case 'uslims3_Uni_KN':
-        ## $clus_user   = 'schneider3';
-        ## $clus_acct   = 'hkn00';
-        ## break;
-        ## 
-        ## case 'uslims3_HHU':
-        ## $clus_user   = 'jics6301';
-        ## $clus_group  = 'jics63';
-        ## break;
-        ## 
-        ## case 'uslims3_FAU':
-        ## $clus_user   = 'uttinger1';
-        ## $clus_acct   = 'her21';
-        ## break;
-        ## 
-        ## case 'uslims3_JSC':
-        ## $clus_user   = 'm.memon';
-        ## break;
-        ## 
-        ## default :
-        ## $clus_user   = 'gorbet1';
-        ## break;
-        ## }
-        ## 
-        ## $userdn      = str_replace( '_USER_', $user, $userdn );
-        ## $clus_scrd   = '/p/scratch/' . $clus_group . '/' . $clus_user;
-        ## }
-
-        $cores      = $nodes * $ppn;
-        if ( $cores < 1 )
-        {
-            $this->message[] = "Requested cores is zero (ns=$nodes, pp=$ppn, gc=$mgroupcount)";
+        if ( array_key_exists( 'grid', $this->debug_arrays ) &&
+            $this->debug_arrays[ 'grid' ] ) {
+            $this->message[] = "grid:" . json_encode( $this->grid, JSON_PRETTY_PRINT );
         }
 
-        $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
-        $maxWallTime = $this->maxwall();
-        if ( preg_match( "/swus/", $clus_user ) )
-        {  ## Development users on Jureca limited to 6 hours wall time
-            $maxWallTime = min( $maxWallTime, 360 );
+        if ( array_key_exists( 'data', $this->debug_arrays ) &&
+            $this->debug_arrays[ 'data' ] ) {
+            $this->message[] = "data:" . json_encode( $this->data, JSON_PRETTY_PRINT );
         }
-        $this->data[ 'cores'       ] = $cores;
-        $this->data[ 'nodes'       ] = $nodes;
-        $this->data[ 'ppn'         ] = $ppn;
-        $this->data[ 'maxWallTime' ] = $maxWallTime;
-        $this->data[ 'dataset' ][ 'status' ] = 'queued';
-        $tarFilename = sprintf( "hpcinput-%s-%s-%05d.tar", $limsHost,
-                                $this->data[ 'db'  ][ 'name' ],
-                                $this->data[ 'job' ][ 'requestID' ] );
 
-        $workingDirPath = $this->data[ 'job' ][ 'directory' ];
-        $inputTarFile   = $workingDirPath . $tarFilename;
-        $outputDirName  = basename( $workingDirPath );
+        ## build $computeClusters array
+
+        $computeClusters = [];
+
+        for ( $i = 0; $i < count( $clus_host ); ++$i ) {
+            if ( $cores[$i] < 1 ) {
+                $this->message[] = "Requested cores for $clus_host[$i] is zero (ns=$nodes[$i], pp=$ppn[$i], gc=$mgroupcount[$i])";
+            } else {
+                $computeClusters[] =
+                    [
+                     "name"                      => $clus_host  [$i]
+                     ,"queue"                    => $queue      [$i]
+                     ,"cores"                    => $cores      [$i]
+                     ,"nodes"                    => $nodes      [$i]
+                     ,"mGroupCount"              => $mgroupcount[$i]
+                     ,"wallTime"                 => $maxWallTime[$i]
+                     ,"clusterUserName"          => $clus_user
+                     ,"clusterScratch"           => $clus_scrd
+                     #,"clusterScratch"           => "/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs"
+                     ,"clusterAllocationAccount" => $clus_acct
+                     #,"clusterAllocationAccount" => "uot111"
+                     #,"extimatedMaxWallTime"     => $maxWallTime[$i]
+                     ,"memreq"                   => $memoryreq  [$i]
+                    ]
+                    ;
+            }
+        }
+
+        if ( !count( $computeClusters ) ) {
+            $this->message[] = "No compute resource available";
+        }
+
+
+        ## does this data get written somewhere?
+        ## could be a major complication if contained in input
+        ## more likely goes into HPCAnalysisRequest or Result (?)
+
+        $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount[0];
+        $this->data[ 'cores'       ]          = $cores[0];
+        $this->data[ 'nodes'       ]          = $nodes[0];
+        $this->data[ 'ppn'         ]          = $ppn[0];
+        $this->data[ 'maxWallTime' ]          = $maxWallTime[0];
+        $this->data[ 'dataset' ][ 'status' ]  = 'queued';
+        $tarFilename                          = sprintf(
+            "hpcinput-%s-%s-%05d.tar"
+            ,$limsHost
+            ,$this->data[ 'db'  ][ 'name' ]
+            ,$this->data[ 'job' ][ 'requestID' ]
+            );
+        $workingDirPath                       = $this->data[ 'job' ][ 'directory' ];
+        $inputTarFile                         = $workingDirPath . $tarFilename;
+        $outputDirName                        = basename( $workingDirPath );
 
         if ( preg_match( "/class_devel/", $class_dir ) )
             $exp_name   = 'US3-ADEV';
@@ -154,63 +253,92 @@ class submit_airavata extends airavata_jobsubmit
         ##         $uslimsVMHost = "demeler6.uleth.ca";
         ##      }
 
-        $memoryreq    = 0;
+        ### --- removed this scalar value memoryreq calc as it is done in an array version above
+        ###        $memoryreq    = 0;
 
-        ## compute memoryreq if compute_memoryreq set
+        ###        ## compute memoryreq if compute_memoryreq set
 
-        if ( isset( $this->grid[ $cluster ][ 'compute_memoryreq' ] ) ) {
-            $use_mem_per_core = 2000;
-            if ( isset( $this->grid[ $cluster ][ 'mempercore' ] ) ) {
-                $use_mem_per_core = $this->grid[ $cluster ][ 'mempercore' ];
-            }
+        ###        if ( isset( $this->grid[ $cluster ][ 'compute_memoryreq' ] ) ) {
+        ###            $use_mem_per_core = 2000;
+        ###            if ( isset( $this->grid[ $cluster ][ 'mempercore' ] ) ) {
+        ###                $use_mem_per_core = $this->grid[ $cluster ][ 'mempercore' ];
+        ###            }
             
-            $memoryreq = (int)( ( $cores * $use_mem_per_core ) / $nodes );
+        ###            $memoryreq = (int)( ( $cores * $use_mem_per_core ) / $nodes );
 
-            $memoryreq = (int)( $memoryreq + 999 );  ## Rounded up multiple of 1000
-            $memoryreq = (int)( $memoryreq / 1000 );
-            $memoryreq = (int)( $memoryreq * 1000 );
-        }
+        ###            $memoryreq = (int)( $memoryreq + 999 );  ## Rounded up multiple of 1000
+        ###            $memoryreq = (int)( $memoryreq / 1000 );
+        ###            $memoryreq = (int)( $memoryreq * 1000 );
+        ###        }
 
-        ## maximum memory limit if maxmem limit set
+        ###        ## maximum memory limit if maxmem limit set
 
-        if (
-            isset( $this->grid[ $cluster ][ 'maxmem' ] ) &&
-            $memoryreq > $this->grid[ $cluster ][ 'maxmem' ]
-            ) {
-            $memoryreq = $this->grid[ $cluster ][ 'maxmem' ];
-        }
+        ###        if (
+        ###            isset( $this->grid[ $cluster ][ 'maxmem' ] ) &&
+        ###            $memoryreq > $this->grid[ $cluster ][ 'maxmem' ]
+        ###            ) {
+        ###            $memoryreq = $this->grid[ $cluster ][ 'maxmem' ];
+        ###        }
 
         if ( !$wrapper_set ) {
             $airavataWrapper = new AiravataWrapper();
             $wrapper_set     = true;
         }
-            
+
         ##var_dump('dumperr', $uslimsVMHost, $limsUser, $exp_name, $expReqId, $clus_host, $queue, $cores, $nodes,
         ##          $mgroupcount, $maxWallTime, $clus_user, $clus_scrd, $inputTarFile, $outputDirName );
 
+
+        if ( array_key_exists( 'clusters', $this->debug_arrays ) &&
+            $this->debug_arrays[ 'clusters' ] ) {
+            $this->message[] = "computeClusters:" . json_encode( $computeClusters, JSON_PRETTY_PRINT );
+        }
+
         if ( $this->testing ) {
+            $this->message[] = "    ppn=" . implode( ":", $ppn ) . " nodes=" . implode( ":", $nodes ) . "  cores=" . implode( ":", $cores );
+            $this->message[] = "    uslimsVMHost=$uslimsVMHost  limsUser=$limsUser";
+            $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId  memoryreq=" . implode( ":", $memoryreq );
+            $this->message[] = "    clus_host=" . implode( ":", $clus_host ) . " queue=" . implode( ":", $queue ) . " clus_user=$clus_user  clus_scrd=$clus_scrd";
+            $this->message[] = "    mgroupcount=" . implode( ":", $mgroupcount ) . " maxWallTime=" . implode( ":", $maxWallTime );
+            $this->message[] = "    inputTarFile=$inputTarFile";
+            $this->message[] = "    outputDirName=$outputDirName";
+
             echo
                 'testing on, submission disabled<br>'
                 ;
-            $this->message[] =
-                "Testing\n"
-                . "------------------------------\n"
-                . "ppn          $ppn\n"
-                . "ppbj         $ppbj\n"
-                . "nodes        $nodes\n"
-                . "cores        $cores\n"
-                . "mgroupcount  $mgroupcount\n"
-                . "maxWallTime  $maxWallTime\n"
-                . "memoryreq    $memoryreq\n"
-                . "------------------------------"
-                ;
-            
+            return 0;
         } else {
-            $expResult  = $airavataWrapper->launch_airavata_experiment( $uslimsVMHost, $limsUser,
-                                                                        $exp_name, $expReqId,
-                                                                        $clus_host, $queue, $cores, $nodes, $mgroupcount,
-                                                                        $maxWallTime, $clus_user, $clus_scrd, $clus_acct,
-                                                                        $inputTarFile, $outputDirName, $memoryreq );
+
+## always submit to metascheduler
+
+            $computeClustersEnc = json_encode( $computeClusters );
+
+            if ( array_key_exists( 'clusters_encoded', $this->debug_arrays ) &&
+                 $this->debug_arrays[ 'clusters_encoded' ] ) {
+                $this->message[] = "computeClustersEnc: $computeClustersEnc";
+            }
+
+            $expResult  = $airavataWrapper->launch_autoscheduled_airavata_experiment(
+                $uslimsVMHost
+                ,$limsUser
+                ,$exp_name
+                ,$expReqId
+                ,$computeClustersEnc
+                ,$inputTarFile
+                ,$outputDirName
+                );
+
+## old way
+#            $expResult  = $airavataWrapper->launch_airavata_experiment( $uslimsVMHost, $limsUser,
+#                                                                        $exp_name, $expReqId,
+#                                                                        $clus_host, $queue, $cores, $nodes, $mgroupcount,
+#                                                                        $maxWallTime, $clus_user, $clus_scrd, $clus_acct,
+#                                                                        $inputTarFile, $outputDirName, $memoryreq );
+
+            if ( array_key_exists( 'exp_result', $this->debug_arrays ) &&
+                 $this->debug_arrays[ 'exp_result' ] ) {
+                 $this->message[] = "exp result " . json_encode( $expResult, JSON_PRETTY_PRINT );
+            }
         }
 
         $expId      = 0;
@@ -220,11 +348,11 @@ class submit_airavata extends airavata_jobsubmit
             $expId      = $expResult[ 'experimentId' ];
             ##var_dump($expId);
             $this->message[] = "Experiment $expId created";
-            $this->message[] = "    ppn=$ppn nodes=$nodes  cores=$cores";
+            $this->message[] = "    ppn=" . implode( ":", $ppn ) . " nodes=" . implode( ":", $nodes ) . "  cores=" . implode( ":", $cores );
             $this->message[] = "    uslimsVMHost=$uslimsVMHost  limsUser=$limsUser";
-            $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId  memoryreq=$memoryreq";
-            $this->message[] = "    clus_host=$clus_host  queue=$queue  clus_user=$clus_user  clus_scrd=$clus_scrd";
-            $this->message[] = "    mgroupcount=$mgroupcount  maxWallTime=$maxWallTime";
+            $this->message[] = "    exp_name=$exp_name  expReqId=$expReqId  memoryreq=" . implode( ":", $memoryreq );
+            $this->message[] = "    clus_host=" . implode( ":", $clus_host ) . " queue=" . implode( ":", $queue ) . " clus_user=$clus_user  clus_scrd=$clus_scrd";
+            $this->message[] = "    mgroupcount=" . implode( ":", $mgroupcount ) . " maxWallTime=" . implode( ":", $maxWallTime );
             $this->message[] = "    inputTarFile=$inputTarFile";
             $this->message[] = "    outputDirName=$outputDirName";
         }

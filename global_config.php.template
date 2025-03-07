@@ -358,4 +358,27 @@ $cluster_details =
          ,'maxproc'            => 16
          ,'pmg'                => true
      ]
+     ,'metascheduler' => [
+         'active'              => false
+         ,'name'               => 'metascheduler'
+         ,'airavata'           => true
+         ,"clusters"           => [
+             "anvil"
+             ,"expanse"
+             ]
+         ,'pmg'                => false
+         ,'pmgonly'            => false
+     ]
+     ,'metascheduler-gamc' => [
+         'active'              => false
+         ,'name'               => 'metascheduler-gamc'
+         ,'airavata'           => true
+         ,"clusters"           => [
+             "anvil-gamc"
+             ,"expanse-gamc"
+             ]
+         ,'pmg'                => true
+         ,'pmgonly'            => true
+     ]
+
     ];

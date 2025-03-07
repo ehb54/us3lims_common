@@ -121,6 +121,13 @@ class airavata_jobsubmit
             ,'maxproc'
             ];
 
+        $reqkey_metascheduler = [
+            'active'
+            ,'name'
+            ,'airavata'
+            ,'clusters'
+            ];
+
         foreach ( $cluster_details as $k => $v ) {
             $ok = true;
 
@@ -131,7 +138,10 @@ class airavata_jobsubmit
                 continue;
             }
 
-            foreach ( $reqkey as $key ) {
+            foreach ( array_key_exists( "clusters", $v )
+                      ? $reqkey_metascheduler
+                      : $reqkey
+                      as $key ) {
                 if ( !array_key_exists( $key, $v ) ) {
                     $error_msg( "\$cluster_details for cluster $k is missing required key $key" );
                     $ok = false;
@@ -410,12 +420,12 @@ class airavata_jobsubmit
         $dataset[ 'parameters' ] = $parameters;
     }
 
-    function maxwall()
+    function maxwall( $cluster = '' )
     {
         $spfact=7;
         $parameters = $this->data[ 'job' ][ 'jobParameters' ];
-        $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-        $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
+        $cluster    = strlen( $cluster ) ? $cluster : $this->data[ 'job' ][ 'cluster_shortname' ];
+        # not used  $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
         $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
         $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
         $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
@@ -629,9 +639,9 @@ class airavata_jobsubmit
         return (int)$time;
     }
 
-    function nodes()
+    function nodes( $cluster = '' )
     {
-        $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
+        $cluster    = strlen( $cluster ) ? $cluster : $this->data[ 'job' ][ 'cluster_shortname' ];
         $parameters = $this->data[ 'job' ][ 'jobParameters' ];
         $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
         $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
@@ -678,9 +688,9 @@ class airavata_jobsubmit
         return $nodes;
     }
 
-    function max_mgroupcount()
+    function max_mgroupcount( $cluster = '' )
     {
-        $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
+        $cluster    = strlen( $cluster ) ? $cluster : $this->data[ 'job' ][ 'cluster_shortname' ];
         $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
         $parameters = $this->data[ 'job' ][ 'jobParameters' ];
         $mciters    = $parameters[ 'mc_iterations' ];

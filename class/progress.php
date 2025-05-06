@@ -1,4 +1,4 @@
-<div id=_submitprogress style="color:darkblue;background:white;font-family:monospace;font-size:20px;text-align:center"></div>
+<div id=_submitprogress class='color_c_darkblue_s_background_c_white_s_font_d_family_c_monospace_s_font_d_size_c_20px_s_text_d_align_c_center'></div>
 <script>
 us_submit_prog     = {};
 us_submit_prog.msg = {};

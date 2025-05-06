@@ -23,7 +23,7 @@ include 'header.php';
      <tr><td><a href='http://www.prace-ri.eu/'>
          Partnership for Advanced<br/>Computing in Europe</a></td>
          <td><a href='http://www.iu.edu/'>Indiana University</a></td></tr>
-     <tr><td style='padding-top:2em;'><img src='images/uthscsa_logo.png' alt='UTHSCSA Logo' /></td></tr>
+     <tr><td class='padding_d_top_c_2em_sc_'><img src='images/uthscsa_logo.png' alt='UTHSCSA Logo' /></td></tr>
      <tr><td><a href='http://www.uthscsa.edu'>
          The University of Texas<br/>Health Science Center</a></td></tr>
      <tr><td><img src='images/UofMont_logo.png' alt='UofMontana Logo' /></td>

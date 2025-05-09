@@ -17,7 +17,7 @@ if ( isset( $is_cli ) && $is_cli ) {
 
 echo<<<HTML
   <!-- end content -->
-  <div class='clear_c__both_sc_'>&nbsp;</div>
+  <div class='clear-both'>&nbsp;</div>
 
   <!-- end page -->
   <div id="footer">

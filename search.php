@@ -51,18 +51,16 @@ Released      : 6/30/2011
 <body>
 
 <!-- begin header -->
-<div id="header" style='text-align:center;'>
+<div id="header" class='text_d_align_c_center_sc_'>
    <table class='noborder'>
    <tr><td><img src='images/USLIMS3-banner.png' alt='USLims 3 banner' /></td>
    </tr>
    </table>
-   <span style='font-size:20px;font-weight:bold;color:white;padding:0 1em;'>
+   <span class='font_d_size_c_20px_sc_font_d_weight_c_bold_sc_color_c_white_sc_padding_c_0_1em_sc_'>
     $org_name</span>
 
 HTML;
 
 include 'topmenu.php';
 
-</div>
-
-?>
+echo "</div>";

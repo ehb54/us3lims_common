@@ -472,3 +472,148 @@ fieldset#clusters tr.subheader th
     height:100%;
   }
 }
+
+.us_text_align_center {
+    text-align:center;
+}
+
+.bg-gray {
+    background: #eeeeee;
+}
+
+.bg-lightblue {
+    background-color: #9CC4E4;
+}
+
+.clear-both {
+    clear: both;
+}
+
+.d-block {
+    display: block;
+}
+
+.d-none {
+    display: none;
+}
+
+.font-bold-110 {
+    font-size: 110%;
+    font-weight: bold;
+}
+
+.font-bold-white-20px {
+    font-size: 20px;
+    font-weight: bold;
+    color: white;
+    padding: 0 1em;
+}
+
+.font-mono-center-20px {
+    color: darkblue;
+    background: white;
+    font-family: monospace;
+    font-size: 20px;
+    text-align: center
+}
+
+.m-2em-0-20em {
+    margin: 2em 0em 20em;
+}
+
+.mt-1em {
+    margin-top: 1em;
+}
+
+.mx-auto {
+    margin: 0px auto;
+}
+
+.pb-20em {
+    padding-bottom: 20em;
+}
+
+.pb-30em {
+    padding-bottom: 30em;
+}
+
+.pb-3em {
+    padding-bottom: 3em;
+}
+
+.pb-40em {
+    padding-bottom: 40em;
+}
+
+.text-blue {
+    color: blue;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.text-darkred {
+    color: darkRed;
+}
+
+.text-darkviolet {
+    color: DarkViolet;
+}
+
+.text-green {
+    color: green;
+}
+
+.text-left {
+    text-align: left;
+}
+
+.text-red {
+    color: red;
+}
+
+.w-11p {
+    width: 11%;
+}
+
+.w-12em {
+    width: 12em;
+}
+
+.w-12p {
+    width: 12%;
+}
+
+.w-15p {
+    width: 15%;
+}
+
+.w-16p {
+    width: 16%;
+}
+
+.w-20em {
+    width: 20em;
+}
+
+.w-400px-valign-middle {
+    vertical-align: middle;
+    width: 400px;
+}
+
+.w-5em {
+    width: 5em;
+}
+
+.w-70p {
+    width: 70%;
+}
+
+.w-95p {
+    width: 95%;
+}
+
+.w-98p {
+    width: 98%;
+}

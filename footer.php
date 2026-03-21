@@ -25,7 +25,7 @@ echo<<<HTML
 	</div>
 
 	  <div id='info2'><hr />Last modified on $modtime --
-         <a href='license.php'>Copyright &copy; notice and license information</a> UltraScan Project, UTHSCSA
+         <a href='license.php'>Copyright &copy; notice and license information</a> UltraScan Project
       </div>
  
   </div>

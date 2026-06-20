@@ -21,6 +21,15 @@ $admin_list = [
 $global_max_queue_time_hours = 24;
 $global_max_run_time_hours   = 24;
 
+## retry/backoff for transient job submission failures (e.g. sbatch
+## "Socket timed out" under scheduler load)
+## can be overridden per-cluster via 'submit_retries'/'submit_retry_wait'
+## in $cluster_details below
+## backoff doubles each retry, starting from $global_sbatch_submit_retry_wait_seconds
+
+$global_sbatch_submit_retries            = 3;
+$global_sbatch_submit_retry_wait_seconds = 5;
+
 ## define all possible clusters for this server
 ## can be overriden in dbinst specific cluster_config.php
 

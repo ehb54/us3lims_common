@@ -500,67 +500,91 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
          $cmd   = "ssh -p $port -x $login " . $cmd;
       }
 
-      $attempt   = 0;
-      $secwait   = $submit_retry_wait;
-      $submit_ok = false;
-      $jobnum    = '';
+      $submitResult = $this->attemptSubmit( $cmd, $is_slurm, $is_demel3, $submit_retries, $submit_retry_wait );
+
+      if ( ! $submitResult[ 'submit_ok' ] )
+      {
+         $this->data[ 'eprfile' ] = '';
+$this->message[] = "ERROR: job submission failed after " . $submitResult['attempt'] . " attempt(s): status=" . $submitResult['status'] . " out0=" . $submitResult['output'][0];
+elog2( "submit_local: FAILED after " . $submitResult['attempt'] . " attempts, status=" . $submitResult['status'] . " out0=" . $submitResult['output'][0] );
+         return;
+      }
+
+      $this->data[ 'eprfile' ] = $submitResult[ 'jobnum' ];
+$this->message[] = "Job submitted; jobid=" . $submitResult['jobid'] . " ID=" . $this->data[ 'eprfile' ]
+ . " status=" . $submitResult['status'] . " out0=" . $submitResult['output'][0];
+elog2( "submit_local 0: jobid=" . $submitResult['jobid'] . " ID=" . $this->data[ 'eprfile' ] );
+   }
+
+   ## Run sbatch/qsub once, validate its result, and retry with
+   ## exponential backoff on failure. Returns an array describing the
+   ## outcome of the last attempt: submit_ok, jobnum, jobid, status,
+   ## output, attempt.
+   private function attemptSubmit( $cmd, $is_slurm, $is_demel3, $submit_retries, $secwait )
+   {
+      $attempt = 0;
+      $jobnum  = false;
+      $jobid   = '';
+      $output  = array();
+      $status  = null;
 
       do
       {
          $attempt++;
 elog2( "submit_local cmd = $cmd (attempt $attempt)" );
-         $jobid = exec( $cmd, $output, $status );
+         $jobid  = exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status  jobid=$jobid (attempt $attempt)";
 
-         if ( $is_slurm )
-         {
-            if ( $status == 0 && preg_match( "/^Submitted batch job\s+(\d+)/", $output[ 0 ], $m ) )
-            {
-               $jobnum    = $m[ 1 ];
-               $submit_ok = true;
-            }
-elog2( "submit_local is_slurm" );
-         }
-         else
-         {
-            if ( $status == 0 )
-            {
-               if ( $is_demel3 )
-               {
-                  $parts_b = preg_split( "/\./", rtrim( $jobid ) );
-                  $jobnum  = $parts_b[0];
-               }
-               else
-                  $jobnum  = rtrim( $jobid );
-               $submit_ok = true;
-            }
-         }
+         $jobnum = $this->parseSubmitResult( $status, $output, $jobid, $is_slurm, $is_demel3 );
 
-         if ( !$submit_ok && $attempt <= $submit_retries )
+         if ( $jobnum === false && $attempt <= $submit_retries )
          {
 elog2( "submit_local: submit failed (attempt $attempt), retrying in ${secwait}s: status=$status out0=" . $output[0] );
             sleep( $secwait );
             $secwait *= 2;
          }
-      } while ( !$submit_ok && $attempt <= $submit_retries );
+      } while ( $jobnum === false && $attempt <= $submit_retries );
 
-      if ( !$submit_ok )
+      return array(
+          'submit_ok' => $jobnum !== false,
+          'jobnum'    => $jobnum,
+          'jobid'     => $jobid,
+          'status'    => $status,
+          'output'    => $output,
+          'attempt'   => $attempt,
+      );
+   }
+
+   ## Validate a single submission attempt's exec() result and extract
+   ## the job ID. Returns the job number string on success, or false.
+   private function parseSubmitResult( $status, $output, $jobid, $is_slurm, $is_demel3 )
+   {
+      if ( $status != 0 )
       {
-         $this->data[ 'eprfile' ] = '';
-$this->message[] = "ERROR: job submission failed after $attempt attempt(s): status=$status out0=" . $output[0];
-elog2( "submit_local: FAILED after $attempt attempts, status=$status out0=" . $output[0] );
-         return;
+         return false;
       }
 
-      $this->data[ 'eprfile' ] = $jobnum;
-$this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ]
- . " status=" . $status . " out0=" . $output[0];
-elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
+      if ( $is_slurm )
+      {
+         if ( preg_match( "/^Submitted batch job\s+(\d+)/", $output[ 0 ], $m ) )
+         {
+            return $m[ 1 ];
+         }
+         return false;
+      }
+
+      if ( $is_demel3 )
+      {
+         $parts_b = preg_split( "/\./", rtrim( $jobid ) );
+         return $parts_b[ 0 ];
+      }
+
+      return rtrim( $jobid );
    }
 
    ## Mark an autoflow request as failed when job submission could not
    ## obtain a real job ID, after exhausting retries.
-   private function mark_autoflow_submit_failed( $autoflowID, $statusMsg )
+   private function markAutoflowSubmitFailed( $autoflowID, $statusMsg )
    {
       global $dbusername;
       global $dbpasswd;
@@ -619,7 +643,7 @@ elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
 
          if ( $autoflowID > 0 )
          {
-            $this->mark_autoflow_submit_failed( $autoflowID, implode( '; ', $this->message ) );
+            $this->markAutoflowSubmitFailed( $autoflowID, implode( '; ', $this->message ) );
          }
          return;
       }

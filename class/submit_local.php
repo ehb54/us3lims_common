@@ -560,7 +560,7 @@ elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
 
    ## Mark an autoflow request as failed when job submission could not
    ## obtain a real job ID, after exhausting retries.
-   function mark_autoflow_submit_failed( $autoflowID, $statusMsg )
+   private function mark_autoflow_submit_failed( $autoflowID, $statusMsg )
    {
       global $dbusername;
       global $dbpasswd;

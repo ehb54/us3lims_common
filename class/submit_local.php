@@ -557,7 +557,36 @@ $this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'epr
  . " status=" . $status . " out0=" . $output[0];
 elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
    }
- 
+
+   ## Mark an autoflow request as failed when job submission could not
+   ## obtain a real job ID, after exhausting retries.
+   function mark_autoflow_submit_failed( $autoflowID, $statusMsg )
+   {
+      global $dbusername;
+      global $dbpasswd;
+      global $dbhost;
+      global $dbname;
+
+      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+      if ( ! $link )
+      {
+         $this->message[] = "Cannot open $dbhost : $dbname\n";
+         return;
+      }
+
+      $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
+      $query = "UPDATE autoflowAnalysis SET "               .
+               "status='SUBMIT_TIMEOUT', "                  .
+               "statusMsg='Job submission failed: $qfmsg' " .
+               "WHERE requestID='$autoflowID'";
+      $result = mysqli_query( $link, $query );
+      if ( ! $result )
+      {
+         $this->message[] = "Invalid query:\n$query\n" . mysqli_error( $link ) . "\n";
+      }
+      mysqli_close( $link );
+   }
+
    function update_db()
    {
       global $globaldbuser;
@@ -590,25 +619,7 @@ elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
 
          if ( $autoflowID > 0 )
          {
-            $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
-            if ( $link )
-            {
-               $qfmsg = mysqli_real_escape_string( $link, implode( '; ', $this->message ) );
-               $query = "UPDATE autoflowAnalysis SET "       .
-                        "status='SUBMIT_TIMEOUT', "          .
-                        "statusMsg='Job submission failed: $qfmsg' " .
-                        "WHERE requestID='$autoflowID'";
-               $result = mysqli_query( $link, $query );
-               if ( ! $result )
-               {
-                  $this->message[] = "Invalid query:\n$query\n" . mysqli_error( $link ) . "\n";
-               }
-               mysqli_close( $link );
-            }
-            else
-            {
-               $this->message[] = "Cannot open $dbhost : $dbname\n";
-            }
+            $this->mark_autoflow_submit_failed( $autoflowID, implode( '; ', $this->message ) );
          }
          return;
       }

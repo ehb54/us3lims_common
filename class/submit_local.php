@@ -442,8 +442,19 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
    ## Schedule the job
    function submit_job()
    {
+      global $global_sbatch_submit_retries;
+      global $global_sbatch_submit_retry_wait_seconds;
+
+      ## set defaults if not defined in global_config.php
+      if ( !isset( $global_sbatch_submit_retries ) ) {
+          $global_sbatch_submit_retries = 3;
+      }
+      if ( !isset( $global_sbatch_submit_retry_wait_seconds ) ) {
+          $global_sbatch_submit_retry_wait_seconds = 5;
+      }
+
       date_default_timezone_set( "America/Chicago" );
- 
+
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
       $clusname  = $this->data[ 'job' ][ 'cluster_name' ];
       $gwhostid  = $this->data[ 'job' ][ 'gwhostid' ];
@@ -454,6 +465,14 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
 
       $is_slurm  = preg_match( "/slurm/", $subtype );
       $is_demel3 = preg_match( "/demeler3/", $cluster );
+
+      ## allow per-cluster override of submit retry/backoff
+      $submit_retries    = array_key_exists( 'submit_retries', $this->grid[ $cluster ] )
+                          ? $this->grid[ $cluster ][ 'submit_retries' ]
+                          : $global_sbatch_submit_retries;
+      $submit_retry_wait = array_key_exists( 'submit_retry_wait', $this->grid[ $cluster ] )
+                          ? $this->grid[ $cluster ][ 'submit_retry_wait' ]
+                          : $global_sbatch_submit_retry_wait_seconds;
 
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $jobid     = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
@@ -481,34 +500,117 @@ $this->message[] = "can_load=$can_load  ppn=$ppn";
          $cmd   = "ssh -p $port -x $login " . $cmd;
       }
 
-elog2( "submit_local cmd = $cmd" );
-      $jobid = exec( $cmd, $output, $status );
-$this->message[] = "$cmd status=$status  jobid=$jobid";
+      $submitResult = $this->attemptSubmit( $cmd, $is_slurm, $is_demel3, $submit_retries, $submit_retry_wait );
 
-      ## Save the job ID
-##      if ( $status == 0 )
+      if ( ! $submitResult[ 'submit_ok' ] )
+      {
+         $this->data[ 'eprfile' ] = '';
+$this->message[] = "ERROR: job submission failed after " . $submitResult['attempt'] . " attempt(s): status=" . $submitResult['status'] . " out0=" . $submitResult['output'][0];
+elog2( "submit_local: FAILED after " . $submitResult['attempt'] . " attempts, status=" . $submitResult['status'] . " out0=" . $submitResult['output'][0] );
+         return;
+      }
+
+      $this->data[ 'eprfile' ] = $submitResult[ 'jobnum' ];
+$this->message[] = "Job submitted; jobid=" . $submitResult['jobid'] . " ID=" . $this->data[ 'eprfile' ]
+ . " status=" . $submitResult['status'] . " out0=" . $submitResult['output'][0];
+elog2( "submit_local 0: jobid=" . $submitResult['jobid'] . " ID=" . $this->data[ 'eprfile' ] );
+   }
+
+   ## Run sbatch/qsub once, validate its result, and retry with
+   ## exponential backoff on failure. Returns an array describing the
+   ## outcome of the last attempt: submit_ok, jobnum, jobid, status,
+   ## output, attempt.
+   private function attemptSubmit( $cmd, $is_slurm, $is_demel3, $submit_retries, $secwait )
+   {
+      $attempt = 0;
+      $jobnum  = false;
+      $jobid   = '';
+      $output  = array();
+      $status  = null;
+
+      do
+      {
+         $attempt++;
+elog2( "submit_local cmd = $cmd (attempt $attempt)" );
+         $jobid  = exec( $cmd, $output, $status );
+$this->message[] = "$cmd status=$status  jobid=$jobid (attempt $attempt)";
+
+         $jobnum = $this->parseSubmitResult( $status, $output, $jobid, $is_slurm, $is_demel3 );
+
+         if ( $jobnum === false && $attempt <= $submit_retries )
+         {
+elog2( "submit_local: submit failed (attempt $attempt), retrying in ${secwait}s: status=$status out0=" . $output[0] );
+            sleep( $secwait );
+            $secwait *= 2;
+         }
+      } while ( $jobnum === false && $attempt <= $submit_retries );
+
+      return array(
+          'submit_ok' => $jobnum !== false,
+          'jobnum'    => $jobnum,
+          'jobid'     => $jobid,
+          'status'    => $status,
+          'output'    => $output,
+          'attempt'   => $attempt,
+      );
+   }
+
+   ## Validate a single submission attempt's exec() result and extract
+   ## the job ID. Returns the job number string on success, or false.
+   private function parseSubmitResult( $status, $output, $jobid, $is_slurm, $is_demel3 )
+   {
+      if ( $status != 0 )
+      {
+         return false;
+      }
+
       if ( $is_slurm )
       {
-         $parts = preg_split( "/\s+/", $output[ 0 ] );
-         $this->data[ 'eprfile' ] = $parts[ 3 ];
-elog2( "submit_local is_slurm" );
-##$this->data[ 'eprfile' ] = $jobid;
-      }
-      else
-      {
-         if ( $is_demel3 )
+         if ( preg_match( "/^Submitted batch job\s+(\d+)/", $output[ 0 ], $m ) )
          {
-            $parts_b = preg_split( "/\./", rtrim( $jobid ) );
-            $this->data[ 'eprfile' ] = $parts_b[0];
-         }  
-         else
-            $this->data[ 'eprfile' ] = rtrim( $jobid );
-      }			     
-$this->message[] = "Job submitted; jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ]
- . " status=" . $status . " out0=" . $output[0];
-elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
+            return $m[ 1 ];
+         }
+         return false;
+      }
+
+      if ( $is_demel3 )
+      {
+         $parts_b = preg_split( "/\./", rtrim( $jobid ) );
+         return $parts_b[ 0 ];
+      }
+
+      return rtrim( $jobid );
    }
- 
+
+   ## Mark an autoflow request as failed when job submission could not
+   ## obtain a real job ID, after exhausting retries.
+   private function markAutoflowSubmitFailed( $autoflowID, $statusMsg )
+   {
+      global $dbusername;
+      global $dbpasswd;
+      global $dbhost;
+      global $dbname;
+
+      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+      if ( ! $link )
+      {
+         $this->message[] = "Cannot open $dbhost : $dbname\n";
+         return;
+      }
+
+      $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
+      $query = "UPDATE autoflowAnalysis SET "               .
+               "status='SUBMIT_TIMEOUT', "                  .
+               "statusMsg='Job submission failed: $qfmsg' " .
+               "WHERE requestID='$autoflowID'";
+      $result = mysqli_query( $link, $query );
+      if ( ! $result )
+      {
+         $this->message[] = "Invalid query:\n$query\n" . mysqli_error( $link ) . "\n";
+      }
+      mysqli_close( $link );
+   }
+
    function update_db()
    {
       global $globaldbuser;
@@ -530,6 +632,20 @@ elog2( "submit_local 0: jobid=" . $jobid . " ID=" . $this->data[ 'eprfile' ] );
       $autoflowID = 0;
       if ( $is_cli ) {
           $autoflowID = $ID;
+      }
+
+      if ( empty( $eprfile ) )
+      {
+         ## submit_job() failed to obtain a real job ID; don't record a
+         ## bogus/empty gfacID or start a jobmonitor watching a job that
+         ## was never actually submitted.
+         $this->message[] = "Job submission failed, not updating database for requestID=$requestID";
+
+         if ( $autoflowID > 0 )
+         {
+            $this->markAutoflowSubmitFailed( $autoflowID, implode( '; ', $this->message ) );
+         }
+         return;
       }
 
       $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );

@@ -531,6 +531,7 @@ elog2( "submit_local 0: jobid=" . $submitResult['jobid'] . " ID=" . $this->data[
       do
       {
          $attempt++;
+         $output = array(); // exec() appends rather than replaces - reset per attempt
 elog2( "submit_local cmd = $cmd (attempt $attempt)" );
          $jobid  = exec( $cmd, $output, $status );
 $this->message[] = "$cmd status=$status  jobid=$jobid (attempt $attempt)";

@@ -179,11 +179,24 @@ class submit_slurm extends jobsubmit
    }
 
    ## SSH sbatch --parsable and capture the Slurm job ID.
-   ## Stdout and stderr are captured separately so parsable stdout is never
-   ## contaminated by SSH warnings or sbatch error messages.
-   ## Sets $this->data['eprfile'] only on confirmed success; leaves it empty on failure.
+   ## Retries with exponential backoff on transient failures (e.g. sbatch
+   ## "Socket timed out" under scheduler load); configurable via
+   ## $global_sbatch_submit_retries / $global_sbatch_submit_retry_wait_seconds
+   ## in global_config.php, overridable per-cluster via 'submit_retries' /
+   ## 'submit_retry_wait'. Fixes ultrascan-tickets#915.
+   ## Sets $this->data['eprfile'] only on confirmed success; leaves it empty
+   ## and marks the autoflow request SUBMIT_TIMEOUT on exhausted retries.
    function submit_job()
    {
+      global $global_sbatch_submit_retries;
+      global $global_sbatch_submit_retry_wait_seconds;
+
+      ## set defaults if not defined in global_config.php
+      if ( ! isset( $global_sbatch_submit_retries ) )
+         $global_sbatch_submit_retries = 3;
+      if ( ! isset( $global_sbatch_submit_retry_wait_seconds ) )
+         $global_sbatch_submit_retry_wait_seconds = 5;
+
       date_default_timezone_set( "America/Chicago" );
 
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
@@ -192,16 +205,89 @@ class submit_slurm extends jobsubmit
       $port      = $this->grid[ $cluster ][ 'sshport' ];
       $workdir   = $this->workdir( $cluster, $requestID );
 
-      ## stderr redirected to a temp file so stdout is clean for --parsable parsing.
-      ## The temp file is read back and included in diagnostics then removed.
+      ## allow per-cluster override of submit retry/backoff
+      $submit_retries    = $this->grid[ $cluster ][ 'submit_retries' ]
+                          ?? $global_sbatch_submit_retries;
+      $submit_retry_wait = $this->grid[ $cluster ][ 'submit_retry_wait' ]
+                          ?? $global_sbatch_submit_retry_wait_seconds;
+
+      $submitResult = $this->attemptSubmit( $port, $login, $workdir, $submit_retries, $submit_retry_wait );
+
+      if ( ! $submitResult[ 'submit_ok' ] ) {
+         $this->data[ 'eprfile' ] = '';
+         $this->message[] = "ERROR: job submission failed after " . $submitResult[ 'attempt' ]
+                           . " attempt(s): " . $submitResult[ 'error' ];
+         elog2( "submit_job: FAILED after " . $submitResult[ 'attempt' ] . " attempts: " . $submitResult[ 'error' ] );
+         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ] );
+         return;
+      }
+
+      $slurm_job_id = $submitResult[ 'job_id' ];
+
+      ## Optional: confirm job exists via scontrol before trusting the ID
+      $this->confirm_slurm_job( $port, $login, $slurm_job_id );
+
+      $this->data[ 'eprfile' ] = $slurm_job_id;
+      elog2( "submit_job: slurm_job_id=$slurm_job_id confirmed after " . $submitResult[ 'attempt' ] . " attempt(s)" );
+   }
+
+   ## Run sbatch once via SSH, validate its result, and retry with
+   ## exponential backoff on failure. Returns an array describing the
+   ## outcome of the last attempt: submit_ok, job_id, error, attempt.
+   private function attemptSubmit( $port, $login, $workdir, $submit_retries, $secwait )
+   {
+      $attempt = 0;
+      $error   = '';
+
+      do
+      {
+         $attempt++;
+         $result = $this->sbatchOnce( $port, $login, $workdir, $attempt );
+
+         if ( $result[ 'ok' ] ) {
+            return array(
+               'submit_ok' => true,
+               'job_id'    => $result[ 'job_id' ],
+               'error'     => '',
+               'attempt'   => $attempt,
+            );
+         }
+
+         $error = $result[ 'error' ];
+
+         if ( $attempt <= $submit_retries ) {
+            elog2( "submit_job: submit failed (attempt $attempt), retrying in {$secwait}s: $error" );
+            sleep( $secwait );
+            $secwait *= 2;
+         }
+      } while ( $attempt <= $submit_retries );
+
+      return array(
+         'submit_ok' => false,
+         'job_id'    => '',
+         'error'     => $error,
+         'attempt'   => $attempt,
+      );
+   }
+
+   ## Run sbatch --parsable once via SSH and validate the result.
+   ## Stdout and stderr are captured into fresh arrays/temp files on every
+   ## call, so a retry never sees stale output carried over from a previous
+   ## attempt (exec() appends to an existing array rather than replacing it;
+   ## fixes ultrascan-tickets#931). Stdout/stderr are also kept separate so
+   ## --parsable's stdout is never contaminated by SSH warnings or sbatch
+   ## error text.
+   ## Returns ['ok' => bool, 'job_id' => string, 'error' => string].
+   private function sbatchOnce( $port, $login, $workdir, $attempt )
+   {
       $stderr_tmp = tempnam( sys_get_temp_dir(), 'us3sbatch_' );
       $sbatch_cmd = "sbatch --parsable --get-user-env $workdir/us3.slurm";
       $cmd        = "/usr/bin/ssh -p $port -x $login '$sbatch_cmd' 2>$stderr_tmp";
 
-      elog2( "submit_job cmd: $cmd" );
+      elog2( "sbatchOnce cmd: $cmd (attempt $attempt)" );
 
       $stdout_lines = [];
-      exec( $cmd, $stdout_lines, $exit_code );
+      $this->runExec( $cmd, $stdout_lines, $exit_code );
 
       $stderr_text = is_readable( $stderr_tmp ) ? trim( file_get_contents( $stderr_tmp ) ) : '';
       @unlink( $stderr_tmp );
@@ -209,34 +295,60 @@ class submit_slurm extends jobsubmit
       $stdout_text = implode( "\n", $stdout_lines );
 
       ## Always log full diagnostics
-      $this->message[] = "submit_job: cmd=$cmd";
-      $this->message[] = "submit_job: exit=$exit_code";
-      $this->message[] = "submit_job: stdout=$stdout_text";
+      $this->message[] = "sbatchOnce (attempt $attempt): cmd=$cmd";
+      $this->message[] = "sbatchOnce (attempt $attempt): exit=$exit_code";
+      $this->message[] = "sbatchOnce (attempt $attempt): stdout=$stdout_text";
       if ( $stderr_text !== '' )
-         $this->message[] = "submit_job: stderr=$stderr_text";
+         $this->message[] = "sbatchOnce (attempt $attempt): stderr=$stderr_text";
 
-      elog2( "submit_job: exit=$exit_code stdout=$stdout_text stderr=$stderr_text" );
+      elog2( "sbatchOnce (attempt $attempt): exit=$exit_code stdout=$stdout_text stderr=$stderr_text" );
 
-      ## Gate: nonzero exit means sbatch itself reported failure
+      ## Gate: nonzero exit means sbatch itself (or the ssh transport) reported failure
       if ( $exit_code !== 0 ) {
-         $this->message[] = "ERROR: sbatch exited $exit_code — submission failed";
-         $this->data[ 'eprfile' ] = '';
-         return;
+         return array( 'ok' => false, 'job_id' => '',
+            'error' => "sbatch exited $exit_code: " . ( $stderr_text !== '' ? $stderr_text : $stdout_text ) );
       }
 
       ## Parse --parsable output: "12345" or "12345;clustername"
-      $slurm_job_id = $this->parse_parsable_sbatch_output( $stdout_lines );
+      $job_id = $this->parse_parsable_sbatch_output( $stdout_lines );
 
-      if ( $slurm_job_id === '' ) {
-         $this->data[ 'eprfile' ] = '';
-         return;  ## parse method already appended error message
+      if ( $job_id === '' ) {
+         ## parse method already appended a specific error to $this->message
+         return array( 'ok' => false, 'job_id' => '', 'error' => "invalid sbatch output: $stdout_text" );
       }
 
-      ## Optional: confirm job exists via scontrol before trusting the ID
-      $this->confirm_slurm_job( $port, $login, $slurm_job_id );
+      return array( 'ok' => true, 'job_id' => $job_id, 'error' => '' );
+   }
 
-      $this->data[ 'eprfile' ] = $slurm_job_id;
-      elog2( "submit_job: slurm_job_id=$slurm_job_id confirmed" );
+   ## Mark an autoflow request as failed when job submission could not
+   ## obtain a real job ID, after exhausting retries, so it isn't left
+   ## tracked with a bogus/empty gfacID or watched by a jobmonitor for a
+   ## job that was never actually submitted.
+   private function markAutoflowSubmitFailed( $statusMsg )
+   {
+      global $dbusername, $dbpasswd, $dbhost, $dbname;
+      global $ID, $is_cli;
+
+      $autoflowID = ( $is_cli && $ID ) ? $ID : 0;
+      if ( $autoflowID <= 0 )
+         return;
+
+      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+      if ( ! $link ) {
+         $this->message[] = "markAutoflowSubmitFailed: cannot connect to $dbhost:$dbname";
+         return;
+      }
+
+      $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
+      $query = "UPDATE autoflowAnalysis SET "
+             . "status='SUBMIT_TIMEOUT', "
+             . "statusMsg='Job submission failed: $qfmsg' "
+             . "WHERE requestID='$autoflowID'";
+      $result = mysqli_query( $link, $query );
+      if ( ! $result )
+         $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
+
+      mysqli_close( $link );
    }
 
    ## Write submission record to instance DB and global gfac DB, then launch jobmonitor
@@ -345,7 +457,7 @@ class submit_slurm extends jobsubmit
    {
       $cmd    = "/usr/bin/ssh -p $port -x $login $remote_cmd 2>&1";
       $output = [];
-      exec( $cmd, $output, $exit_code );
+      $this->runExec( $cmd, $output, $exit_code );
       $this->message[] = "ssh: $cmd  exit=$exit_code"
                        . ( $exit_code !== 0 ? "  out=" . ( $output[0] ?? '' ) : '' );
       return $exit_code;
@@ -356,10 +468,19 @@ class submit_slurm extends jobsubmit
    {
       $cmd    = "/usr/bin/scp -P $port $files $dest 2>&1";
       $output = [];
-      exec( $cmd, $output, $exit_code );
+      $this->runExec( $cmd, $output, $exit_code );
       $this->message[] = "scp: $cmd  exit=$exit_code"
                        . ( $exit_code !== 0 ? "  out=" . ( $output[0] ?? '' ) : '' );
       return $exit_code;
+   }
+
+   ## Run a shell command, capturing output and exit code. Thin wrapper
+   ## around exec() so tests can substitute a scripted fake (no real shell,
+   ## SSH, or network call) by overriding this single method in a subclass.
+   protected function runExec( $cmd, &$output, &$exit_code )
+   {
+      $output = [];
+      exec( $cmd, $output, $exit_code );
    }
 
    ## Parse sbatch --parsable stdout lines.
@@ -398,7 +519,7 @@ class submit_slurm extends jobsubmit
    {
       $cmd    = "/usr/bin/ssh -p $port -x $login scontrol show job $slurm_job_id 2>&1";
       $output = [];
-      exec( $cmd, $output, $exit_code );
+      $this->runExec( $cmd, $output, $exit_code );
 
       if ( $exit_code === 0 ) {
          $this->message[] = "submit_job: scontrol confirmed job $slurm_job_id exists";

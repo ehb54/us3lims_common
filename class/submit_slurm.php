@@ -23,7 +23,7 @@ elog2( "submit_slurm start" );
 class submit_slurm extends jobsubmit
 {
    ## Top-level: stage files then submit
-   function submit()
+   public function submit()
    {
       if ( ! isset( $this->data[ 'job' ][ 'cluster_shortname' ] ) )
       {
@@ -56,7 +56,7 @@ class submit_slurm extends jobsubmit
 
    ## SSH mkdir, write slurm script locally, scp both files to submithost.
    ## Returns true on success, false if any step fails (error already in $this->message).
-   function stage_files()
+   public function stage_files()
    {
       $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
       $requestID = $this->data[ 'job' ][ 'requestID' ];
@@ -86,7 +86,7 @@ class submit_slurm extends jobsubmit
    }
 
    ## Generate the Slurm batch script and write it to disk; return filename
-   function write_slurm_script( $cluster, $requestID, $workdir, $tarfile )
+   public function write_slurm_script( $cluster, $requestID, $workdir, $tarfile )
    {
       $cfg     = $this->grid[ $cluster ];
       $quename = $cfg[ 'queue' ];
@@ -186,7 +186,7 @@ class submit_slurm extends jobsubmit
    ## 'submit_retry_wait'. Fixes ultrascan-tickets#915.
    ## Sets $this->data['eprfile'] only on confirmed success; leaves it empty
    ## and marks the autoflow request SUBMIT_TIMEOUT on exhausted retries.
-   function submit_job()
+   public function submit_job()
    {
       global $global_sbatch_submit_retries;
       global $global_sbatch_submit_retry_wait_seconds;
@@ -352,7 +352,7 @@ class submit_slurm extends jobsubmit
    }
 
    ## Write submission record to instance DB and global gfac DB, then launch jobmonitor
-   function update_db()
+   public function update_db()
    {
       global $globaldbuser, $globaldbpasswd, $globaldbhost, $globaldbname;
       global $dbusername, $dbpasswd, $dbhost, $dbname;
@@ -423,7 +423,7 @@ class submit_slurm extends jobsubmit
       $this->message[] = "jobmonitor launch: exit=$exit_code";
    }
 
-   function close_transport() { /* no-op: no persistent transport */ }
+   public function close_transport() { /* no-op: no persistent transport */ }
 
    ## -------------------------------------------------------------------------
    ## Private helpers

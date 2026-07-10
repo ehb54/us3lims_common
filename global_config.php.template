@@ -18,8 +18,8 @@ $admin_list = [
 ## if UDP messaging from the cluster isn't working, then status updates will be missed
 ## set to zero to disable
 
-$global_max_queue_time_hours = 24;
-$global_max_run_time_hours   = 24;
+$global_max_queue_time_hours = 0;
+$global_max_run_time_hours   = 0;
 
 ## retry/backoff for transient job submission failures (e.g. sbatch
 ## "Socket timed out" under scheduler load)

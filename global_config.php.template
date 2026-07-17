@@ -21,6 +21,17 @@ $admin_list = [
 $global_max_queue_time_hours = 24;
 $global_max_run_time_hours   = 24;
 
+## after a job reports COMPLETE, jobmonitor waits for the cluster's (UDP)
+## "Finished" message before finalizing.  Because UDP is unreliable, it will
+## finalize anyway once $global_complete_grace_seconds have elapsed since the
+## job was first seen COMPLETE (measured on the jobmonitor's own clock, so it
+## is immune to timezone/clock skew between the LIMS host, cluster, and DB).
+## $global_complete_max_seconds is a hard ceiling: a job stuck COMPLETE past
+## this is force-finalized.  If unset, jobmonitor defaults to 600 and 21600.
+
+$global_complete_grace_seconds = 600;
+$global_complete_max_seconds   = 21600;
+
 ## retry/backoff for transient job submission failures (e.g. sbatch
 ## "Socket timed out" under scheduler load)
 ## can be overridden per-cluster via 'submit_retries'/'submit_retry_wait'

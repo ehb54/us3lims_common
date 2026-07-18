@@ -106,7 +106,7 @@ class jobsubmit
 
        ## Required keys for every SSH-Slurm cluster entry.
        ## 'submittype' and 'httpport' are historical Airavata fields; no longer
-       ## required by submit_local.php but may still appear in config — tolerated.
+       ## required by submit_slurm.php but may still appear in config — tolerated.
        $reqkey = [
            'active'
            ,'name'

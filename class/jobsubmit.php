@@ -59,7 +59,7 @@ class jobsubmit
 
        ## dbinst specific configs
 
-       $dbinst_config_file = '$full_path/cluster_config.php';
+       $dbinst_config_file = "$full_path/cluster_config.php";
 
        if ( !file_exists( $dbinst_config_file ) ) {
            $dbinst_config_file = '../uslims3_newlims/cluster_config.php';
@@ -104,14 +104,12 @@ class jobsubmit
            return;
        }
 
+       ## Required keys for every SSH-Slurm cluster entry.
+       ## 'submittype' and 'httpport' are historical Airavata fields; no longer
+       ## required by submit_slurm.php but may still appear in config — tolerated.
        $reqkey = [
            'active'
-           ,'airavata'
            ,'name'
-           ,'submithost'
-           ,'userdn'
-           ,'submittype'
-           ,'httpport'
            ,'workdir'
            ,'sshport'
            ,'queue'
@@ -124,7 +122,6 @@ class jobsubmit
         $reqkey_metascheduler = [
             'active'
             ,'name'
-            ,'airavata'
             ,'clusters'
             ];
 
@@ -150,11 +147,6 @@ class jobsubmit
            }
 
            if ( !$ok ) {
-               continue;
-           }
-
-           if ( $v['airavata'] ) {
-               $debug_msg( "cluster $k airavata, skipped", $debug );
                continue;
            }
 
@@ -523,7 +515,11 @@ class jobsubmit
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
          {
             $time *= 8;
-            if ( preg_match( "/us3iab/", $cluster ) )
+            ## Phase 4: use localhost config flag for CG time multiplier
+            $is_local = array_key_exists( $cluster, $this->grid )
+                        && array_key_exists( 'localhost', $this->grid[ $cluster ] )
+                        && $this->grid[ $cluster ]['localhost'];
+            if ( $is_local )
                $time *= 4;
             else if ( $mxiters > 0 )  $time *= 2;
          }
@@ -597,39 +593,7 @@ class jobsubmit
       if ( !array_key_exists( 'pmg', $this->grid[ $cluster ] ) ||
            !$this->grid[ $cluster ]['pmg'] ) {
           $mgroupcount = 1;
-      }          
-
-      ## if usemaxtime is set, use the max time
-
-      if ( array_key_exists( 'usemaxtime', $this->grid[ $cluster ] ) &&
-           $this->grid[ $cluster ]['usemaxtime'] ) {
-          $time = $max_time;
-      }          
-
-      ## if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
-      ## {  ## For alamo, $max_time is hardwired to 2160, and no PMG
-      ## $time        = $max_time;
-      ## ## At most 4 pm groups on alamo
-      ## $mgroupcount = min( 4, $mgroupcount );
-      ## }
-
-      ## else if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
-      ## {  ## For jacinto, $max_time is hardwired to 2160, and no PMG
-      ## $time        = $max_time;
-      ## $mgroupcount = min( 2, $mgroupcount );
-      ## }
-
-      ## else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
-      ## {  ## For bcf, hardwire $max_time to 240 (4 hours), and no PMG
-      ## $time        = $max_time;
-      ## $mgroupcount = 1;
-      ## }
-
-      ## else
-      ## {  ## Maximum time is defined for each cluster
-      ## $time        = min( $time, $max_time );
-      ## }
-##if($time < 480) $time=480;
+      }
 
       return (int)$time;
    }
@@ -637,14 +601,17 @@ class jobsubmit
    function nodes()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $is_us3iab  = preg_match( "/us3iab/", $cluster );
+      ## Phase 4: use localhost config flag instead of cluster-name matching
+      $is_local   = array_key_exists( $cluster, $this->grid )
+                    && array_key_exists( 'localhost', $this->grid[ $cluster ] )
+                    && $this->grid[ $cluster ]['localhost'];
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
       $ppbj       = $this->grid[ $cluster ][ 'ppbj'    ];
 
-      if ( $is_us3iab )
-      {  ## It is "us3iab"
+      if ( $is_local )
+      {  ## Local cluster (us3iab, slurm-head etc.)
          $mgroup     = 1;
          $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
          $montecarlo = $parameters[ 'mc_iterations' ];
@@ -677,7 +644,7 @@ class jobsubmit
          $max_procs  = $ppn;
          $this->grid[ $cluster ][ 'maxproc' ] = $max_procs;
          $this->grid[ $cluster ][ 'ppn'     ] = $ppn;
-      }  ## End: us3iab
+      }  ## End: local cluster
 
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {  ## GA: procs is demes+1 rounded to procs-per-node
@@ -685,7 +652,7 @@ class jobsubmit
          if ( $demes == 1 )
          {
             $demes = $ppbj - 1;
-            if ( $is_us3iab )
+            if ( $is_local )
                $demes = max( 15, $demes );
             if ( $ppbj == 9 )
                $demes = max( 17, $demes );
@@ -724,14 +691,18 @@ class jobsubmit
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $mciters    = $parameters[ 'mc_iterations' ];
       $max_groups = 32;
+      ## Phase 4: use localhost config flag instead of cluster-name matching
+      $is_local   = array_key_exists( $cluster, $this->grid )
+                    && array_key_exists( 'localhost', $this->grid[ $cluster ] )
+                    && $this->grid[ $cluster ]['localhost'];
 
       if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
       {  ## For 2DSA/PCSA, PMGs is always 1
          $max_groups = 1;
       }
 
-      else if ( preg_match( "/us3iab/", $cluster ) )
-      {   ## Us3iab PMGs limited by max procs available
+      else if ( $is_local )
+      {   ## Local cluster PMGs limited by max procs available
          $max_groups = $max_procs / 16;
       }
 

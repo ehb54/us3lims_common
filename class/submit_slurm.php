@@ -374,7 +374,7 @@ class submit_slurm extends jobsubmit
       $query = "INSERT INTO HPCAnalysisResult SET "
              . "HPCAnalysisRequestID='$requestID', "
              . "jobfile='$jobfile', "
-             . "backend_job_id='$slurm_id'";
+             . "gfacID='$slurm_id'";
       $result = mysqli_query( $link, $query );
       if ( ! $result ) {
          $this->message[] = "DB insert failed: " . mysqli_error( $link );

@@ -374,7 +374,7 @@ class submit_slurm extends jobsubmit
       $query = "INSERT INTO HPCAnalysisResult SET "
              . "HPCAnalysisRequestID='$requestID', "
              . "jobfile='$jobfile', "
-             . "gfacID='$slurm_id'";
+             . "backend_job_id='$slurm_id'";
       $result = mysqli_query( $link, $query );
       if ( ! $result ) {
          $this->message[] = "DB insert failed: " . mysqli_error( $link );
@@ -417,7 +417,15 @@ class submit_slurm extends jobsubmit
       $this->message[] = "DB updated: requestID=$requestID slurm_id=$slurm_id";
 
       ## Launch per-job monitor daemon
-      $cmd = "sudo -u us3 nice -15 php /home/us3/lims/bin/jobmonitor/jobmonitor.php"
+      ## `nice` wraps `sudo`, not the other way around: the NOPASSWD sudoers
+      ## rule for www-data->us3 only covers /usr/bin/php as sudo's direct
+      ## target command. `sudo -u us3 nice ... php` makes nice the target
+      ## instead, which doesn't match, so sudo demands a password and the
+      ## launch silently fails. Niceness is inherited across exec(), so
+      ## setting it on the outer process has the same effect. The absolute
+      ## /usr/bin/php path is also required: a bare "php" resolves via PATH
+      ## to /usr/local/bin/php, which the sudoers rule doesn't match either.
+      $cmd = "nice -15 sudo -u us3 /usr/bin/php /home/us3/lims/bin/jobmonitor/jobmonitor.php"
            . " $dbname $slurm_id $requestID 2>&1";
       exec( $cmd, $null, $exit_code );
       $this->message[] = "jobmonitor launch: exit=$exit_code";

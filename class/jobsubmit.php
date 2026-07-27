@@ -515,12 +515,15 @@ class jobsubmit
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
          {
             $time *= 8;
-            ## Phase 4: use localhost config flag for CG time multiplier
-            $is_local = array_key_exists( $cluster, $this->grid )
-                        && array_key_exists( 'localhost', $this->grid[ $cluster ] )
-                        && $this->grid[ $cluster ]['localhost'];
-            if ( $is_local )
-               $time *= 4;
+            ## How much slower custom-grid work runs here is a performance
+            ## property of the box, not a topology or capacity one, so it is
+            ## a per-cluster magnitude rather than a boolean: a fast
+            ## fixed-capacity box and a slow one no longer have to share the
+            ## same x4.
+            $legacy         = $this->legacy_localhost( $cluster );
+            $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity', $legacy );
+            if ( $fixed_capacity )
+               $time *= (float) $this->cluster_opt( $cluster, 'cg_time_multiplier', 4.0 );
             else if ( $mxiters > 0 )  $time *= 2;
          }
       }
@@ -601,17 +604,25 @@ class jobsubmit
    function nodes()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      ## Phase 4: use localhost config flag instead of cluster-name matching
-      $is_local   = array_key_exists( $cluster, $this->grid )
-                    && array_key_exists( 'localhost', $this->grid[ $cluster ] )
-                    && $this->grid[ $cluster ]['localhost'];
+      ## Sizing is driven by two independent config axes, not one 'localhost'
+      ## flag (see legacy_localhost()):
+      ##   fixed_capacity - size the job to this box's core count instead of
+      ##                    requesting a share of a large shared scheduler
+      ##   single_node    - confine the job to exactly one node
+      ## They are orthogonal: a co-located appliance with several compute
+      ## nodes sets fixed_capacity without single_node, a configuration the
+      ## old flag could not express (it always forced one node).
+      $legacy         = $this->legacy_localhost( $cluster );
+      $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity',   $legacy );
+      $single_node    = (bool) $this->cluster_opt( $cluster, 'single_node',      $legacy );
+      $ppmg           = (int)  $this->cluster_opt( $cluster, 'procs_per_mgroup', 16 );
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
       $ppbj       = $this->grid[ $cluster ][ 'ppbj'    ];
 
-      if ( $is_local )
-      {  ## Local cluster (us3iab, slurm-head etc.)
+      if ( $fixed_capacity )
+      {  ## Size to the box: GA wants whole model groups of $ppmg procs
          $mgroup     = 1;
          $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
          $montecarlo = $parameters[ 'mc_iterations' ];
@@ -620,7 +631,7 @@ class jobsubmit
          {  ## GA or DMGA
             if ( $montecarlo < 2 )
             {  ## Non-MC GA
-               $ppn        = 16;
+               $ppn        = $ppmg;
             }
             else
             {  ## GA-MC
@@ -629,22 +640,28 @@ class jobsubmit
                   $mgroup     = $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ];
                   if ( $mgroup > 1 )
                      $ppn     = (int)( $max_procs / $mgroup );
-                  $ppn        = max( $ppn, 16 );
+                  $ppn        = max( $ppn, $ppmg );
                }
                else
                {
                   $mgroup     = 1;
-                  $ppn        = 16;
+                  $ppn        = $ppmg;
                   $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] = $mgroup;
                }
                $this->data[ 'job' ][ 'mgroupcount' ] = $mgroup;
             }
          }
 
-         $max_procs  = $ppn;
-         $this->grid[ $cluster ][ 'maxproc' ] = $max_procs;
-         $this->grid[ $cluster ][ 'ppn'     ] = $ppn;
-      }  ## End: local cluster
+         $this->grid[ $cluster ][ 'ppn' ] = $ppn;
+
+         if ( $single_node )
+         {  ## Clamping the proc budget to one node's worth is what forces
+            ## nodes()'s final division to 1. Without single_node the
+            ## configured maxproc stands and the job may span nodes.
+            $max_procs  = $ppn;
+            $this->grid[ $cluster ][ 'maxproc' ] = $max_procs;
+         }
+      }  ## End: fixed-capacity cluster
 
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {  ## GA: procs is demes+1 rounded to procs-per-node
@@ -652,8 +669,8 @@ class jobsubmit
          if ( $demes == 1 )
          {
             $demes = $ppbj - 1;
-            if ( $is_local )
-               $demes = max( 15, $demes );
+            if ( $fixed_capacity )
+               $demes = max( $ppmg - 1, $demes );
             if ( $ppbj == 9 )
                $demes = max( 17, $demes );
             $ppbj  = $demes + 1;
@@ -684,6 +701,34 @@ class jobsubmit
       return $nodes;
    }
 
+   ## True when a cluster entry still sets the deprecated 'localhost' flag as
+   ## a sizing hint. 'localhost' now means only "this cluster runs on the LIMS
+   ## host" (used for display and for resolving the 'localhost' cluster alias);
+   ## the sizing behaviour it used to imply is expressed by 'single_node',
+   ## 'fixed_capacity', 'procs_per_mgroup' and 'cg_time_multiplier'.
+   ##
+   ## This fallback exists so deployments whose global_config.php predates that
+   ## split keep their current node/PMG/walltime sizing untouched. New configs
+   ## should set the explicit keys; see global_config.php.template. Once no
+   ## deployed global_config.php relies on it, this method and every
+   ## $legacy default below can be deleted.
+   protected function legacy_localhost( $cluster )
+   {
+      return array_key_exists( $cluster, $this->grid )
+             && ! empty( $this->grid[ $cluster ][ 'localhost' ] );
+   }
+
+   ## Read a per-cluster tuning key, falling back to $default when absent.
+   protected function cluster_opt( $cluster, $key, $default )
+   {
+      if ( ! array_key_exists( $cluster, $this->grid ) )
+         return $default;
+
+      return array_key_exists( $key, $this->grid[ $cluster ] )
+             ? $this->grid[ $cluster ][ $key ]
+             : $default;
+   }
+
    function max_mgroupcount()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
@@ -691,19 +736,20 @@ class jobsubmit
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $mciters    = $parameters[ 'mc_iterations' ];
       $max_groups = 32;
-      ## Phase 4: use localhost config flag instead of cluster-name matching
-      $is_local   = array_key_exists( $cluster, $this->grid )
-                    && array_key_exists( 'localhost', $this->grid[ $cluster ] )
-                    && $this->grid[ $cluster ]['localhost'];
+      ## PMG ceiling on a fixed-capacity box is a pure capacity question:
+      ## how many whole $ppmg-proc model groups fit in the core budget.
+      $legacy         = $this->legacy_localhost( $cluster );
+      $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity',   $legacy );
+      $ppmg           = (int)  $this->cluster_opt( $cluster, 'procs_per_mgroup', 16 );
 
       if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
       {  ## For 2DSA/PCSA, PMGs is always 1
          $max_groups = 1;
       }
 
-      else if ( $is_local )
-      {   ## Local cluster PMGs limited by max procs available
-         $max_groups = $max_procs / 16;
+      else if ( $fixed_capacity )
+      {   ## Fixed-capacity cluster: PMGs limited by max procs available
+         $max_groups = $max_procs / $ppmg;
       }
 
       else if ( $mciters > 1 )

@@ -41,6 +41,21 @@ $global_complete_max_seconds   = 21600;
 $global_sbatch_submit_retries            = 3;
 $global_sbatch_submit_retry_wait_seconds = 5;
 
+## does this install serve a single tenant (a USiaB appliance) or many
+## (a shared LIMS host)?  governs whether the queue views scope rows to this
+## instance's database or show every tenant's jobs to a level-4 admin.
+## this is a property of the deployment, not of any one cluster.
+## if left unset, it is inferred from any active cluster flagged 'localhost'
+## (the pre-split behaviour); set it explicitly.
+
+$single_tenant_deployment = false;
+
+## which cluster the literal cluster name "localhost" resolves to, for CLI
+## submission (submitone.php).  if unset, the first active cluster flagged
+## 'localhost' is used.
+
+## $default_local_cluster = 'us3iab-node0';
+
 ## define all possible clusters for this server
 ## can be overriden in dbinst specific cluster_config.php
 
@@ -69,12 +84,44 @@ $global_sbatch_submit_retry_wait_seconds = 5;
 ##                           ibrun:  TACC wrapper; required for Lonestar6, Stampede2
 ##
 ##   Optional scheduler/resource keys:
-##     single_node   bool  collapse all ranks onto one node (e.g. USiaB)
 ##     usemaxtime    bool  use maxtime directly instead of computed estimate;
 ##                         set maxtime=0 for unlimited (emits 00:00:00 to Slurm)
 ##     wall_override int   fixed walltime in minutes (overrides computed; ignored if usemaxtime)
-##     min_ppn       int   minimum procs per node floor
 ##     mempercore    int   MB per core (#SBATCH --mem-per-cpu)
+##
+##   Sizing keys. These are three independent axes -- do not assume setting
+##   one implies another. They replace the single overloaded 'localhost' flag,
+##   which conflated all three and so could not express, for example, a
+##   co-located appliance that has more than one compute node.
+##
+##     TOPOLOGY
+##     single_node   bool  confine the job to exactly one node (default false).
+##                         Emits #SBATCH -N 1; the total rank count (-n) is
+##                         unaffected.
+##
+##     CAPACITY
+##     fixed_capacity    bool  size jobs to this box's own core count rather
+##                             than requesting a share of a large shared
+##                             scheduler (default false). Set this for USiaB
+##                             appliances and small dedicated clusters.
+##     procs_per_mgroup  int   procs in one parallel model group (default 16).
+##                             Sets the GA procs-per-node floor, the GA deme
+##                             floor, and the PMG ceiling (maxproc/this).
+##                             Only consulted when fixed_capacity is set.
+##
+##     PERFORMANCE
+##     cg_time_multiplier  float  extra walltime factor for custom-grid (CG)
+##                                methods on this box (default 4.0). Only
+##                                consulted when fixed_capacity is set; a
+##                                fast fixed-capacity box should lower it.
+##
+##   DEPRECATED:
+##     localhost     bool  now means only "this cluster runs on the LIMS host",
+##                         used for display and for resolving the 'localhost'
+##                         cluster alias. It is still honoured as a fallback
+##                         default for single_node/fixed_capacity when those
+##                         are absent, so existing configs keep their current
+##                         sizing; set the explicit keys instead.
 ##     pmg           bool  parallel Monte Carlo group support enabled
 ##     pmgonly       bool  cluster accepts PMG jobs only
 ##     submit_retries    int  override $global_sbatch_submit_retries for this cluster
@@ -366,6 +413,9 @@ $cluster_details =
      ,'us3iab-devel' => [
          'active'              => false
          ,'name'               => 'us3iab-devel.attlocal.net'
+         ,'login'              => 'us3@us3iab-devel.attlocal.net'
+         ,'localhost'          => true
+         ,'fixed_capacity'     => true
          ,'workdir'            => '/export/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'normal'
@@ -382,6 +432,7 @@ $cluster_details =
          ,'name'               => 'us3iab-node0.localhost'
          ,'login'              => 'us3@us3iab-node0'
          ,'localhost'          => true
+         ,'fixed_capacity'     => true
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'batch'
@@ -398,6 +449,8 @@ $cluster_details =
          'active'              => false
          ,'name'               => 'us3iab-node1.localhost'
          ,'login'              => 'us3@us3iab-node1'
+         ,'localhost'          => true
+         ,'fixed_capacity'     => true
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'normal'

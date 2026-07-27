@@ -88,29 +88,31 @@ class submit_slurm extends jobsubmit
    ## Generate the Slurm batch script and write it to disk; return filename
    public function write_slurm_script( $cluster, $requestID, $workdir, $tarfile )
    {
-      $cfg     = $this->grid[ $cluster ];
-      $quename = $cfg[ 'queue' ];
-      $ppbj    = $cfg[ 'ppbj' ];
-      $ppn     = $cfg[ 'ppn'  ];
+      elog2( "write_slurm_script: cluster=$cluster queue=" . $this->grid[ $cluster ][ 'queue' ] );
 
-      elog2( "write_slurm_script: cluster=$cluster queue=$quename" );
-
-      ## For GA analysis, double procs-per-base-job if under the minimum
-      if ( preg_match( "/GA/", $this->data[ 'method' ] ) && $ppbj < 16 )
-         $ppbj *= 2;
-
-      ## Compute parallel group count and node count
+      ## Compute parallel group count and node count FIRST. nodes() rewrites
+      ## grid[ppn]/[ppbj]/[maxproc] in place for fixed-capacity clusters, so
+      ## every cluster value below has to be read after it has run -- reading
+      ## them first silently emits the pre-sizing ppbj into #SBATCH -n.
       $mgroupcount = $this->resolve_mgroupcount();
       $nodes       = $this->nodes() * $mgroupcount;
       $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
 
-      ## Apply single_node collapse: all ranks on one node (e.g. USiaB, slurm-head)
-      $single_node = $cfg[ 'single_node' ] ?? false;
-      if ( $single_node && $nodes > 1 ) {
-         $ppn   = $nodes * $ppn;
+      $cfg     = $this->grid[ $cluster ];
+      $quename = $cfg[ 'queue' ];
+      $ppbj    = $cfg[ 'ppbj' ];
+      $ppmg    = (int) ( $cfg[ 'procs_per_mgroup' ] ?? 16 );
+
+      ## For GA analysis, double procs-per-base-job if under one model group
+      if ( preg_match( "/GA/", $this->data[ 'method' ] ) && $ppbj < $ppmg )
+         $ppbj *= 2;
+
+      ## single_node: confine the job to one node. The total rank count
+      ## (#SBATCH -n, below) is $ppbj either way, so collapsing the node count
+      ## is the whole of the transformation -- there is no per-node figure in
+      ## the emitted script to recompute.
+      if ( ! empty( $cfg[ 'single_node' ] ) )
          $nodes = 1;
-      }
-      $ppn = max( $ppn, $cfg[ 'min_ppn' ] ?? $ppn );
 
       ## Resolve wall time
       list( $walltime, $wallmins ) = $this->resolve_walltime( $cfg );
@@ -416,17 +418,31 @@ class submit_slurm extends jobsubmit
 
       $this->message[] = "DB updated: requestID=$requestID slurm_id=$slurm_id";
 
-      ## Launch per-job monitor daemon
-      ## `nice` wraps `sudo`, not the other way around: the NOPASSWD sudoers
-      ## rule for www-data->us3 only covers /usr/bin/php as sudo's direct
-      ## target command. `sudo -u us3 nice ... php` makes nice the target
-      ## instead, which doesn't match, so sudo demands a password and the
-      ## launch silently fails. Niceness is inherited across exec(), so
-      ## setting it on the outer process has the same effect. The absolute
-      ## /usr/bin/php path is also required: a bare "php" resolves via PATH
-      ## to /usr/local/bin/php, which the sudoers rule doesn't match either.
-      $cmd = "nice -15 sudo -u us3 /usr/bin/php /home/us3/lims/bin/jobmonitor/jobmonitor.php"
-           . " $dbname $slurm_id $requestID 2>&1";
+      ## Launch per-job monitor daemon.
+      ##
+      ## Do not add an unconditional `sudo -u us3` here. Production runs the
+      ## whole web tier as us3 (httpd.conf "User us3", php-fpm "user = us3")
+      ## and the playbooks put us3 in no sudoers file, so a sudo hop fails
+      ## there with "us3 is not in the sudoers file" and the monitor never
+      ## starts. Sudo is only for a deployment whose web tier runs as some
+      ## other user.
+      $php     = PHP_BINARY ?: '/usr/bin/php';
+      $monitor = "/home/us3/lims/bin/jobmonitor/jobmonitor.php";
+      $args    = "$dbname $slurm_id $requestID";
+
+      $whoami  = function_exists( 'posix_geteuid' ) && function_exists( 'posix_getpwuid' )
+                 ? ( posix_getpwuid( posix_geteuid() )[ 'name' ] ?? '' )
+                 : '';
+
+      if ( $whoami === 'us3' || $whoami === '' )
+         $cmd = "nice -15 $php $monitor $args 2>&1";
+      else
+         ## `nice` must wrap `sudo`, not the reverse: a NOPASSWD rule matches
+         ## sudo's direct target command, so `sudo -u us3 nice ... php` would
+         ## make nice the target and fail to match. Niceness is inherited
+         ## across exec(), so the outer process has the same effect.
+         $cmd = "nice -15 sudo -u us3 /usr/bin/php $monitor $args 2>&1";
+
       exec( $cmd, $null, $exit_code );
       $this->message[] = "jobmonitor launch: exit=$exit_code";
    }

@@ -67,7 +67,9 @@ $single_tenant_deployment = false;
 ##     workdir    string  base path on submithost; job subdirectory appended at runtime
 ##     sshport    int     SSH port (normally 22)
 ##     queue      string  Slurm partition name
-##     maxtime    int     maximum walltime in minutes (0 = unlimited when usemaxtime set)
+##     maxtime    int     maximum walltime in minutes; the computed estimate and
+##                        wall_override are both clamped to it (0 = unlimited:
+##                        no clamp, and 00:00:00 when usemaxtime is set)
 ##     ppn        int     procs per node
 ##     ppbj       int     procs per base job
 ##     maxproc    int     maximum total procs
@@ -86,7 +88,8 @@ $single_tenant_deployment = false;
 ##   Optional scheduler/resource keys:
 ##     usemaxtime    bool  use maxtime directly instead of computed estimate;
 ##                         set maxtime=0 for unlimited (emits 00:00:00 to Slurm)
-##     wall_override int   fixed walltime in minutes (overrides computed; ignored if usemaxtime)
+##     wall_override int   fixed walltime in minutes (overrides computed; ignored if
+##                         usemaxtime; still clamped to maxtime)
 ##     mempercore    int   MB per core (#SBATCH --mem-per-cpu)
 ##
 ##   Sizing keys. These are three independent axes -- do not assume setting

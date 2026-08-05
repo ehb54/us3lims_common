@@ -418,7 +418,6 @@ class jobsubmit
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
-      $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
       $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
                     ? $parameters[ 'tinoise_option' ] > 0
                     : false;

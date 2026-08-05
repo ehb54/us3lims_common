@@ -563,6 +563,14 @@ class submit_slurm extends jobsubmit
    ##                          (maxtime = 0 means unlimited → 00:00:00 / Slurm no-limit)
    ##   2. wall_override > 0 → use that fixed value in minutes
    ##   3. otherwise         → use the computed estimate from maxwall()
+   ##
+   ## In cases 2 and 3 the result is clamped to the cluster's configured
+   ## maxtime (when maxtime > 0). Without the clamp a long estimate -- or a
+   ## wall_override left over from a cluster whose queue limit has since been
+   ## lowered -- is handed to sbatch unchanged and the scheduler rejects the
+   ## job outright, which surfaces to the user as a submission failure rather
+   ## than a job that runs up to the queue limit. maxtime = 0 means the
+   ## cluster advertises no limit, so nothing is clamped.
    private function resolve_walltime( $cfg )
    {
       ## usemaxtime: skip computed estimate, use the configured cluster maximum
@@ -579,6 +587,15 @@ class submit_slurm extends jobsubmit
 
       if ( ! empty( $cfg[ 'wall_override' ] ) )
          $wall = (float) $cfg[ 'wall_override' ];
+
+      ## Clamp to the cluster's queue limit; maxtime = 0 means unlimited
+      $max_time = isset( $cfg[ 'maxtime' ] ) ? (int) $cfg[ 'maxtime' ] : 0;
+      if ( $max_time > 0  &&  $wall > $max_time ) {
+         $this->message[] = "NOTE: walltime "
+                          . (int)$wall
+                          . " min exceeds cluster maxtime $max_time min; clamped to $max_time";
+         $wall = (float) $max_time;
+      }
 
       $hours    = (int)( $wall / 60 );
       $mins     = (int)( $wall % 60 );

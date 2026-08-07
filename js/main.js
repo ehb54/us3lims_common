@@ -178,6 +178,12 @@ document.addEventListener('click', function(event) {
             main_debug && console.log( 'click event target has class onclick-construction' );
             construction();
             return false;
+        } else if ( event.target.classList.contains( 'onclick-form-submit' ) ) {
+            // no preventDefault() here: these are radio inputs, they must
+            // still become checked before the form is submitted
+            main_debug && console.log( 'click event target has class onclick-form-submit' );
+            event.target.form.submit();
+            return false;
         } else if ( event.target.classList.contains( 'onclick-selectAllCells' ) ) {
             event.preventDefault();
             main_debug && console.log( 'click event target has class onclick-selectAllCells' );

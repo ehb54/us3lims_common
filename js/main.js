@@ -178,6 +178,11 @@ document.addEventListener('click', function(event) {
             main_debug && console.log( 'click event target has class onclick-construction' );
             construction();
             return false;
+        } else if ( event.target.classList.contains( 'onclick-window-close' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-window-close' );
+            window.close();
+            return false;
         } else if ( event.target.classList.contains( 'onclick-form-submit' ) ) {
             // no preventDefault() here: these are radio inputs, they must
             // still become checked before the form is submitted
@@ -326,3 +331,50 @@ document.addEventListener('submit', function(event) {
         }
     }
 });
+
+// Submit-progress display, formerly an inline <script> in class/progress.php.
+// The element is looked up lazily because main.js loads from <head>, whereas
+// class/progress.php is included part-way down the body.  Initial hidden state
+// comes from the d-none class rather than a hide() call at parse time.
+us_submit_prog     = {};
+us_submit_prog.msg = {};
+
+us_submit_prog.element = function() {
+    return document.getElementById( "_submitprogress" );
+};
+
+us_submit_prog.update = function( msg ) {
+    const ele = us_submit_prog.element();
+    if ( ele ) {
+        ele.innerHTML = msg;
+    }
+};
+
+us_submit_prog.append = function( msg ) {
+    const ele = us_submit_prog.element();
+    if ( ele ) {
+        ele.innerHTML += "<br>" + msg;
+    }
+};
+
+us_submit_prog.show = function() {
+    const ele = us_submit_prog.element();
+    if ( ele ) {
+        ele.classList.remove( 'd-none' );
+    }
+};
+
+us_submit_prog.hide = function() {
+    const ele = us_submit_prog.element();
+    if ( ele ) {
+        ele.classList.add( 'd-none' );
+    }
+};
+
+us_submit_prog.msg.prep = function( x ) {
+    us_submit_prog.update( `preparing datasets - ${x} remaining` );
+};
+
+us_submit_prog.msg.submit = function( x ) {
+    us_submit_prog.update( `submitting ${x}` );
+};

@@ -573,6 +573,10 @@ fieldset#clusters tr.subheader th
     color: red;
 }
 
+.font-bold {
+    font-weight: bold;
+}
+
 .w-11p {
     width: 11%;
 }

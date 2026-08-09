@@ -2,9 +2,23 @@
 /*
  * submit_slurm.php
  *
- * Submits an analysis job to a Slurm cluster via SSH.
- * Always uses: ssh mkdir → scp → ssh sbatch.
- * Handles all SSH-based Slurm submission: remote HPC clusters and USiaB appliances.
+ * Submits an analysis job to a Slurm cluster.
+ *
+ * Remote clusters use: ssh mkdir → scp → ssh sbatch.
+ *
+ * A cluster whose global_config.php entry sets 'localhost' => true runs every
+ * one of those steps directly instead — mkdir, cp, sbatch, scontrol — with no
+ * ssh or scp in the path.
+ *
+ * Going through ssh on a single-node appliance would require generating a
+ * loopback keypair for us3 and granting it shell access, which the appliance's
+ * sshd deliberately withholds (AllowGroups usiab-admins usiab-users, and us3
+ * is in neither). Native submission avoids opening that hole.
+ *
+ * Caveat: under ssh, every command arrived as the 'login' user regardless of
+ * who invoked PHP. Natively it runs as the invoking user — us3 for the
+ * submitone.php/submitctl.php autoflow path, apache for a direct web-UI
+ * submission. The workdir must therefore be writable by both.
  *
  */
 require_once $class_dir . 'jobsubmit.php';
@@ -12,7 +26,7 @@ include_once $class_dir . 'priority.php';
 
 function elog2( $msg )
 {
-   ## Phase 5: path comes from $elog2_path in global_config.php (not hardcoded)
+   ## Path comes from $elog2_path in global_config.php.
    global $elog2_path;
    $path = isset( $elog2_path ) ? $elog2_path : '/home/us3/lims/etc/elog2.txt';
    error_log( "$msg\n", 3, $path );
@@ -54,7 +68,8 @@ class submit_slurm extends jobsubmit
       chdir( $savedir );
    }
 
-   ## SSH mkdir, write slurm script locally, scp both files to submithost.
+   ## Create the working directory (ssh or local), write the slurm script
+   ## locally, then copy both files to the submithost (scp or local cp).
    ## Returns true on success, false if any step fails (error already in $this->message).
    public function stage_files()
    {
@@ -65,20 +80,25 @@ class submit_slurm extends jobsubmit
       $workdir   = $this->workdir( $cluster, $requestID );
       $tarfile   = $this->tarfile();
 
-      $this->message[] = "stage_files: cluster=$cluster login=$login workdir=$workdir";
+      $local     = $this->is_local( $cluster );
 
-      ## Create remote working directory
-      if ( $this->ssh( $port, $login, "/bin/mkdir -p $workdir" ) !== 0 ) {
-         $this->message[] = "ERROR: stage_files: ssh mkdir failed for $workdir";
+      $this->message[] = "stage_files: cluster=$cluster login=$login workdir=$workdir"
+                       . ( $local ? " (local submission, no ssh)" : '' );
+
+      ## Create the working directory on the submithost
+      if ( $this->ssh( $cluster, $port, $login, "/bin/mkdir -p $workdir" ) !== 0 ) {
+         $this->message[] = "ERROR: stage_files: mkdir failed for $workdir";
          return false;
       }
 
       ## Generate slurm script locally
       $slufile = $this->write_slurm_script( $cluster, $requestID, $workdir, $tarfile );
 
-      ## Copy input tar and slurm script to submithost
-      if ( $this->scp( $port, "$tarfile $slufile", "$login:$workdir" ) !== 0 ) {
-         $this->message[] = "ERROR: stage_files: scp failed (tarfile=$tarfile slufile=$slufile)";
+      ## Copy input tar and slurm script to the working directory. For a local
+      ## cluster the destination is a plain path; scp() turns the copy into cp.
+      $dest = $local ? $workdir : "$login:$workdir";
+      if ( $this->scp( $cluster, $port, "$tarfile $slufile", $dest ) !== 0 ) {
+         $this->message[] = "ERROR: stage_files: copy failed (tarfile=$tarfile slufile=$slufile)";
          return false;
       }
 
@@ -185,7 +205,7 @@ class submit_slurm extends jobsubmit
    ## "Socket timed out" under scheduler load); configurable via
    ## $global_sbatch_submit_retries / $global_sbatch_submit_retry_wait_seconds
    ## in global_config.php, overridable per-cluster via 'submit_retries' /
-   ## 'submit_retry_wait'. Fixes ultrascan-tickets#915.
+   ## 'submit_retry_wait'.
    ## Sets $this->data['eprfile'] only on confirmed success; leaves it empty
    ## and marks the autoflow request SUBMIT_TIMEOUT on exhausted retries.
    public function submit_job()
@@ -213,7 +233,7 @@ class submit_slurm extends jobsubmit
       $submit_retry_wait = $this->grid[ $cluster ][ 'submit_retry_wait' ]
                           ?? $global_sbatch_submit_retry_wait_seconds;
 
-      $submitResult = $this->attemptSubmit( $port, $login, $workdir, $submit_retries, $submit_retry_wait );
+      $submitResult = $this->attemptSubmit( $cluster, $port, $login, $workdir, $submit_retries, $submit_retry_wait );
 
       if ( ! $submitResult[ 'submit_ok' ] ) {
          $this->data[ 'eprfile' ] = '';
@@ -226,8 +246,8 @@ class submit_slurm extends jobsubmit
 
       $slurm_job_id = $submitResult[ 'job_id' ];
 
-      ## Optional: confirm job exists via scontrol before trusting the ID
-      $this->confirm_slurm_job( $port, $login, $slurm_job_id );
+      ## Best-effort scontrol check; does not gate submission (see below).
+      $this->confirm_slurm_job( $cluster, $port, $login, $slurm_job_id );
 
       $this->data[ 'eprfile' ] = $slurm_job_id;
       elog2( "submit_job: slurm_job_id=$slurm_job_id confirmed after " . $submitResult[ 'attempt' ] . " attempt(s)" );
@@ -236,7 +256,7 @@ class submit_slurm extends jobsubmit
    ## Run sbatch once via SSH, validate its result, and retry with
    ## exponential backoff on failure. Returns an array describing the
    ## outcome of the last attempt: submit_ok, job_id, error, attempt.
-   private function attemptSubmit( $port, $login, $workdir, $submit_retries, $secwait )
+   private function attemptSubmit( $cluster, $port, $login, $workdir, $submit_retries, $secwait )
    {
       $attempt = 0;
       $error   = '';
@@ -244,7 +264,7 @@ class submit_slurm extends jobsubmit
       do
       {
          $attempt++;
-         $result = $this->sbatchOnce( $port, $login, $workdir, $attempt );
+         $result = $this->sbatchOnce( $cluster, $port, $login, $workdir, $attempt );
 
          if ( $result[ 'ok' ] ) {
             return array(
@@ -275,16 +295,21 @@ class submit_slurm extends jobsubmit
    ## Run sbatch --parsable once via SSH and validate the result.
    ## Stdout and stderr are captured into fresh arrays/temp files on every
    ## call, so a retry never sees stale output carried over from a previous
-   ## attempt (exec() appends to an existing array rather than replacing it;
-   ## fixes ultrascan-tickets#931). Stdout/stderr are also kept separate so
-   ## --parsable's stdout is never contaminated by SSH warnings or sbatch
-   ## error text.
+   ## attempt (exec() appends to an existing array rather than replacing it).
+   ## Stdout/stderr are also kept separate so --parsable's stdout is never
+   ## contaminated by SSH warnings or sbatch error text.
    ## Returns ['ok' => bool, 'job_id' => string, 'error' => string].
-   private function sbatchOnce( $port, $login, $workdir, $attempt )
+   private function sbatchOnce( $cluster, $port, $login, $workdir, $attempt )
    {
       $stderr_tmp = tempnam( sys_get_temp_dir(), 'us3sbatch_' );
       $sbatch_cmd = "sbatch --parsable --get-user-env $workdir/us3.slurm";
-      $cmd        = "/usr/bin/ssh -p $port -x $login '$sbatch_cmd' 2>$stderr_tmp";
+
+      ## The remote form single-quotes $sbatch_cmd so ssh passes it as one
+      ## argument to the login shell; run locally that quoting would make the
+      ## whole string a single command name, so drop it.
+      $cmd = $this->is_local( $cluster )
+           ? "$sbatch_cmd 2>$stderr_tmp"
+           : "/usr/bin/ssh -p $port -x $login '$sbatch_cmd' 2>$stderr_tmp";
 
       elog2( "sbatchOnce cmd: $cmd (attempt $attempt)" );
 
@@ -476,24 +501,42 @@ class submit_slurm extends jobsubmit
          $this->data[ 'job' ][ 'requestID' ] );
    }
 
-   ## Run a command on the submithost via SSH; log and return exit code
-   private function ssh( $port, $login, $remote_cmd )
+   ## True when this cluster runs on the same host as the LIMS stack, i.e. its
+   ## global_config.php entry sets 'localhost' => true. Such a cluster is
+   ## driven with plain local commands rather than ssh/scp. Absent or false
+   ## means ssh/scp, as with any remote cluster.
+   private function is_local( $cluster )
    {
-      $cmd    = "/usr/bin/ssh -p $port -x $login $remote_cmd 2>&1";
+      return ! empty( $this->grid[ $cluster ][ 'localhost' ] );
+   }
+
+   ## Run a command on the submithost; log and return exit code.
+   ## Local clusters execute it directly, remote ones via SSH.
+   private function ssh( $cluster, $port, $login, $remote_cmd )
+   {
+      $cmd = $this->is_local( $cluster )
+           ? "$remote_cmd 2>&1"
+           : "/usr/bin/ssh -p $port -x $login $remote_cmd 2>&1";
+
       $output = [];
       $this->runExec( $cmd, $output, $exit_code );
-      $this->message[] = "ssh: $cmd  exit=$exit_code"
+      $this->message[] = "exec: $cmd  exit=$exit_code"
                        . ( $exit_code !== 0 ? "  out=" . ( $output[0] ?? '' ) : '' );
       return $exit_code;
    }
 
-   ## Copy local files to a remote destination via scp
-   private function scp( $port, $files, $dest )
+   ## Copy the staged files into the working directory. Remote clusters use
+   ## scp; local ones use cp, since source and destination are the same
+   ## filesystem and $dest is already a bare path (see stage_files).
+   private function scp( $cluster, $port, $files, $dest )
    {
-      $cmd    = "/usr/bin/scp -P $port $files $dest 2>&1";
+      $cmd = $this->is_local( $cluster )
+           ? "/bin/cp $files $dest 2>&1"
+           : "/usr/bin/scp -P $port $files $dest 2>&1";
+
       $output = [];
       $this->runExec( $cmd, $output, $exit_code );
-      $this->message[] = "scp: $cmd  exit=$exit_code"
+      $this->message[] = "copy: $cmd  exit=$exit_code"
                        . ( $exit_code !== 0 ? "  out=" . ( $output[0] ?? '' ) : '' );
       return $exit_code;
    }
@@ -539,9 +582,13 @@ class submit_slurm extends jobsubmit
    ## Confirm the submitted job is visible to Slurm via scontrol show job.
    ## This is a best-effort check: a lookup failure is logged but does not
    ## abort submission — the ID came from a successful --parsable response.
-   private function confirm_slurm_job( $port, $login, $slurm_job_id )
+   private function confirm_slurm_job( $cluster, $port, $login, $slurm_job_id )
    {
-      $cmd    = "/usr/bin/ssh -p $port -x $login scontrol show job $slurm_job_id 2>&1";
+      $scontrol_cmd = "scontrol show job $slurm_job_id";
+      $cmd = $this->is_local( $cluster )
+           ? "$scontrol_cmd 2>&1"
+           : "/usr/bin/ssh -p $port -x $login $scontrol_cmd 2>&1";
+
       $output = [];
       $this->runExec( $cmd, $output, $exit_code );
 

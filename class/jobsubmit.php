@@ -57,16 +57,41 @@ class jobsubmit
            return;
        }
 
-       ## dbinst specific configs
+       ## Cluster configuration comes from three levels, in this precedence
+       ## order, matching lib/utility.php exactly:
+       ##
+       ##   1. dbinst    $full_path/cluster_config.php
+       ##   2. site      ../cluster_config.php  (legacy, not a designed level)
+       ##   3. newlims   ../uslims3_newlims/cluster_config.php
+       ##
+       ## First file found wins outright; the levels do not merge, because
+       ## each file assigns $cluster_configuration whole.
+       ##
+       ## The site-level candidate is here only to keep the two loaders
+       ## byte-identical in what they resolve. utility.php reached that path
+       ## by accident, through a relative include resolved against the working
+       ## directory, and it was the only dbinst candidate it had -- so an
+       ## instance with its own cluster_config.php was honoured here and
+       ## ignored there.
 
-       $dbinst_config_file = "$full_path/cluster_config.php";
+       $dbinst_config_candidates = array(
+           rtrim( $full_path, '/' ) . '/cluster_config.php'
+           ,'../cluster_config.php'
+           ,'../uslims3_newlims/cluster_config.php'
+           );
 
-       if ( !file_exists( $dbinst_config_file ) ) {
-           $dbinst_config_file = '../uslims3_newlims/cluster_config.php';
-           if ( !file_exists( $dbinst_config_file ) ) {
-               $error_msg( "no cluster_config.php file found" );
-               return;
+       $dbinst_config_file = null;
+
+       foreach ( $dbinst_config_candidates as $candidate ) {
+           if ( file_exists( $candidate ) ) {
+               $dbinst_config_file = $candidate;
+               break;
            }
+       }
+
+       if ( $dbinst_config_file === null ) {
+           $error_msg( "no cluster_config.php file found" );
+           return;
        }
 
        ## global configs
@@ -128,12 +153,40 @@ class jobsubmit
        foreach ( $cluster_details as $k => $v ) {
            $ok = true;
 
-           ## do all required keys exist for this cluster?
-
            if ( array_key_exists( 'active', $v ) && !$v['active'] ) {
                $debug_msg( "cluster $k not active", $debug );
                continue;
            }
+
+           ## The instance's cluster_config.php is the per-instance override:
+           ## it decides which of global_config.php's clusters THIS LIMS
+           ## instance is allowed to use. lib/utility.php applies it when it
+           ## builds the queue-setup list, so a cluster switched off there
+           ## disappears from the UI.
+           ##
+           ## This loop used to consult $cluster_details alone. The two filters
+           ## therefore disagreed: a cluster the instance had switched off was
+           ## hidden from the UI but still accepted here, so a CLI submission
+           ## or a hand-built request could still land a job on it. Apply the
+           ## same test, so "not offered" and "not accepted" are one decision.
+
+           if ( !array_key_exists( $k, $cluster_configuration ) ) {
+               $debug_msg( "cluster $k not present in \$cluster_configuration", $debug );
+               continue;
+           }
+
+           if ( !is_array( $cluster_configuration[ $k ] ) ) {
+               $error_msg( "cluster configuration for cluster $k is not an array" );
+               continue;
+           }
+
+           if ( !array_key_exists( 'active', $cluster_configuration[ $k ] )
+                || !$cluster_configuration[ $k ][ 'active' ] ) {
+               $debug_msg( "cluster $k inactive in \$cluster_configuration", $debug );
+               continue;
+           }
+
+           ## do all required keys exist for this cluster?
 
            foreach ( array_key_exists( "clusters", $v )
                      ? $reqkey_metascheduler
@@ -517,10 +570,8 @@ class jobsubmit
             ## How much slower custom-grid work runs here is a performance
             ## property of the box, not a topology or capacity one, so it is
             ## a per-cluster magnitude rather than a boolean: a fast
-            ## fixed-capacity box and a slow one no longer have to share the
-            ## same x4.
-            $legacy         = $this->legacy_localhost( $cluster );
-            $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity', $legacy );
+            ## fixed-capacity box and a slow one need not share the same x4.
+            $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity', false );
             if ( $fixed_capacity )
                $time *= (float) $this->cluster_opt( $cluster, 'cg_time_multiplier', 4.0 );
             else if ( $mxiters > 0 )  $time *= 2;
@@ -603,17 +654,14 @@ class jobsubmit
    function nodes()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      ## Sizing is driven by two independent config axes, not one 'localhost'
-      ## flag (see legacy_localhost()):
+      ## Sizing is driven by two independent config axes:
       ##   fixed_capacity - size the job to this box's core count instead of
       ##                    requesting a share of a large shared scheduler
       ##   single_node    - confine the job to exactly one node
       ## They are orthogonal: a co-located appliance with several compute
-      ## nodes sets fixed_capacity without single_node, a configuration the
-      ## old flag could not express (it always forced one node).
-      $legacy         = $this->legacy_localhost( $cluster );
-      $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity',   $legacy );
-      $single_node    = (bool) $this->cluster_opt( $cluster, 'single_node',      $legacy );
+      ## nodes sets fixed_capacity without single_node.
+      $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity',   false );
+      $single_node    = (bool) $this->cluster_opt( $cluster, 'single_node',      false );
       $ppmg           = (int)  $this->cluster_opt( $cluster, 'procs_per_mgroup', 16 );
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
@@ -700,23 +748,6 @@ class jobsubmit
       return $nodes;
    }
 
-   ## True when a cluster entry still sets the deprecated 'localhost' flag as
-   ## a sizing hint. 'localhost' now means only "this cluster runs on the LIMS
-   ## host" (used for display and for resolving the 'localhost' cluster alias);
-   ## the sizing behaviour it used to imply is expressed by 'single_node',
-   ## 'fixed_capacity', 'procs_per_mgroup' and 'cg_time_multiplier'.
-   ##
-   ## This fallback exists so deployments whose global_config.php predates that
-   ## split keep their current node/PMG/walltime sizing untouched. New configs
-   ## should set the explicit keys; see global_config.php.template. Once no
-   ## deployed global_config.php relies on it, this method and every
-   ## $legacy default below can be deleted.
-   protected function legacy_localhost( $cluster )
-   {
-      return array_key_exists( $cluster, $this->grid )
-             && ! empty( $this->grid[ $cluster ][ 'localhost' ] );
-   }
-
    ## Read a per-cluster tuning key, falling back to $default when absent.
    protected function cluster_opt( $cluster, $key, $default )
    {
@@ -737,8 +768,7 @@ class jobsubmit
       $max_groups = 32;
       ## PMG ceiling on a fixed-capacity box is a pure capacity question:
       ## how many whole $ppmg-proc model groups fit in the core budget.
-      $legacy         = $this->legacy_localhost( $cluster );
-      $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity',   $legacy );
+      $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity',   false );
       $ppmg           = (int)  $this->cluster_opt( $cluster, 'procs_per_mgroup', 16 );
 
       if ( preg_match( "/SA/", $this->data[ 'method' ] ) )

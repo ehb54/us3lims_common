@@ -21,6 +21,24 @@ $admin_list = [
 $global_max_queue_time_hours = 0;
 $global_max_run_time_hours   = 0;
 
+## abandonment ceiling, in hours since last status update.
+##
+## The stall timers above measure elapsed time, so an outage that stops status
+## updates makes every waiting job look hung. gridctl therefore checks whether
+## the cluster is answering before firing a stall timer, and defers if it is
+## not -- the jobs are usually fine and the LIMS is blind.
+##
+## This is the ceiling on that deferral. Without one, a cluster that is
+## decommissioned, renamed, or simply never coming back holds its jobs in
+## 'submitted' forever and no operator ever sees them. Past this many hours of
+## an unreachable cluster the job is closed out as a timeout, with autoflow
+## status CLUSTER_UNAVAILABLE so the reason is not confused with a job failure.
+##
+## Make it comfortably longer than a routine maintenance window: it should
+## catch a site that is gone, not a site that is down for the afternoon.
+## Set to zero to defer indefinitely instead (the pre-ceiling behaviour).
+$global_cluster_abandon_hours = 72;
+
 ## after a job reports COMPLETE, jobmonitor waits for the cluster's (UDP)
 ## "Finished" message before finalizing.  Because UDP is unreliable, it will
 ## finalize anyway once $global_complete_grace_seconds have elapsed since the
@@ -32,32 +50,123 @@ $global_max_run_time_hours   = 0;
 $global_complete_grace_seconds = 600;
 $global_complete_max_seconds   = 21600;
 
-## retry/backoff for transient job submission failures (e.g. sbatch
-## "Socket timed out" under scheduler load)
-## can be overridden per-cluster via 'submit_retries'/'submit_retry_wait'
-## in $cluster_details below
-## backoff doubles each retry, starting from $global_sbatch_submit_retry_wait_seconds
+## sbatch is deliberately submitted once. An SSH failure can happen after
+## Slurm accepted the job but before its ID reached LIMS, so retry/backoff here
+## would risk creating a duplicate. Reconcile an uncertain submission on the
+## scheduler before asking LIMS to submit it again.
 
-$global_sbatch_submit_retries            = 3;
-$global_sbatch_submit_retry_wait_seconds = 5;
+## ---------------------------------------------------------------------------
+## remote execution (class/remote_exec.php)
+##
+## Every ssh/scp call to a cluster is bounded twice over: ssh's own
+## ConnectTimeout bounds the handshake, and timeout(1) bounds total wall clock.
+## Both are needed. ConnectTimeout cannot interrupt a command that connected
+## successfully and is now blocked in uninterruptible I/O on an unresponsive
+## parallel filesystem -- the session is healthy, keepalives are answered, and
+## the command simply never returns. Only the external kill bounds that, and
+## it is the case that hung the job monitors during the 2026 Expanse/Lustre
+## incident.
+##
+## Connect, short-command, and file-copy budgets remain distinct because their
+## safe durations differ. Their defaults, transport retry/backoff, breaker
+## threshold/cooldown, and timeout(1) discovery are implementation policy in
+## class/remote_exec.php, not routine deployment settings.
+
+## how long a gfac.cluster_status row stays trustworthy, in seconds.
+## The health probe is a cron job and cron jobs die. Past this age a row is
+## treated as 'down' rather than as its last recorded value, so a cluster that
+## went down while the probe was wedged does not stay selectable in the
+## queue-setup UI on the strength of a stale 'up'.
+##
+## Note that this really is 'down' and not 'unknown': a stale row makes the
+## cluster unselectable, exactly as a probe that found it dead would. That is
+## the intended trade. Refusing a submission to a cluster we have no current
+## information about costs the user seconds; accepting one for a cluster that
+## is actually unreachable costs them the run.
+##
+## Set to a small multiple of the probe's cron interval. Set to zero to
+## disable the age check and trust each row's recorded value however old it
+## is, which is the behaviour this setting was added to end.
+$global_cluster_status_max_age_seconds = 900;
+
+## NOTE: the probe escalation ladder is deliberately NOT configurable.
+## One failed health probe records 'warn'; a second consecutive failure
+## records 'down' (gridctl/cluster_status.php, escalate_probe_failure).
+## The count is fixed at two because the ladder uses the cluster_status.status
+## column itself as its memory, and that holds one bit of history. Any other
+## count needs a separate counter, and the count is not a value a site has a
+## reason to change: how quickly a flapping cluster leaves the queue-setup UI
+## is governed by the probe's cron interval, not by this.
+##
+## Do not add a $global_cluster_down_after_failures key. Nothing reads one, so
+## setting it has no effect and gives no warning.
+##
+## There is likewise no aggregated admin alert per cluster outage. When jobs are abandoned for an unreachable cluster
+## (job_state_machine::abandon_for_outage) the cron sweep in gridctl.php mails
+## the admins once per affected job, and mail_to_admin_once deduplicates only
+## within a single jobmonitor process, which is one process per job. Collapsing
+## those into one alert per cluster is worth doing and is separate work: the
+## alert belongs to the outage, not to a probe count.
+
+## ---------------------------------------------------------------- circuit breaker
+##
+## Shared, cross-process memory of which clusters are not answering. Retry with
+## backoff is right for one call and wrong in aggregate: every queued job has
+## its own jobmonitor process, so during an outage each one independently
+## rediscovers the same dead login node by making its own attempts against it.
+## The breaker lets the first few processes record the outage and everyone else
+## fail fast without touching the network until the cooldown expires.
+##
+## directory for the per-cluster state files. Must be writable by every account
+## that talks to a cluster (the web tier's apache user and the us3 cron/daemon
+## user), or the breaker silently disables itself and behaviour reverts to
+## plain per-process retry -- degraded, but never worse than before it existed.
+##
+## Left commented deliberately. The default is owned by remote_exec::BREAKER_DIR
+## and is '/var/tmp/us3-circuit-breaker'. Restating it here would give it two
+## owners, so a host that had not copied the current template would use a
+## different directory than one that had, and the breaker's cross-process state
+## would silently stop being shared. Uncomment only to move the directory, and
+## then only to a path both accounts can write.
+
+## $global_circuit_breaker_dir = '/var/tmp/us3-circuit-breaker';
 
 ## does this install serve a single tenant (a USiaB appliance) or many
 ## (a shared LIMS host)?  governs whether the queue views scope rows to this
 ## instance's database or show every tenant's jobs to a level-4 admin.
 ## this is a property of the deployment, not of any one cluster.
-## if left unset, it is inferred from any active cluster flagged 'localhost'
-## (the pre-split behaviour); set it explicitly.
+## set it explicitly. unset means multi-tenant.
 
 $single_tenant_deployment = false;
 
 ## which cluster the literal cluster name "localhost" resolves to, for CLI
-## submission (submitone.php).  if unset, the first active cluster flagged
-## 'localhost' is used.
+## submission (submitone.php).  if unset, "localhost" resolves to nothing and
+## the submission is rejected.
 
 ## $default_local_cluster = 'us3iab-node0';
 
-## define all possible clusters for this server
-## can be overriden in dbinst specific cluster_config.php
+## define all possible clusters for this server.
+##
+## CLUSTER CONFIGURATION COMES FROM THREE LEVELS. This file, the common one,
+## defines what each cluster IS: its hostname, queue, sizing and limits, in
+## $cluster_details below. Which of those clusters a given LIMS instance may
+## actually use is a separate decision, made in $cluster_configuration in a
+## cluster_config.php, and that file is looked for at two levels in turn:
+##
+##   1. dbinst    <instance dir>/cluster_config.php
+##                the instance's own file, if it has one
+##   2. newlims   <web root>/uslims3_newlims/cluster_config.php
+##                the shared default from the registration interface
+##
+## The first file found wins outright. The levels do not merge, because each
+## one assigns $cluster_configuration whole.
+##
+## A cluster is offered, and accepted, only when it is active in BOTH places:
+## 'active' => true here, and 'active' => true in the winning
+## $cluster_configuration. Both lib/utility.php (which builds the queue-setup
+## list) and class/jobsubmit.php (which decides what a submission may reach)
+## apply that intersection, so "not offered" and "not accepted" are one
+## decision rather than two that can drift apart.
 
 ## SSH-Slurm cluster config keys:
 ##
@@ -93,9 +202,8 @@ $single_tenant_deployment = false;
 ##     mempercore    int   MB per core (#SBATCH --mem-per-cpu)
 ##
 ##   Sizing keys. These are three independent axes -- do not assume setting
-##   one implies another. They replace the single overloaded 'localhost' flag,
-##   which conflated all three and so could not express, for example, a
-##   co-located appliance that has more than one compute node.
+##   one implies another. A co-located appliance with more than one compute
+##   node, for instance, sets fixed_capacity without single_node.
 ##
 ##     TOPOLOGY
 ##     single_node   bool  confine the job to exactly one node (default false).
@@ -118,17 +226,21 @@ $single_tenant_deployment = false;
 ##                                consulted when fixed_capacity is set; a
 ##                                fast fixed-capacity box should lower it.
 ##
+##   Exception-only remote execution policy. Normal clusters omit this key.
+##   When operational evidence shows one site needs a different wall-clock
+##   budget, add only the affected field. remote_exec validates the name, type,
+##   and safe range before making a connection; retry and breaker policy cannot
+##   be overridden here.
+##
+##     'remote_exec_overrides' => [
+##         'connect_timeout_seconds' => 30,   # allowed 1..300
+##         'command_timeout_seconds' => 180,  # allowed 1..3600
+##         'copy_timeout_seconds'    => 1800, # allowed 1..86400
+##     ]
+##
 ##   DEPRECATED:
-##     localhost     bool  now means only "this cluster runs on the LIMS host",
-##                         used for display and for resolving the 'localhost'
-##                         cluster alias. It is still honoured as a fallback
-##                         default for single_node/fixed_capacity when those
-##                         are absent, so existing configs keep their current
-##                         sizing; set the explicit keys instead.
 ##     pmg           bool  parallel Monte Carlo group support enabled
 ##     pmgonly       bool  cluster accepts PMG jobs only
-##     submit_retries    int  override $global_sbatch_submit_retries for this cluster
-##     submit_retry_wait int  override $global_sbatch_submit_retry_wait_seconds for this cluster
 
 $cluster_details =
     [
@@ -210,8 +322,10 @@ $cluster_details =
      ## -----------------------------------------------------------------------
      ## Bridges-2 (PSC)
      ## login: us3@bridges2.psc.edu — PSC login alias; doc-supported
-     ## workdir: /ocean/projects/mcb210002p/us3/work — Ocean filesystem, allocation path;
-     ##          directory must exist — NEEDS MANUAL VERIFICATION
+     ## workdir: /ocean/projects/mcb210002p/us3/airavata-workdirs — verified
+     ##          readable/writable from both LIMS submission origins on 2026-08-27.
+     ##          The historical directory name is retained until an approved remote
+     ##          directory migration is completed; changing only this template breaks staging.
      ## mpi_launcher: mpirun — PSC docs support mpirun; no ibrun required
      ## env_script_lines: Bridges-2 is module-based. Exact module names for the us3
      ##   account not in public docs.
@@ -221,7 +335,7 @@ $cluster_details =
          'active'              => false
          ,'name'               => 'bridges2.psc.edu'
          ,'login'              => 'us3@bridges2.psc.edu'
-         ,'workdir'            => '/ocean/projects/mcb210002p/us3/work'
+         ,'workdir'            => '/ocean/projects/mcb210002p/us3/airavata-workdirs'
          ,'sshport'            => 22
          ,'queue'              => 'RM-shared'
          ,'maxtime'            => 2880
@@ -234,7 +348,7 @@ $cluster_details =
          'active'              => false
          ,'name'               => 'bridges2.psc.edu'
          ,'login'              => 'us3@bridges2.psc.edu'
-         ,'workdir'            => '/ocean/projects/mcb210002p/us3/work'
+         ,'workdir'            => '/ocean/projects/mcb210002p/us3/airavata-workdirs'
          ,'sshport'            => 22
          ,'queue'              => 'RM'
          ,'maxtime'            => 2880
@@ -295,19 +409,20 @@ $cluster_details =
      ## -----------------------------------------------------------------------
      ## Expanse (SDSC)
      ## login: us3@login.expanse.sdsc.edu — SDSC docs confirm this login host
-     ## workdir: /expanse/lustre/scratch/us3/temp_project/work — scratch filesystem;
-     ##          directory must exist and scratch quota must be sufficient —
-     ##          NEEDS MANUAL VERIFICATION
+     ## workdir: /expanse/lustre/scratch/us3/temp_project/airavata-workingdirs —
+     ##          verified readable/writable from both LIMS submission origins on
+     ##          2026-08-27. The historical directory name is retained until an
+     ##          approved remote migration; the proposed /work path does not exist.
      ## mpi_launcher: srun — SDSC Expanse docs recommend srun for MPI inside Slurm jobs
-     ## env_script_lines: Expanse is module-based. Exact module names for the us3
-     ##   account not in public docs.
-     ##   NEEDS MANUAL VERIFICATION before activating.
+     ## env_script_lines: `module load ultrascan3/4.0` was verified on 2026-08-27
+     ##   to resolve both /home/us3/expanse/bin/us_mpi_analysis and srun. Do not
+     ##   prepend `module purge`: doing so removes the Slurm launcher from PATH.
      ## -----------------------------------------------------------------------
      ,'expanse' => [
          'active'              => false
          ,'name'               => 'expanse.sdsc.edu'
          ,'login'              => 'us3@login.expanse.sdsc.edu'
-         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/work'
+         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
          ,'maxtime'            => 2880
@@ -315,13 +430,13 @@ $cluster_details =
          ,'ppbj'               => 32
          ,'maxproc'            => 128
          ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for us3 account"
+         ,'env_script_lines'   => "module load ultrascan3/4.0"
      ]
      ,'expanse-bigmem' => [
          'active'              => false
          ,'name'               => 'expanse.sdsc.edu'
          ,'login'              => 'us3@login.expanse.sdsc.edu'
-         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/work'
+         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
          ,'maxtime'            => 2880
@@ -330,13 +445,13 @@ $cluster_details =
          ,'maxproc'            => 32
          ,'mempercore'         => 3000
          ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for us3 account"
+         ,'env_script_lines'   => "module load ultrascan3/4.0"
      ]
      ,'expanse-gamc' => [
          'active'              => false
          ,'name'               => 'expanse.sdsc.edu'
          ,'login'              => 'us3@login.expanse.sdsc.edu'
-         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/work'
+         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
          ,'sshport'            => 22
          ,'queue'              => 'compute'
          ,'maxtime'            => 2880
@@ -346,7 +461,7 @@ $cluster_details =
          ,'pmg'                => true
          ,'pmgonly'            => true
          ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for us3 account"
+         ,'env_script_lines'   => "module load ultrascan3/4.0"
      ]
      ## -----------------------------------------------------------------------
      ## Lonestar6 (TACC)
@@ -417,7 +532,6 @@ $cluster_details =
          'active'              => false
          ,'name'               => 'us3iab-devel.attlocal.net'
          ,'login'              => 'us3@us3iab-devel.attlocal.net'
-         ,'localhost'          => true
          ,'fixed_capacity'     => true
          ,'workdir'            => '/export/home/us3/lims/work/'
          ,'sshport'            => 22
@@ -434,7 +548,6 @@ $cluster_details =
          'active'              => true
          ,'name'               => 'us3iab-node0.localhost'
          ,'login'              => 'us3@us3iab-node0'
-         ,'localhost'          => true
          ,'fixed_capacity'     => true
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
@@ -452,7 +565,6 @@ $cluster_details =
          'active'              => false
          ,'name'               => 'us3iab-node1.localhost'
          ,'login'              => 'us3@us3iab-node1'
-         ,'localhost'          => true
          ,'fixed_capacity'     => true
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22

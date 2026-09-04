@@ -238,7 +238,11 @@ class submit_slurm extends jobsubmit
          . "cd $workdir\n\n"
          . "$launch_cmd\n";
 
-      $this->data[ 'pbsfile' ] = $script;   ## stored for update_db()
+      ## Held for update_db(), which writes it to HPCAnalysisResult.jobfile.
+      ## The key was 'pbsfile' back when this class had a PBS sibling emitter;
+      ## it has only ever held whatever script the emitter produced, which is
+      ## now always Slurm.
+      $this->data[ 'jobfile' ] = $script;
 
       $filename = "us3.slurm";
       file_put_contents( $filename, $script );
@@ -424,7 +428,7 @@ class submit_slurm extends jobsubmit
          return false;
       }
 
-      $jobfile = mysqli_real_escape_string( $link, $this->data[ 'pbsfile' ] );
+      $jobfile = mysqli_real_escape_string( $link, $this->data[ 'jobfile' ] );
       $query = "INSERT INTO HPCAnalysisResult SET "
              . "HPCAnalysisRequestID='$requestID', "
              . "jobfile='$jobfile', "

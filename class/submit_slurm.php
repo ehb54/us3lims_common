@@ -145,27 +145,37 @@ class submit_slurm extends jobsubmit
    {
       elog2( "write_slurm_script: cluster=$cluster queue=" . $this->grid[ $cluster ][ 'queue' ] );
 
-      ## Compute parallel group count and node count FIRST. nodes() rewrites
-      ## grid[ppn]/[ppbj]/[maxproc] in place for fixed-capacity clusters, so
-      ## every cluster value below has to be read after it has run -- reading
-      ## them first silently emits the pre-sizing ppbj into #SBATCH -n.
+      ## Compute the parallel group count, the node count and the rank count
+      ## FIRST. nodes() is the sizing pass: it rewrites grid[ppn]/[ppbj]/
+      ## [maxproc] in place for fixed-capacity clusters and publishes the
+      ## total rank count it settled on, so everything below has to be read
+      ## after it has run.
       $mgroupcount = $this->resolve_mgroupcount();
       $nodes       = $this->nodes() * $mgroupcount;
       $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
 
       $cfg     = $this->grid[ $cluster ];
       $quename = $cfg[ 'queue' ];
-      $ppbj    = $cfg[ 'ppbj' ];
-      $ppmg    = (int) ( $cfg[ 'procs_per_mgroup' ] ?? 16 );
 
-      ## For GA analysis, double procs-per-base-job if under one model group
-      if ( preg_match( "/GA/", $this->data[ 'method' ] ) && $ppbj < $ppmg )
-         $ppbj *= 2;
+      ## The rank count comes from the sizing pass, not from a second
+      ## derivation here.
+      ##
+      ## This function used to build its own from grid[ppbj] plus a copy of
+      ## the GA rule ("double procs-per-base-job if under one model group"),
+      ## which dated from 2020 and the first Slurm script writer. That figure
+      ## disagreed with the one nodes() had just computed, in both directions:
+      ## it over-requested when demes was small and under-requested badly once
+      ## demes grew past a single base job, because doubling ppbj cannot track
+      ## a total that scales with demes. nodes() already implements GA's real
+      ## rule, master plus demes, so there is nothing here left to decide.
+      ## SubmitSlurmRankCountBaselineTest records what each cluster shape
+      ## emitted before and after.
+      $ranks = (int) $this->data[ 'job' ][ 'procs' ];
 
-      ## single_node: confine the job to one node. The total rank count
-      ## (#SBATCH -n, below) is $ppbj either way, so collapsing the node count
-      ## is the whole of the transformation -- there is no per-node figure in
-      ## the emitted script to recompute.
+      ## single_node: confine the job to one node. The rank count is the same
+      ## either way, so collapsing the node count is the whole of the
+      ## transformation -- there is no per-node figure in the emitted script
+      ## to recompute.
       if ( ! empty( $cfg[ 'single_node' ] ) )
          $nodes = 1;
 
@@ -202,11 +212,11 @@ class submit_slurm extends jobsubmit
                      . " -mgroupcount $mgroupcount $tarfile";
       } else if ( $launcher === 'srun' ) {
          ## srun: task count also from SLURM env, but explicit -n is harmless and clear
-         $launch_cmd = "srun -n $ppbj us_mpi_analysis -walltime $wallmins"
+         $launch_cmd = "srun -n $ranks us_mpi_analysis -walltime $wallmins"
                      . " -mgroupcount $mgroupcount $tarfile";
       } else {
          ## mpirun: explicit -n required
-         $launch_cmd = "mpirun -n $ppbj us_mpi_analysis -walltime $wallmins"
+         $launch_cmd = "mpirun -n $ranks us_mpi_analysis -walltime $wallmins"
                      . " -mgroupcount $mgroupcount $tarfile";
       }
 
@@ -215,7 +225,7 @@ class submit_slurm extends jobsubmit
          . "#SBATCH -p $quename\n"
          . "#SBATCH -J US3_Job_$requestID\n"
          . "#SBATCH -N $nodes\n"
-         . "#SBATCH -n $ppbj\n"
+         . "#SBATCH -n $ranks\n"
          . "#SBATCH -t $walltime\n"
          . "#SBATCH -e $workdir/stderr\n"
          . "#SBATCH -o $workdir/stdout\n"

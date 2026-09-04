@@ -743,6 +743,20 @@ class jobsubmit
       $procs = max( $procs, $ppbj );          ## Minimum procs is procs-per-node
       $procs = min( $procs, $max_procs );    ## Maximum procs depends on cluster
 
+      ## Publish the total rank count alongside the node count.
+      ##
+      ## $procs is the authoritative answer to "how many ranks does this job
+      ## want", and until now it was computed here and discarded: only the
+      ## derived node count survived the return. submit_slurm then had to
+      ## reconstruct a rank count for #SBATCH -n from $ppbj plus its own copy
+      ## of the GA rule, and the two answers disagree (see
+      ## JobsubmitProcsPublicationTest and SubmitSlurmRankCountBaselineTest).
+      ##
+      ## Recording it changes nothing on its own -- no caller reads this key
+      ## yet. It exists so the emitter can consume the number this function
+      ## already decided on instead of deriving a second one.
+      $this->data[ 'job' ][ 'procs' ] = (int) $procs;
+
       $nodes = (int)$procs / $ppn;    ## Return nodes, procs divided by procs-per-node
       $nodes = max( 1, $nodes );
       return $nodes;

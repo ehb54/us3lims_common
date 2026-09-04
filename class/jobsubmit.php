@@ -757,7 +757,18 @@ class jobsubmit
       ## already decided on instead of deriving a second one.
       $this->data[ 'job' ][ 'procs' ] = (int) $procs;
 
-      $nodes = (int)$procs / $ppn;    ## Return nodes, procs divided by procs-per-node
+      ## Nodes is the rank total divided by procs-per-node, rounded UP: a
+      ## total that is not a whole multiple still needs the partial node.
+      ##
+      ## The cast used to sit on $procs, the numerator, rather than on the
+      ## quotient, so it never truncated anything and a fractional count
+      ## reached the batch script verbatim as "#SBATCH -N 2.5", which sbatch
+      ## rejects outright. Moving the cast to the quotient would have been the
+      ## other obvious reading of the original and is also wrong: truncating
+      ## down under-allocates and leaves the last ranks with no node to land
+      ## on. Only GA reaches a non-multiple total, because 2DSA and PCSA size
+      ## to $ppbj exactly.
+      $nodes = (int) ceil( $procs / $ppn );
       $nodes = max( 1, $nodes );
       return $nodes;
    }

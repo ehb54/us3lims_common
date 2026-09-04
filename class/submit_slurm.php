@@ -170,7 +170,28 @@ class submit_slurm extends jobsubmit
       ## rule, master plus demes, so there is nothing here left to decide.
       ## SubmitSlurmRankCountBaselineTest records what each cluster shape
       ## emitted before and after.
-      $ranks = (int) $this->data[ 'job' ][ 'procs' ];
+      ##
+      ## nodes() sizes ONE model group. Parallel-masters runs $mgroupcount of
+      ## them side by side inside a single MPI job, so the rank count scales by
+      ## the group count exactly as the node count does on the line above --
+      ## both axes are the one-group figure times the number of groups.
+      ##
+      ## us_mpi_analysis derives each group's share back out by dividing the
+      ## MPI world size by the group count (us_mpi_analysis.cpp:1057), so
+      ## leaving the rank count unscaled handed every group a fraction of the
+      ## cores the sizing pass had allotted it: a 4-group job on demeler1-local
+      ## reserved 4 nodes, ran 8 ranks, and left its first group a master with
+      ## no workers. The predecessor PBS emitter did scale it -- "#PBS -l
+      ## nodes=$nodes:ppn=$ppbj" multiplies out, and submit_local.php:211 wrote
+      ## that product as $procs = $nodes * $ppbj -- and the scaling was lost in
+      ## translation to Slurm, where -n is a job total rather than a per-node
+      ## figure.
+      ##
+      ## Multiplying is right on fixed-capacity boxes too, and not a double
+      ## count: nodes() divides that box's capacity by the group count
+      ## (jobsubmit.php:687) so procs is already one group's share, and the
+      ## product comes back to the configured maxproc.
+      $ranks = (int) $this->data[ 'job' ][ 'procs' ] * $mgroupcount;
 
       ## single_node: confine the job to one node. The rank count is the same
       ## either way, so collapsing the node count is the whole of the

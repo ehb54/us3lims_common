@@ -811,6 +811,23 @@ class jobsubmit
          $max_groups = min( $max_groups, ( $mciters / 2 ) );
       }
 
+      ## And no more groups than the cluster's core budget can hold.
+      ##
+      ## The groups run side by side inside one MPI job, so the ranks they
+      ## need multiply: submit_slurm emits procs-per-group times the group
+      ## count. Without this ceiling that product can exceed maxproc and the
+      ## scheduler rejects a job the sizing pass believed it had sized to fit.
+      ## A group needs at least a base job's worth of ranks, so maxproc/ppbj
+      ## is how many can fit. The fixed-capacity branch above already applies
+      ## its own, tighter, capacity ceiling; this leaves that one in force.
+      ## ppbj is a new dependency for this function, so treat it as optional:
+      ## a config without it carries no capacity information to apply, and a
+      ## missing key must not turn a sizing question into a fatal.
+      $ppbj = (int) $this->cluster_opt( $cluster, 'ppbj', 0 );
+
+      if ( $ppbj > 0 )
+         $max_groups = min( $max_groups, max( 1, (int) ( $max_procs / $ppbj ) ) );
+
       return $max_groups;
    }
 }

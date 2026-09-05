@@ -18,8 +18,20 @@ $admin_list = [
 ## if UDP messaging from the cluster isn't working, then status updates will be missed
 ## set to zero to disable
 
-$global_max_queue_time_hours = 24;
-$global_max_run_time_hours   = 24;
+$global_max_queue_time_hours = 0;
+$global_max_run_time_hours   = 0;
+
+## abandonment ceiling, in hours since last status update.
+##
+## gridctl defers the stall timers above while a cluster is unreachable. This
+## caps that deferral: past this many hours the job is closed out as a
+## timeout, with autoflow status CLUSTER_UNAVAILABLE so the reason is not
+## confused with a job failure. Zero defers indefinitely.
+##
+## Make it comfortably longer than a routine maintenance window: it should
+## catch a site that is gone, not a site that is down for the afternoon.
+## cluster_probe_outage_verdict() in gridctl explains the policy.
+$global_cluster_abandon_hours = 72;
 
 ## after a job reports COMPLETE, jobmonitor waits for the cluster's (UDP)
 ## "Finished" message before finalizing.  Because UDP is unreliable, it will
@@ -32,32 +44,238 @@ $global_max_run_time_hours   = 24;
 $global_complete_grace_seconds = 600;
 $global_complete_max_seconds   = 21600;
 
-## retry/backoff for transient job submission failures (e.g. sbatch
-## "Socket timed out" under scheduler load)
-## can be overridden per-cluster via 'submit_retries'/'submit_retry_wait'
-## in $cluster_details below
-## backoff doubles each retry, starting from $global_sbatch_submit_retry_wait_seconds
+## sbatch is deliberately submitted once. An SSH failure can happen after
+## Slurm accepted the job but before its ID reached LIMS, so retry/backoff here
+## would risk creating a duplicate. Reconcile an uncertain submission on the
+## scheduler before asking LIMS to submit it again.
 
-$global_sbatch_submit_retries            = 3;
-$global_sbatch_submit_retry_wait_seconds = 5;
+## ---------------------------------------------------------------------------
+## remote execution (class/remote_exec.php)
+##
+## Every ssh/scp call to a cluster is bounded twice over: ssh's own
+## ConnectTimeout bounds the handshake, and timeout(1) bounds total wall clock.
+## Both are needed. ConnectTimeout cannot interrupt a command that connected
+## successfully and is now blocked in uninterruptible I/O on an unresponsive
+## parallel filesystem -- the session is healthy, keepalives are answered, and
+## the command simply never returns. Only the external kill bounds that, and
+## it is the case that hung the job monitors during the 2026 Expanse/Lustre
+## incident.
+##
+## Connect, short-command, and file-copy budgets remain distinct because their
+## safe durations differ. Their defaults, transport retry/backoff, breaker
+## threshold/cooldown, and timeout(1) discovery are implementation policy in
+## class/remote_exec.php, not routine deployment settings.
 
-## define all possible clusters for this server
-## can be overriden in dbinst specific cluster_config.php
+## how long a gfac.cluster_status row stays trustworthy, in seconds.
+## The health probe is a cron job and cron jobs die. Past this age a row is
+## treated as 'down' rather than as its last recorded value, so a cluster that
+## went down while the probe was wedged does not stay selectable in the
+## queue-setup UI on the strength of a stale 'up'.
+##
+## Note that this really is 'down' and not 'unknown': a stale row makes the
+## cluster unselectable, exactly as a probe that found it dead would. That is
+## the intended trade. Refusing a submission to a cluster we have no current
+## information about costs the user seconds; accepting one for a cluster that
+## is actually unreachable costs them the run.
+##
+## Set to a small multiple of the probe's cron interval. Set to zero to
+## disable the age check and trust each row's recorded value however old it
+## is, which is the behaviour this setting was added to end.
+$global_cluster_status_max_age_seconds = 900;
 
-$subhost = 'http://gridfarm005.ucs.indiana.edu';
-$subport = 8080;
+## NOTE: the probe escalation ladder is deliberately NOT configurable.
+## One failed health probe records 'warn'; a second consecutive failure
+## records 'down' (gridctl/cluster_status.php, escalate_probe_failure).
+## The count is fixed at two because the ladder uses the cluster_status.status
+## column itself as its memory, and that holds one bit of history. Any other
+## count needs a separate counter, and the count is not a value a site has a
+## reason to change: how quickly a flapping cluster leaves the queue-setup UI
+## is governed by the probe's cron interval, not by this.
+##
+## Do not add a $global_cluster_down_after_failures key. Nothing reads one, so
+## setting it has no effect and gives no warning.
+##
+## There is likewise no aggregated admin alert per cluster outage. When jobs are abandoned for an unreachable cluster
+## (job_state_machine::abandon_for_outage) the cron sweep in gridctl.php mails
+## the admins once per affected job, and mail_to_admin_once deduplicates only
+## within a single jobmonitor process, which is one process per job. Collapsing
+## those into one alert per cluster is worth doing and is separate work: the
+## alert belongs to the outage, not to a probe count.
+
+## ---------------------------------------------------------------- circuit breaker
+##
+## Shared, cross-process memory of which clusters are not answering. Retry with
+## backoff is right for one call and wrong in aggregate: every queued job has
+## its own jobmonitor process, so during an outage each one independently
+## rediscovers the same dead login node by making its own attempts against it.
+## The breaker lets the first few processes record the outage and everyone else
+## fail fast without touching the network until the cooldown expires.
+##
+## directory for the per-cluster state files. Must be writable by every account
+## that talks to a cluster (the web tier's apache user and the us3 cron/daemon
+## user), or the breaker silently disables itself and behaviour reverts to
+## plain per-process retry -- degraded, but never worse than before it existed.
+##
+## Left commented deliberately. The default is owned by remote_exec::BREAKER_DIR
+## and is '/var/tmp/us3-circuit-breaker'. Restating it here would give it two
+## owners, so a host that had not copied the current template would use a
+## different directory than one that had, and the breaker's cross-process state
+## would silently stop being shared. Uncomment only to move the directory, and
+## then only to a path both accounts can write.
+
+## $global_circuit_breaker_dir = '/var/tmp/us3-circuit-breaker';
+
+## does this install serve a single tenant (a USiaB appliance) or many
+## (a shared LIMS host)?  governs whether the queue views scope rows to this
+## instance's database or show every tenant's jobs to a level-4 admin.
+## this is a property of the deployment, not of any one cluster.
+## set it explicitly. unset means multi-tenant.
+
+$single_tenant_deployment = false;
+
+## which cluster the literal cluster name "localhost" resolves to, for CLI
+## submission (submitone.php).  if unset, "localhost" resolves to nothing and
+## the submission is rejected.
+
+## $default_local_cluster = 'us3iab-node0';
+
+## define all possible clusters for this server.
+##
+## CLUSTER CONFIGURATION COMES FROM THREE LEVELS. This file, the common one,
+## defines what each cluster IS: its hostname, queue, sizing and limits, in
+## $cluster_details below. Which of those clusters a given LIMS instance may
+## actually use is a separate decision, made in $cluster_configuration in a
+## cluster_config.php, and that file is looked for at two levels in turn:
+##
+##   1. dbinst    <instance dir>/cluster_config.php
+##                the instance's own file, if it has one
+##   2. newlims   <web root>/uslims3_newlims/cluster_config.php
+##                the shared default from the registration interface
+##
+## The first file found wins outright. The levels do not merge, because each
+## one assigns $cluster_configuration whole.
+##
+## A cluster is offered, and accepted, only when it is active in BOTH places:
+## 'active' => true here, and 'active' => true in the winning
+## $cluster_configuration. Both lib/utility.php (which builds the queue-setup
+## list) and class/jobsubmit.php (which decides what a submission may reach)
+## apply that intersection, so "not offered" and "not accepted" are one
+## decision rather than two that can drift apart.
+
+## SSH-Slurm cluster config keys:
+##
+##   Required:
+##     name       string  SSH hostname (used as login target if 'login' not set)
+##     login      string  SSH login target, e.g. user@host (overrides name)
+##     workdir    string  base path on submithost; job subdirectory appended at runtime
+##     sshport    int     SSH port (normally 22)
+##     queue      string  Slurm partition name
+##     maxtime    int     maximum walltime in minutes; the computed estimate and
+##                        wall_override are both clamped to it (0 = unlimited:
+##                        no clamp, and 00:00:00 when usemaxtime is set)
+##     ppn        int     procs per node
+##     ppbj       int     procs per base job
+##     maxproc    int     maximum total procs
+##
+##   Environment:
+##     env_script_lines  string  verbatim shell preamble written into the Slurm script
+##                               before the MPI launch line; include module commands,
+##                               PATH/LD_LIBRARY_PATH exports, etc.
+##
+##   MPI launcher:
+##     mpi_launcher  string  'mpirun' (default) | 'srun' | 'ibrun'
+##                           mpirun: standard OpenMPI, used for most clusters
+##                           srun:   Slurm-native; use for Anvil, Expanse
+##                           ibrun:  TACC wrapper; required for Lonestar6, Stampede2
+##
+##   Optional scheduler/resource keys:
+##     usemaxtime    bool  use maxtime directly instead of computed estimate;
+##                         set maxtime=0 for unlimited (emits 00:00:00 to Slurm)
+##     wall_override int   fixed walltime in minutes (overrides computed; ignored if
+##                         usemaxtime; still clamped to maxtime)
+##     ssh_host_key_policy string  'accept-new' (default) trusts an unknown host
+##                         key on first use and still refuses a changed one.
+##                         'yes' requires the key to be installed in advance and
+##                         is right for a provisioned cluster, where first-use
+##                         trust buys nothing. No other value is accepted.
+##     sbatch_directives array  site-specific batch directives, for example a
+##                              --mem-per-cpu or --exclusive policy. Each entry
+##                              is emitted verbatim, so it must be a complete
+##                              single line beginning "#SBATCH " with no
+##                              embedded newline; the emitter rejects anything
+##                              else rather than writing a malformed script.
+##                              Replaces mempercore. A config still carrying
+##                              mempercore and no sbatch_directives keeps
+##                              working: it is read as --mem-per-cpu.
+##
+##   Sizing keys. These are three independent axes -- do not assume setting
+##   one implies another. A co-located appliance with more than one compute
+##   node, for instance, sets fixed_capacity without single_node.
+##
+##     TOPOLOGY
+##     single_node   bool  confine the job to exactly one node (default false).
+##                         This is a constraint on the plan, not a collapse
+##                         applied after sizing: maxproc must not exceed ppn,
+##                         and a plan whose total rank count will not fit on
+##                         one node is refused rather than silently shrunk.
+##
+##     CAPACITY
+##     fixed_capacity    bool  size jobs to this box's own core count rather
+##                             than requesting a share of a large shared
+##                             scheduler (default false). Set this for USiaB
+##                             appliances and small dedicated clusters.
+##     procs_per_mgroup  int   floor on the ranks allotted to one parallel
+##                             model group (default 16), capped by ppn so it
+##                             can never ask for more than a node holds. It
+##                             sets that floor and the GA deme floor. It no
+##                             longer sets the group ceiling: the ceiling is
+##                             maxproc divided by the ranks one intact group
+##                             actually needs, which procs_per_mgroup only
+##                             raises from below. Only consulted when
+##                             fixed_capacity is set.
+##
+##     PERFORMANCE
+##     cg_time_multiplier  float  extra walltime factor for custom-grid (CG)
+##                                methods on this box (default 4.0). Only
+##                                consulted when fixed_capacity is set; a
+##                                fast fixed-capacity box should lower it.
+##
+##   Exception-only remote execution policy. Normal clusters omit this key.
+##   When operational evidence shows one site needs a different wall-clock
+##   budget, add only the affected field. remote_exec validates the name, type,
+##   and safe range before making a connection; retry and breaker policy cannot
+##   be overridden here.
+##
+##     'remote_exec_overrides' => [
+##         'connect_timeout_seconds' => 30,   # allowed 1..300
+##         'command_timeout_seconds' => 180,  # allowed 1..3600
+##         'copy_timeout_seconds'    => 1800, # allowed 1..86400
+##     ]
+##
+##   DEPRECATED:
+##     pmg           bool  parallel Monte Carlo group support enabled
+##     pmgonly       bool  cluster accepts PMG jobs only
 
 $cluster_details =
     [
+     ## -----------------------------------------------------------------------
+     ## Anvil (Purdue/RCAC)
+     ## login: x-us3@anvil.rcac.purdue.edu  — doc-supported (Anvil ACCESS allocation)
+     ## workdir: /anvil/projects/x-mcb070039n/us3 — project allocation path; subdirectory
+     ##          'work' or similar must exist and be writable — NEEDS MANUAL VERIFICATION
+     ## mpi_launcher: srun — Anvil docs explicitly show srun for OpenMPI jobs
+     ## env_script_lines: Anvil is module-based; exact UltraScan module names for the
+     ##   x-us3 account are not in public docs. Structure should be:
+     ##     module purge
+     ##     module load <openmpi-module>
+     ##     module load <qt-module>        (if installed as a module)
+     ##     export PATH=...               (if us_mpi_analysis is not in a module)
+     ##   NEEDS MANUAL VERIFICATION before activating.
+     ## -----------------------------------------------------------------------
      'anvil' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'anvil.rcac.purdue.edu'
          ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
@@ -65,16 +283,13 @@ $cluster_details =
          ,'ppn'                => 32
          ,'ppbj'               => 32
          ,'maxproc'            => 32
+         ,'mpi_launcher'       => 'srun'
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for x-us3 account"
      ]
      ,'anvil-bigmem' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'anvil.rcac.purdue.edu'
          ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
@@ -82,18 +297,14 @@ $cluster_details =
          ,'ppn'                => 32
          ,'ppbj'               => 32
          ,'maxproc'            => 32
-         ,'compute_memoryreq'  => true
-         ,'mempercore'         => 3000
+         ,'sbatch_directives'  => [ '#SBATCH --mem-per-cpu=3000' ]
+         ,'mpi_launcher'       => 'srun'
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for x-us3 account"
      ]
      ,'anvil-gamc' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'anvil.rcac.purdue.edu'
          ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
          ,'sshport'            => 22
          ,'queue'              => 'wholenode'
@@ -103,16 +314,13 @@ $cluster_details =
          ,'maxproc'            => 2048
          ,'pmg'                => true
          ,'pmgonly'            => true
+         ,'mpi_launcher'       => 'srun'
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for x-us3 account"
      ]
      ,'anvil-gamc-bigmem' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'anvil.rcac.purdue.edu'
          ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
          ,'sshport'            => 22
          ,'queue'              => 'wholenode'
@@ -122,16 +330,25 @@ $cluster_details =
          ,'maxproc'            => 2048
          ,'pmg'                => true
          ,'pmgonly'            => true
+         ,'mpi_launcher'       => 'srun'
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for x-us3 account"
      ]
+     ## -----------------------------------------------------------------------
+     ## Bridges-2 (PSC)
+     ## login: us3@bridges2.psc.edu — PSC login alias; doc-supported
+     ## workdir: /ocean/projects/mcb210002p/us3/airavata-workdirs — verified
+     ##          readable/writable from both LIMS submission origins on 2026-08-27.
+     ##          The historical directory name is retained until an approved remote
+     ##          directory migration is completed; changing only this template breaks staging.
+     ## mpi_launcher: mpirun — PSC docs support mpirun; no ibrun required
+     ## env_script_lines: Bridges-2 is module-based. Exact module names for the us3
+     ##   account not in public docs.
+     ##   NEEDS MANUAL VERIFICATION before activating.
+     ## -----------------------------------------------------------------------
      ,'bridges2' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'bridges2.psc.edu'
          ,'login'              => 'us3@bridges2.psc.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/ocean/projects/mcb210002p/us3/airavata-workdirs'
          ,'sshport'            => 22
          ,'queue'              => 'RM-shared'
@@ -139,16 +356,12 @@ $cluster_details =
          ,'ppn'                => 32
          ,'ppbj'               => 32
          ,'maxproc'            => 1024
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for us3 account"
      ]
      ,'bridges2-gamc' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'bridges2.psc.edu'
          ,'login'              => 'us3@bridges2.psc.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/ocean/projects/mcb210002p/us3/airavata-workdirs'
          ,'sshport'            => 22
          ,'queue'              => 'RM'
@@ -158,15 +371,18 @@ $cluster_details =
          ,'maxproc'            => 1024
          ,'pmg'                => true
          ,'pmgonly'            => true
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for us3 account"
      ]
+     ## -----------------------------------------------------------------------
+     ## Chinook (U Montana HPC)
+     ## login: falls back to name (chinook.hs.umt.edu) — no login key needed
+     ## workdir: /home/us3/lims/work/ — us3 home, known working
+     ## mpi_launcher: mpirun (default)
+     ## env_script_lines: known working config
+     ## -----------------------------------------------------------------------
      ,'chinook-local' => [
          'active'              => false
-         ,'airavata'           => false
          ,'name'               => 'chinook.hs.umt.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'slurm'
-         ,'httpport'           => $subport
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'batch'
@@ -174,17 +390,52 @@ $cluster_details =
          ,'ppn'                => 64
          ,'ppbj'               => 8
          ,'maxproc'            => 64
-
+         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/home/us3/cluster/lib:/opt/qt/lib:\$LD_LIBRARY_PATH\nexport PATH=/home/us3/cluster/bin:\$PATH"
      ]
+     ,'demeler1-local' => [
+         'active'              => false
+         ,'name'               => 'demeler1.uleth.ca'
+         ,'login'              => 'us3@demeler1.uleth.ca'
+         ,'workdir'            => '/home/us3/lims/work/'
+         ,'sshport'            => 22
+         ,'queue'              => 'batch'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 128
+         ,'ppbj'               => 8
+         ,'maxproc'            => 128
+         ,'pmg'                => true
+         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/home/us3/cluster/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/home/us3/cluster/bin:\$PATH"
+     ]
+     ,'demeler9-local' => [
+         'active'              => false
+         ,'name'               => 'demeler9.uleth.ca'
+         ,'login'              => 'us3@demeler9.uleth.ca'
+         ,'workdir'            => '/home/us3/lims/work/'
+         ,'sshport'            => 22
+         ,'queue'              => 'batch'
+         ,'maxtime'            => 5760
+         ,'ppn'                => 128
+         ,'ppbj'               => 8
+         ,'maxproc'            => 128
+         ,'pmg'                => true
+         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
+     ]
+     ## -----------------------------------------------------------------------
+     ## Expanse (SDSC)
+     ## login: us3@login.expanse.sdsc.edu — SDSC docs confirm this login host
+     ## workdir: /expanse/lustre/scratch/us3/temp_project/airavata-workingdirs —
+     ##          verified readable/writable from both LIMS submission origins on
+     ##          2026-08-27. The historical directory name is retained until an
+     ##          approved remote migration; the proposed /work path does not exist.
+     ## mpi_launcher: srun — SDSC Expanse docs recommend srun for MPI inside Slurm jobs
+     ## env_script_lines: `module load ultrascan3/4.0` was verified on 2026-08-27
+     ##   to resolve both /home/us3/expanse/bin/us_mpi_analysis and srun. Do not
+     ##   prepend `module purge`: doing so removes the Slurm launcher from PATH.
+     ## -----------------------------------------------------------------------
      ,'expanse' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'expanse.sdsc.edu'
          ,'login'              => 'us3@login.expanse.sdsc.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
@@ -192,17 +443,13 @@ $cluster_details =
          ,'ppn'                => 32
          ,'ppbj'               => 32
          ,'maxproc'            => 128
-         ,'compute_memoryreq'  => true
+         ,'mpi_launcher'       => 'srun'
+         ,'env_script_lines'   => "module load ultrascan3/4.0"
      ]
      ,'expanse-bigmem' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'expanse.sdsc.edu'
          ,'login'              => 'us3@login.expanse.sdsc.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
@@ -210,18 +457,14 @@ $cluster_details =
          ,'ppn'                => 32
          ,'ppbj'               => 32
          ,'maxproc'            => 32
-         ,'compute_memoryreq'  => true
-         ,'mempercore'         => 3000
+         ,'sbatch_directives'  => [ '#SBATCH --mem-per-cpu=3000' ]
+         ,'mpi_launcher'       => 'srun'
+         ,'env_script_lines'   => "module load ultrascan3/4.0"
      ]
      ,'expanse-gamc' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'expanse.sdsc.edu'
          ,'login'              => 'us3@login.expanse.sdsc.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
          ,'sshport'            => 22
          ,'queue'              => 'compute'
@@ -229,57 +472,25 @@ $cluster_details =
          ,'ppn'                => 128
          ,'ppbj'               => 32
          ,'maxproc'            => 1024
-         ,'maxmem'             => 249000
          ,'pmg'                => true
          ,'pmgonly'            => true
-         ,'compute_memoryreq'  => true
+         ,'mpi_launcher'       => 'srun'
+         ,'env_script_lines'   => "module load ultrascan3/4.0"
      ]
-     ,'demeler1-local' => [
-         'active'              => false
-         ,'airavata'           => false
-         ,'name'               => 'demeler1.uleth.ca'
-         ,'login'              => 'us3@demeler1.uleth.ca'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'slurm'
-         ,'httpport'           => $subport
-         ,'workdir'            => '/home/us3/lims/work/'
-         ,'sshport'            => 22
-         ,'queue'              => 'batch'
-         ,'maxtime'            => 5760
-         ,'ppn'                => 128
-         ,'ppbj'               => 8
-         ,'maxproc'            => 128
-         ,'pmg'                => true
-
-     ]
-     ,'demeler9-local' => [
-         'active'              => false
-         ,'airavata'           => false
-         ,'name'               => 'demeler9.uleth.ca'
-         ,'login'              => 'us3@demeler9.uleth.ca'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'slurm'
-         ,'httpport'           => $subport
-         ,'workdir'            => '/home/us3/lims/work/'
-         ,'sshport'            => 22
-         ,'queue'              => 'batch'
-         ,'maxtime'            => 5760
-         ,'ppn'                => 128
-         ,'ppbj'               => 8
-         ,'maxproc'            => 128
-         ,'pmg'                => true
-     ]
+     ## -----------------------------------------------------------------------
+     ## Lonestar6 (TACC)
+     ## login: us3@ls6.tacc.utexas.edu — TACC docs confirm this login host
+     ## workdir: /work/01623/us3/ls6/us3 — TACC $WORK filesystem, allocation-based path;
+     ##          NEEDS MANUAL VERIFICATION (exact path under allocation)
+     ## mpi_launcher: ibrun — required by TACC; ibrun reads SLURM_NTASKS from #SBATCH -n
+     ## env_script_lines: TACC uses Lmod. ibrun does not need explicit MPI path exports
+     ##   (it's a wrapper). UltraScan binary/Qt paths will be needed.
+     ##   NEEDS MANUAL VERIFICATION before activating.
+     ## -----------------------------------------------------------------------
      ,'lonestar6-gamc' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'ls6.tacc.utexas.edu'
          ,'login'              => 'us3@ls6.tacc.utexas.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
          ,'workdir'            => '/work/01623/us3/ls6/us3'
          ,'sshport'            => 22
          ,'queue'              => 'normal'
@@ -289,16 +500,18 @@ $cluster_details =
          ,'maxproc'            => 8192
          ,'pmg'                => true
          ,'pmgonly'            => true
+         ,'mpi_launcher'       => 'ibrun'
+         ,'env_script_lines'   => "module purge\n## TODO: load correct Qt/UltraScan modules; ibrun does not need explicit MPI exports"
      ]
+     ## -----------------------------------------------------------------------
+     ## Stampede2 (TACC) — DECOMMISSIONED January 2024
+     ## Kept as a config record; must not be activated.
+     ## -----------------------------------------------------------------------
      ,'stampede2' => [
          'active'              => false
-         ,'airavata'           => true
          ,'name'               => 'stampede2.tacc.xsede.org'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'http'
-         ,'httpport'           => $subport
-         ,'workdir'            => '/scratch/01623/us3/airavata-workingdirs'
+         ,'login'              => 'us3@stampede2.tacc.xsede.org'
+         ,'workdir'            => '/scratch/01623/us3/work'
          ,'sshport'            => 22
          ,'queue'              => 'skx-normal'
          ,'maxtime'            => 2880
@@ -307,16 +520,16 @@ $cluster_details =
          ,'maxproc'            => 6144
          ,'pmg'                => true
          ,'pmgonly'            => true
+         ,'mpi_launcher'       => 'ibrun'
+         ,'env_script_lines'   => ""  ## DECOMMISSIONED — do not activate
      ]
+     ## -----------------------------------------------------------------------
+     ## U Montana (Grizzly)
+     ## -----------------------------------------------------------------------
      ,'umontana-local' => [
          'active'              => false
-         ,'airavata'           => false
          ,'name'               => 'login.gscc.umt.edu'
          ,'login'              => 'bd142854e@login.gscc.umt.edu'
-         ,'submithost'         => $subhost
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'slurm'
-         ,'httpport'           => $subport
          ,'workdir'            => '/home/bd142854e/cluster/work/'
          ,'sshport'            => 22
          ,'queue'              => 'griz_partition'
@@ -324,81 +537,66 @@ $cluster_details =
          ,'ppn'                => 72
          ,'ppbj'               => 36
          ,'maxproc'            => 144
+         ,'env_script_lines'   => "module use /home/bd142854e/local/modulefiles\nmodule load rocks/openmpi\nmodule load qt5\nexport LD_LIBRARY_PATH=/home/bd142854e/cluster/lib:\$LD_LIBRARY_PATH\nexport PATH=/home/bd142854e/cluster/bin:\$PATH"
      ]
+     ## -----------------------------------------------------------------------
+     ## USiaB appliance clusters
+     ## -----------------------------------------------------------------------
      ,'us3iab-devel' => [
          'active'              => false
-         ,'airavata'           => false
          ,'name'               => 'us3iab-devel.attlocal.net'
-         ,'submithost'         => 'localhost'
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'pbs'
-         ,'httpport'           => $subport
+         ,'login'              => 'us3@us3iab-devel.attlocal.net'
+         ,'fixed_capacity'     => true
          ,'workdir'            => '/export/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'normal'
-         ,'maxtime'            => 2160
+         ,'maxtime'            => 0
          ,'ppn'                => 8
          ,'ppbj'               => 8
-         ,'maxproc'            => 16
+         ,'maxproc'            => 8
+         ,'single_node'        => true
+         ,'usemaxtime'         => true
+         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
      ]
+     ## ppn/ppbj/maxproc below are shipped defaults, sized for the smallest
+     ## appliance. Set them to the node's real capacity at install time and
+     ## they stay set: nothing rewrites this file afterwards. ppn must equal
+     ## the node's Slurm CPUTot, or the scheduler refuses work sized past
+     ## what it registered.
      ,'us3iab-node0' => [
          'active'              => true
-         ,'airavata'           => false
          ,'name'               => 'us3iab-node0.localhost'
-         ,'submithost'         => 'localhost'
-         ,'localhost'          => true
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'slurm'
-         ,'httpport'           => $subport
+         ,'login'              => 'us3@us3iab-node0'
+         ,'ssh_host_key_policy' => 'yes'
+         ,'fixed_capacity'     => true
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'batch'
-         ,'maxtime'            => 60000
+         ,'maxtime'            => 0
          ,'ppn'                => 8
          ,'ppbj'               => 8
-         ,'maxproc'            => 16
+         ,'maxproc'            => 8
          ,'pmg'                => true
          ,'usemaxtime'         => true
+         ,'single_node'        => true
+         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
      ]
      ,'us3iab-node1' => [
          'active'              => false
-         ,'airavata'           => false
          ,'name'               => 'us3iab-node1.localhost'
-         ,'queue'              => 'batch'
-         ,'submithost'         => 'localhost'
-         ,'userdn'             => '/C=US/O=National Center for Supercomputing Applications/CN=Ultrascan3 Community User'
-         ,'submittype'         => 'slurm'
-         ,'httpport'           => $subport
+         ,'login'              => 'us3@us3iab-node1'
+         ,'fixed_capacity'     => true
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'normal'
-         ,'maxtime'            => 2160
+         ,'maxtime'            => 0
          ,'ppn'                => 8
          ,'ppbj'               => 8
-         ,'maxproc'            => 16
+         ,'maxproc'            => 8
          ,'pmg'                => true
-     ]
-     ,'metascheduler' => [
-         'active'              => false
-         ,'name'               => 'metascheduler'
-         ,'airavata'           => true
-         ,"clusters"           => [
-             "anvil"
-             ,"expanse"
-             ]
-         ,'pmg'                => false
-         ,'pmgonly'            => false
-     ]
-     ,'metascheduler-gamc' => [
-         'active'              => false
-         ,'name'               => 'metascheduler-gamc'
-         ,'airavata'           => true
-         ,"clusters"           => [
-             "anvil-gamc"
-             ,"expanse-gamc"
-             ]
-         ,'pmg'                => true
-         ,'pmgonly'            => true
+         ,'usemaxtime'         => true
+         ,'single_node'        => true
+         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
      ]
 
     ];

@@ -44,11 +44,9 @@ class submit_slurm extends jobsubmit
       chdir( $this->data[ 'job' ][ 'directory' ] );
 
       if ( ! $this->stage_files() ) {
-         ## A staging failure is a submission failure and is recorded as one,
-         ## exactly as an exhausted sbatch retry is. Without the write,
-         ## autoflowAnalysis keeps whatever status it had and a request whose
-         ## files never reached the cluster is indistinguishable from one still
-         ## waiting to be picked up.
+         ## Without this write, autoflowAnalysis keeps its old status and a
+         ## request whose files never reached the cluster looks identical to
+         ## one still waiting to be picked up.
          $this->message[] = "ERROR: stage_files failed - submission aborted";
          $this->markAutoflowSubmitFailed( $this->stage_error !== '' ? $this->stage_error : 'staging failed' );
          chdir( $savedir );
@@ -77,15 +75,11 @@ class submit_slurm extends jobsubmit
     * locally, then copy both files to the submithost (scp or local cp).
     *
     * Both steps are idempotent -- mkdir -p and a whole-file copy into a
-    * per-request directory -- so remote_exec is allowed to retry them through
-    * a transport fault. This is the step that was failing during the 2026
-    * Expanse SFTP timeouts, and it had no retry at all: one timed-out copy
-    * aborted the submission outright.
+    * per-request directory -- so remote_exec may retry them through a
+    * transport fault.
     *
-    * Returns true on success, false if any step fails, with the failure
-    * already recorded in $this->message AND persisted by the caller -- see
-    * submit(), which must not let a staging failure vanish into a message
-    * array nobody reads.
+    * Returns true on success, false if any step fails. The caller must
+    * persist the failure, not just leave it in $this->message.
     */
    public function stage_files()
    {
@@ -106,6 +100,12 @@ class submit_slurm extends jobsubmit
 
       ## Generate slurm script locally
       $slufile = $this->write_slurm_script( $cluster, $requestID, $workdir, $tarfile );
+      if ( $slufile === false ) {
+         ## The specific reason is already in message[]; this is the
+         ## autoflow failure category.
+         $this->stage_error = 'resource plan rejected';
+         return false;
+      }
 
       ## Copy input tar and slurm script to the working directory.
       $cp = $this->scp( $cluster, [ $tarfile, $slufile ], $workdir, [ 'label' => 'stage:copy' ] );
@@ -145,60 +145,17 @@ class submit_slurm extends jobsubmit
    {
       elog2( "write_slurm_script: cluster=$cluster queue=" . $this->grid[ $cluster ][ 'queue' ] );
 
-      ## Compute the parallel group count, the node count and the rank count
-      ## FIRST. nodes() is the sizing pass: it rewrites grid[ppn]/[ppbj]/
-      ## [maxproc] in place for fixed-capacity clusters and publishes the
-      ## total rank count it settled on, so everything below has to be read
-      ## after it has run.
-      $mgroupcount = $this->resolve_mgroupcount();
-      $nodes       = $this->nodes() * $mgroupcount;
-      $this->data[ 'job' ][ 'mgroupcount' ] = $mgroupcount;
+      ## Do not recompute any of the plan's quantities here.
+      $plan = $this->resource_plan();
+      if ( $plan === false )
+         return false;
 
-      $cfg     = $this->grid[ $cluster ];
-      $quename = $cfg[ 'queue' ];
-
-      ## The rank count comes from the sizing pass, not from a second
-      ## derivation here.
-      ##
-      ## This function used to build its own from grid[ppbj] plus a copy of
-      ## the GA rule ("double procs-per-base-job if under one model group"),
-      ## which dated from 2020 and the first Slurm script writer. That figure
-      ## disagreed with the one nodes() had just computed, in both directions:
-      ## it over-requested when demes was small and under-requested badly once
-      ## demes grew past a single base job, because doubling ppbj cannot track
-      ## a total that scales with demes. nodes() already implements GA's real
-      ## rule, master plus demes, so there is nothing here left to decide.
-      ## SubmitSlurmRankCountBaselineTest records what each cluster shape
-      ## emitted before and after.
-      ##
-      ## nodes() sizes ONE model group. Parallel-masters runs $mgroupcount of
-      ## them side by side inside a single MPI job, so the rank count scales by
-      ## the group count exactly as the node count does on the line above --
-      ## both axes are the one-group figure times the number of groups.
-      ##
-      ## us_mpi_analysis derives each group's share back out by dividing the
-      ## MPI world size by the group count (us_mpi_analysis.cpp:1057), so
-      ## leaving the rank count unscaled handed every group a fraction of the
-      ## cores the sizing pass had allotted it: a 4-group job on demeler1-local
-      ## reserved 4 nodes, ran 8 ranks, and left its first group a master with
-      ## no workers. The predecessor PBS emitter did scale it -- "#PBS -l
-      ## nodes=$nodes:ppn=$ppbj" multiplies out, and submit_local.php:211 wrote
-      ## that product as $procs = $nodes * $ppbj -- and the scaling was lost in
-      ## translation to Slurm, where -n is a job total rather than a per-node
-      ## figure.
-      ##
-      ## Multiplying is right on fixed-capacity boxes too, and not a double
-      ## count: nodes() divides that box's capacity by the group count
-      ## (jobsubmit.php:687) so procs is already one group's share, and the
-      ## product comes back to the configured maxproc.
-      $ranks = (int) $this->data[ 'job' ][ 'procs' ] * $mgroupcount;
-
-      ## single_node: confine the job to one node. The rank count is the same
-      ## either way, so collapsing the node count is the whole of the
-      ## transformation -- there is no per-node figure in the emitted script
-      ## to recompute.
-      if ( ! empty( $cfg[ 'single_node' ] ) )
-         $nodes = 1;
+      $cfg         = $this->grid[ $cluster ];
+      $quename     = $cfg[ 'queue' ];
+      $mgroupcount = $plan[ 'resolved_groups' ];
+      $nodes       = $plan[ 'node_count' ];
+      $ranks       = $plan[ 'total_tasks' ];
+      $tasks_per_node = $plan[ 'tasks_per_node' ];
 
       ## Resolve wall time
       list( $walltime, $wallmins ) = $this->resolve_walltime( $cfg );
@@ -206,10 +163,26 @@ class submit_slurm extends jobsubmit
       ## Build environment setup lines from config
       $env_lines = $this->build_env_lines( $cfg );
 
-      ## Optional sbatch directives
-      $mempercore_line = isset( $cfg[ 'mempercore' ] )
-         ? "#SBATCH --mem-per-cpu=" . $cfg[ 'mempercore' ]
-         : "";
+      ## Entries are complete, single-line #SBATCH directives.
+      $directives = (array)( $cfg[ 'sbatch_directives' ] ?? [] );
+
+      ## Deployed configs predate this key and still carry mempercore. They
+      ## are hand maintained, so nothing migrates them; honour the old key
+      ## when no directive list is present.
+      if ( ! $directives  &&  isset( $cfg[ 'mempercore' ] ) )
+         $directives = [ '#SBATCH --mem-per-cpu=' . (int) $cfg[ 'mempercore' ] ];
+
+      $site_directives = '';
+      foreach ( $directives as $directive )
+      {
+         if ( ! is_string( $directive )
+              || strpos( $directive, "\n" ) !== false
+              || strpos( $directive, "\r" ) !== false
+              || strpos( $directive, '#SBATCH ' ) !== 0 )
+            throw new UnexpectedValueException( "invalid sbatch directive for cluster $cluster" );
+
+         $site_directives .= "$directive\n";
+      }
 
       $priority_nice = priority_nice_string();
       if ( strlen( $priority_nice ) )
@@ -247,10 +220,11 @@ class submit_slurm extends jobsubmit
          . "#SBATCH -J US3_Job_$requestID\n"
          . "#SBATCH -N $nodes\n"
          . "#SBATCH -n $ranks\n"
+         . "#SBATCH --ntasks-per-node=$tasks_per_node\n"
          . "#SBATCH -t $walltime\n"
          . "#SBATCH -e $workdir/stderr\n"
          . "#SBATCH -o $workdir/stdout\n"
-         . ( $mempercore_line ? "$mempercore_line\n" : "" )
+         . $site_directives
          . ( $priority_nice   ? "$priority_nice\n"   : "" )
          . $env_lines
          . "export UCX_LOG_LEVEL=error\n"
@@ -260,9 +234,6 @@ class submit_slurm extends jobsubmit
          . "$launch_cmd\n";
 
       ## Held for update_db(), which writes it to HPCAnalysisResult.jobfile.
-      ## The key was 'pbsfile' back when this class had a PBS sibling emitter;
-      ## it has only ever held whatever script the emitter produced, which is
-      ## now always Slurm.
       $this->data[ 'jobfile' ] = $script;
 
       $filename = "us3.slurm";
@@ -422,13 +393,10 @@ class submit_slurm extends jobsubmit
    ## Write submission record to instance DB and global gfac DB, then launch
    ## jobmonitor. Returns false if any of that failed.
    ##
-   ## Every failure here is reported with an "ERROR:" prefix because that is
-   ## what the submit pages scan for when deciding whether to warn the user
-   ## (2DSA_2.php and its siblings match /^ERROR:/ against get_messages()).
-   ## Without the prefix these read as ordinary progress notes, so a job that
-   ## reached the cluster but was never recorded rendered as a clean success --
-   ## and an unrecorded job is invisible to jobmonitor, to the queue views, and
-   ## to cleanup.
+   ## The "ERROR:" prefix on every failure here is load bearing: the submit
+   ## pages match /^ERROR:/ against get_messages() to decide whether to warn
+   ## the user (2DSA_2.php and siblings). Without it a job that reached the
+   ## cluster but was never recorded renders as a clean success.
    public function update_db()
    {
       $ok = true;
@@ -510,25 +478,36 @@ class submit_slurm extends jobsubmit
       ## and the playbooks put us3 in no sudoers file, so a sudo hop fails
       ## there with "us3 is not in the sudoers file" and the monitor never
       ## starts. Sudo is only for a deployment whose web tier runs as some
-      ## other user.
-      $php     = PHP_BINARY ?: '/usr/bin/php';
-      $monitor = "/home/us3/lims/bin/jobmonitor/jobmonitor.php";
-      $args    = "$dbname $slurm_id $requestID";
+      ## other user, and that branch keeps a literal /usr/bin/php because the
+      ## path resolves on the target user's side of the hop.
+      $monitor_host = getenv( 'US3_JOBMONITOR_SSH_HOST' );
 
-      $whoami  = function_exists( 'posix_geteuid' ) && function_exists( 'posix_getpwuid' )
-                 ? ( posix_getpwuid( posix_geteuid() )[ 'name' ] ?? '' )
-                 : '';
+      if ( $monitor_host !== false && $monitor_host !== '' ) {
+         ## The deployment's own LIMS host, never the job's compute cluster.
+         $res = $this->launch_monitor_over_ssh( $monitor_host, $dbname, $slurm_id, $requestID );
+         $exit_code = $res[ 'class' ] === remote_exec::OK ? 0 : 1;
+         if ( $exit_code !== 0 )
+            $this->message[] = 'ERROR: monitor transport failed: ' . $res[ 'class' ];
+      } else {
+         $php     = escapeshellarg( $this->monitor_php_binary() );
+         $monitor = "/home/us3/lims/bin/jobmonitor/jobmonitor.php";
+         $args    = "$dbname $slurm_id $requestID";
 
-      if ( $whoami === 'us3' || $whoami === '' )
-         $cmd = "nice -15 $php $monitor $args 2>&1";
-      else
-         ## `nice` must wrap `sudo`, not the reverse: a NOPASSWD rule matches
-         ## sudo's direct target command, so `sudo -u us3 nice ... php` would
-         ## make nice the target and fail to match. Niceness is inherited
-         ## across exec(), so the outer process has the same effect.
-         $cmd = "nice -15 sudo -u us3 /usr/bin/php $monitor $args 2>&1";
+         $whoami  = function_exists( 'posix_geteuid' ) && function_exists( 'posix_getpwuid' )
+                    ? ( posix_getpwuid( posix_geteuid() )[ 'name' ] ?? '' )
+                    : '';
 
-      exec( $cmd, $null, $exit_code );
+         if ( $whoami === 'us3' || $whoami === '' )
+            $cmd = "nice -15 $php $monitor $args 2>&1";
+         else
+            ## `nice` must wrap `sudo`, not the reverse: a NOPASSWD rule matches
+            ## sudo's direct target command, so `sudo -u us3 nice ... php` would
+            ## make nice the target and fail to match. Niceness is inherited
+            ## across exec(), so the outer process has the same effect.
+            $cmd = "nice -15 sudo -u us3 /usr/bin/php $monitor $args 2>&1";
+
+         exec( $cmd, $null, $exit_code );
+      }
 
       if ( $exit_code !== 0 ) {
          ## The job is on the cluster and recorded, but nothing is watching it,
@@ -544,6 +523,43 @@ class submit_slurm extends jobsubmit
    }
 
    public function close_transport() { /* no-op: no persistent transport */ }
+
+   ## Under php-fpm, PHP_BINARY names the fpm binary, which cannot run a
+   ## script. PHP_BINDIR is the bin directory in either SAPI. The arguments
+   ## let the tests drive both cases.
+   protected function monitor_php_binary( $sapi = PHP_SAPI, $binary = PHP_BINARY,
+                                          $bindir = PHP_BINDIR )
+   {
+      return $sapi === 'cli' && $binary !== '' ? $binary : $bindir . '/php';
+   }
+
+   ## For an appliance whose web pool is confined by SELinux and cannot spawn
+   ## the collector directly.
+   ##
+   ## This returns promptly only because jobmonitor.php double-forks, calls
+   ## posix_setsid() and closes its streams: ssh waits for the channel to
+   ## close, so a jobmonitor run with $nofork set would block here until
+   ## remote_exec's timeout and report a successful launch as a failure.
+   ##
+   ## Host key policy is 'yes' because this host's key is installed at
+   ## provisioning time, so first-use trust would buy nothing.
+   protected function launch_monitor_over_ssh( $host, $dbname, $jobID, $requestID )
+   {
+      if ( ! preg_match( '/^[A-Za-z0-9][A-Za-z0-9._-]*$/D', $host ) )
+         throw new InvalidArgumentException( 'Invalid US3_JOBMONITOR_SSH_HOST' );
+      $rx = new remote_exec( 'lims-jobmonitor', [
+         'lims-jobmonitor' => [ 'name' => $host, 'login' => 'us3@' . $host, 'sshport' => 22,
+                               'ssh_host_key_policy' => 'yes' ],
+      ], 'elog2' );
+      $rx->set_executor( function ( $cmd, &$output, &$exit_code ) {
+         $this->runExec( $cmd, $output, $exit_code );
+      } );
+      $cmd = '/usr/bin/php /home/us3/lims/bin/jobmonitor/jobmonitor.php '
+           . escapeshellarg( $dbname ) . ' ' . escapeshellarg( (string) $jobID )
+           . ' ' . escapeshellarg( (string) $requestID );
+      ## A lost response may follow a successful launch. Do not launch twice.
+      return $rx->run( $cmd, [ 'retries' => 0 ] );
+   }
 
    ## -------------------------------------------------------------------------
    ## Private helpers
@@ -578,11 +594,10 @@ class submit_slurm extends jobsubmit
     * Build a remote_exec for one cluster, wired to this object's own exec
     * seam so a test double's scripted responses cover the whole call chain.
     *
-    * Every ssh/scp this class performs goes through here. Nothing in this
-    * file should ever build an "ssh ..." string again: the timeout budget,
-    * the hardening options, and the failure classification all live in
-    * remote_exec, and a second copy of them is how the pre-2026 code ended up
-    * with four mutually inconsistent notions of what a failed call meant.
+    * Every ssh/scp this class performs goes through here. Do not build an
+    * "ssh ..." string in this file: the timeout budget, hardening options
+    * and failure classification all live in remote_exec, and a second copy
+    * of them drifts.
     */
    protected function remote( $cluster )
    {
@@ -693,13 +708,10 @@ class submit_slurm extends jobsubmit
    ##   2. wall_override > 0 → use that fixed value in minutes
    ##   3. otherwise         → use the computed estimate from maxwall()
    ##
-   ## In cases 2 and 3 the result is clamped to the cluster's configured
-   ## maxtime (when maxtime > 0). Without the clamp a long estimate -- or a
-   ## wall_override left over from a cluster whose queue limit has since been
-   ## lowered -- is handed to sbatch unchanged and the scheduler rejects the
-   ## job outright, which surfaces to the user as a submission failure rather
-   ## than a job that runs up to the queue limit. maxtime = 0 means the
-   ## cluster advertises no limit, so nothing is clamped.
+   ## Cases 2 and 3 are clamped to maxtime when it is > 0: an unclamped
+   ## request past the queue limit is rejected by sbatch outright, which the
+   ## user sees as a failed submission rather than a shortened job.
+   ## maxtime = 0 means no advertised limit, so nothing is clamped.
    private function resolve_walltime( $cfg )
    {
       ## usemaxtime: skip computed estimate, use the configured cluster maximum
@@ -743,10 +755,4 @@ class submit_slurm extends jobsubmit
       return $block !== '' ? "\n" . $block . "\n\n" : "\n";
    }
 
-   ## Clamp mgroupcount to the computed maximum
-   private function resolve_mgroupcount()
-   {
-      $requested = $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] ?? 1;
-      return min( $this->max_mgroupcount(), (int) $requested );
-   }
 }

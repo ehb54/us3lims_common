@@ -601,6 +601,8 @@ class remote_exec
     * StrictHostKeyChecking=accept-new
     *                    trust on first use, but still refuse a CHANGED key.
     *                    'no' would accept a swapped host key silently.
+    *                    A provisioned cluster can require preinstalled trust
+    *                    with ssh_host_key_policy='yes'; SSH and SCP agree.
     */
    private function ssh_opts()
    {
@@ -612,7 +614,7 @@ class remote_exec
            . ' -o ConnectTimeout=' . (int) $connect
            . ' -o ServerAliveInterval=15'
            . ' -o ServerAliveCountMax=3'
-           . ' -o StrictHostKeyChecking=accept-new';
+           . ' -o StrictHostKeyChecking=' . $this->host_key_policy();
    }
 
    ## scp takes the same options but spells the port -P, and must not be given -x.
@@ -626,7 +628,15 @@ class remote_exec
            . ' -o ConnectTimeout=' . (int) $connect
            . ' -o ServerAliveInterval=15'
            . ' -o ServerAliveCountMax=3'
-           . ' -o StrictHostKeyChecking=accept-new';
+           . ' -o StrictHostKeyChecking=' . $this->host_key_policy();
+   }
+
+   private function host_key_policy()
+   {
+      $value = $this->details[ 'ssh_host_key_policy' ] ?? 'accept-new';
+      if ( ! in_array( $value, [ 'yes', 'accept-new' ], true ) )
+         throw new InvalidArgumentException( 'ssh_host_key_policy must be yes or accept-new' );
+      return $value;
    }
 
    /**

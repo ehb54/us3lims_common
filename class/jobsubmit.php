@@ -651,126 +651,168 @@ class jobsubmit
       return (int)$time;
    }
 
-   function nodes()
+   ## Size ONE intact analysis group. Capacity does not clamp the answer: a
+   ## group too large for the cluster is refused by the caller, because
+   ## shrinking it changes the analysis that was asked for.
+   ##
+   ## Not pure: the GA demes==1 branch backfills grid[ppbj]. Re-running
+   ## converges on the same value, so the repeat calls are safe.
+   protected function tasks_per_group_plan()
    {
-      $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      ## Sizing is driven by two independent config axes:
-      ##   fixed_capacity - size the job to this box's core count instead of
-      ##                    requesting a share of a large shared scheduler
-      ##   single_node    - confine the job to exactly one node
-      ## They are orthogonal: a co-located appliance with several compute
-      ## nodes sets fixed_capacity without single_node.
-      $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity',   false );
-      $single_node    = (bool) $this->cluster_opt( $cluster, 'single_node',      false );
-      $ppmg           = (int)  $this->cluster_opt( $cluster, 'procs_per_mgroup', 16 );
-      $parameters = $this->data[ 'job' ][ 'jobParameters' ];
-      $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
-      $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
-      $ppbj       = $this->grid[ $cluster ][ 'ppbj'    ];
+      $cluster       = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cfg           = $this->grid[ $cluster ];
+      $parameters    = $this->data[ 'job' ][ 'jobParameters' ];
+      $fixed         = (bool) $this->cluster_opt( $cluster, 'fixed_capacity', false );
+      $tasks_per_node = max( 1, (int) $cfg[ 'ppn' ] );
+      $ppbj          = max( 1, (int) $cfg[ 'ppbj' ] );
+      $ppmg          = max( 1, (int) $this->cluster_opt( $cluster, 'procs_per_mgroup', 16 ) );
+      $minimum       = $fixed ? min( $ppmg, $tasks_per_node ) : 1;
 
-      if ( $fixed_capacity )
-      {  ## Size to the box: GA wants whole model groups of $ppmg procs
-         $mgroup     = 1;
-         $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
-         $montecarlo = $parameters[ 'mc_iterations' ];
-
-         if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
-         {  ## GA or DMGA
-            if ( $montecarlo < 2 )
-            {  ## Non-MC GA
-               $ppn        = $ppmg;
-            }
-            else
-            {  ## GA-MC
-               if ( isset( $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] ) )
-               {
-                  $mgroup     = $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ];
-                  if ( $mgroup > 1 )
-                     $ppn     = (int)( $max_procs / $mgroup );
-                  $ppn        = max( $ppn, $ppmg );
-               }
-               else
-               {
-                  $mgroup     = 1;
-                  $ppn        = $ppmg;
-                  $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] = $mgroup;
-               }
-               $this->data[ 'job' ][ 'mgroupcount' ] = $mgroup;
-            }
-         }
-
-         $this->grid[ $cluster ][ 'ppn' ] = $ppn;
-
-         if ( $single_node )
-         {  ## Clamping the proc budget to one node's worth is what forces
-            ## nodes()'s final division to 1. Without single_node the
-            ## configured maxproc stands and the job may span nodes.
-            $max_procs  = $ppn;
-            $this->grid[ $cluster ][ 'maxproc' ] = $max_procs;
-         }
-      }  ## End: fixed-capacity cluster
-
+      ## What one intact group asks for; refused below if it cannot fit.
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
-      {  ## GA: procs is demes+1 rounded to procs-per-node
-         $demes = $parameters[ 'demes' ];
+      {
+         $demes = isset( $parameters[ 'demes' ] ) ? (int) $parameters[ 'demes' ] : 1;
          if ( $demes == 1 )
          {
             $demes = $ppbj - 1;
-            if ( $fixed_capacity )
-               $demes = max( $ppmg - 1, $demes );
+            if ( $fixed )
+               $demes = max( $minimum - 1, $demes );
             if ( $ppbj == 9 )
                $demes = max( 17, $demes );
-            $ppbj  = $demes + 1;
+            $ppbj = $demes + 1;
             $this->grid[ $cluster ][ 'ppbj' ] = $ppbj;
          }
-         $procs = $demes + $ppbj;                  ## Procs = demes+1
-         $procs = (int)( $procs / $ppbj ) * $ppbj;  ## Rounded to procs-per-basejob
+         $method_demand = (int)( ( $demes + $ppbj ) / $ppbj ) * $ppbj;
       }
       else if ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
-      {  ## 2DSA:  procs is max_procs, but no more than subgrid count
-         $gsize = $parameters[ 'uniform_grid' ];
-         $gsize = $gsize * $gsize;           ## Subgrid count
-         $procs = min( $ppbj, $gsize );      ## Procs = base or subgrid count
+      {
+         $gsize = (int) $parameters[ 'uniform_grid' ];
+         $method_demand = min( $ppbj, $gsize * $gsize );
       }
       else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
-      {  ## PCSA:  procs is max_procs, but no more than vars_count
-         $vsize = $parameters[ 'vars_count' ];
+      {
+         $vsize = (int) $parameters[ 'vars_count' ];
          if ( $parameters[ 'curve_type' ] != 'HL' )
-            $vsize = $vsize * $vsize;        ## Variations count
-         $procs = min( $ppbj, $vsize );      ## Procs = base or subgrid count
+            $vsize *= $vsize;
+         $method_demand = min( $ppbj, $vsize );
+      }
+      else
+      {
+         $method_demand = $ppbj;
       }
 
-      $procs = max( $procs, $ppbj );          ## Minimum procs is procs-per-node
-      $procs = min( $procs, $max_procs );    ## Maximum procs depends on cluster
+      $method_demand = max( $method_demand, $ppbj );
+      $desired       = max( $method_demand, $minimum );
 
-      ## Publish the total rank count alongside the node count.
-      ##
-      ## $procs is the authoritative answer to "how many ranks does this job
-      ## want", and until now it was computed here and discarded: only the
-      ## derived node count survived the return. submit_slurm then had to
-      ## reconstruct a rank count for #SBATCH -n from $ppbj plus its own copy
-      ## of the GA rule, and the two answers disagree (see
-      ## JobsubmitProcsPublicationTest and SubmitSlurmRankCountBaselineTest).
-      ##
-      ## Recording it changes nothing on its own -- no caller reads this key
-      ## yet. It exists so the emitter can consume the number this function
-      ## already decided on instead of deriving a second one.
-      $this->data[ 'job' ][ 'procs' ] = (int) $procs;
+      return [
+         'minimum'      => (int) $minimum,
+         'desired'      => (int) $desired,
+         'tasks_per_node' => (int) $tasks_per_node,
+      ];
+   }
 
-      ## Nodes is the rank total divided by procs-per-node, rounded UP: a
-      ## total that is not a whole multiple still needs the partial node.
-      ##
-      ## The cast used to sit on $procs, the numerator, rather than on the
-      ## quotient, so it never truncated anything and a fractional count
-      ## reached the batch script verbatim as "#SBATCH -N 2.5", which sbatch
-      ## rejects outright. Moving the cast to the quotient would have been the
-      ## other obvious reading of the original and is also wrong: truncating
-      ## down under-allocates and leaves the last ranks with no node to land
-      ## on. Only GA reaches a non-multiple total, because 2DSA and PCSA size
-      ## to $ppbj exactly.
-      $nodes = (int) ceil( $procs / $ppn );
-      $nodes = max( 1, $nodes );
-      return $nodes;
+   ## The single authority on how this job is sized and placed. Returns the
+   ## whole plan, or false with an explanation appended to message[] when the
+   ## job cannot be run on this cluster as configured.
+   ##
+   ## Keys, all integers:
+   ##   minimum_tasks_per_group    allocation floor for one group
+   ##   desired_tasks_per_group    what one intact group asks for
+   ##   requested_groups           what the user asked for, unclamped
+   ##   resolved_groups            what the cluster will actually run
+   ##   allocated_tasks_per_group  ranks each resolved group receives
+   ##   total_tasks                the MPI world size (#SBATCH -n)
+   ##   tasks_per_node             the node's rank capacity (--ntasks-per-node)
+   ##   node_count                 nodes required to hold total_tasks
+   ##
+   ## Callers print these. Nothing downstream derives them a second time.
+   function resource_plan()
+   {
+      $cluster       = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cfg           = $this->grid[ $cluster ];
+      $parameters    = $this->data[ 'job' ][ 'jobParameters' ];
+      $single        = (bool) $this->cluster_opt( $cluster, 'single_node', false );
+      $maxproc       = max( 0, (int) $cfg[ 'maxproc' ] );
+      $configured_ppn = (int) $cfg[ 'ppn' ];
+
+      if ( $configured_ppn < 1 )
+      {
+         $this->message[] = "ERROR: cluster $cluster has an invalid tasks-per-node capacity";
+         return false;
+      }
+
+      if ( $single  &&  $maxproc > $configured_ppn )
+      {
+         $this->message[] = "ERROR: single-node cluster $cluster permits $maxproc tasks per job,"
+                          . " but only $configured_ppn tasks on its node";
+         return false;
+      }
+
+      $group_plan    = $this->tasks_per_group_plan();
+      $minimum       = $group_plan[ 'minimum' ];
+      $desired       = $group_plan[ 'desired' ];
+      $tasks_per_node = $group_plan[ 'tasks_per_node' ];
+
+      $requested = max( 1, (int)( $parameters[ 'req_mgroupcount' ] ?? 1 ) );
+      $limit     = 32;
+      $mciters   = (int)( $parameters[ 'mc_iterations' ] ?? 1 );
+
+      if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
+         $limit = 1;
+      else if ( $mciters > 1 )
+         $limit = min( $limit, max( 1, (int)( $mciters / 2 ) ) );
+
+      ## Parallel masters needs at least three ranks per group.  Below that,
+      ## use the standard single-master path instead.
+      if ( $desired < 3 )
+         $limit = 1;
+
+      $capacity_groups = $desired > 0 ? (int)( $maxproc / $desired ) : 0;
+      $resolved        = min( $requested, $limit, $capacity_groups );
+
+      if ( $resolved < 1 )
+      {
+         $this->message[] = "ERROR: one intact analysis group needs $desired tasks,"
+                          . " but cluster $cluster permits at most $maxproc";
+         return false;
+      }
+
+      $allocated = $desired;
+      $total     = $allocated * $resolved;
+
+      ## Defensive: total is bounded by maxproc, and maxproc by the node's
+      ## capacity, so the checks above should already have caught this.
+      if ( $single  &&  $total > $tasks_per_node )
+      {
+         $this->message[] = "ERROR: single-node cluster $cluster permits $tasks_per_node"
+                          . " tasks per node, but the resolved plan needs $total";
+         return false;
+      }
+
+      $plan = [
+         'minimum_tasks_per_group'   => (int) $minimum,
+         'desired_tasks_per_group'   => (int) $desired,
+         'requested_groups'          => (int) $requested,
+         'resolved_groups'           => (int) $resolved,
+         'allocated_tasks_per_group' => (int) $allocated,
+         'total_tasks'               => (int) $total,
+         'tasks_per_node'            => (int) $tasks_per_node,
+         'node_count'                => max( 1, (int) ceil( $total / $tasks_per_node ) ),
+      ];
+
+      $this->data[ 'job' ][ 'procs' ]       = $plan[ 'allocated_tasks_per_group' ];
+      $this->data[ 'job' ][ 'mgroupcount' ] = $plan[ 'resolved_groups' ];
+      $this->data[ 'job' ][ 'resource_plan' ] = $plan;
+
+      return $plan;
+   }
+
+   ## Node count alone, for the tests that assert placement in isolation.
+   ## No production caller remains: submit_slurm consumes the whole plan.
+   function nodes()
+   {
+      $plan = $this->resource_plan();
+      return $plan === false ? 0 : $plan[ 'node_count' ];
    }
 
    ## Read a per-cluster tuning key, falling back to $default when absent.
@@ -784,50 +826,26 @@ class jobsubmit
              : $default;
    }
 
+   ## The group ceiling on its own, for the UI and for focused tests.
+   ## These limit rules duplicate resource_plan()'s and will drift if only
+   ## one is edited. resource_plan() is the authority; this wants merging.
    function max_mgroupcount()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
-      $mciters    = $parameters[ 'mc_iterations' ];
-      $max_groups = 32;
-      ## PMG ceiling on a fixed-capacity box is a pure capacity question:
-      ## how many whole $ppmg-proc model groups fit in the core budget.
-      $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity',   false );
-      $ppmg           = (int)  $this->cluster_opt( $cluster, 'procs_per_mgroup', 16 );
+      $maxproc    = max( 0, (int) $this->grid[ $cluster ][ 'maxproc' ] );
+      $desired    = $this->tasks_per_group_plan()[ 'desired' ];
+      $mciters    = (int)( $parameters[ 'mc_iterations' ] ?? 1 );
+      $limit      = 32;
 
       if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
-      {  ## For 2DSA/PCSA, PMGs is always 1
-         $max_groups = 1;
-      }
-
-      else if ( $fixed_capacity )
-      {   ## Fixed-capacity cluster: PMGs limited by max procs available
-         $max_groups = $max_procs / $ppmg;
-      }
-
+         $limit = 1;
       else if ( $mciters > 1 )
-      {  ## No more PMGs than half of MC iterations
-         $max_groups = min( $max_groups, ( $mciters / 2 ) );
-      }
+         $limit = min( $limit, max( 1, (int)( $mciters / 2 ) ) );
 
-      ## And no more groups than the cluster's core budget can hold.
-      ##
-      ## The groups run side by side inside one MPI job, so the ranks they
-      ## need multiply: submit_slurm emits procs-per-group times the group
-      ## count. Without this ceiling that product can exceed maxproc and the
-      ## scheduler rejects a job the sizing pass believed it had sized to fit.
-      ## A group needs at least a base job's worth of ranks, so maxproc/ppbj
-      ## is how many can fit. The fixed-capacity branch above already applies
-      ## its own, tighter, capacity ceiling; this leaves that one in force.
-      ## ppbj is a new dependency for this function, so treat it as optional:
-      ## a config without it carries no capacity information to apply, and a
-      ## missing key must not turn a sizing question into a fatal.
-      $ppbj = (int) $this->cluster_opt( $cluster, 'ppbj', 0 );
+      if ( $desired < 3 )
+         $limit = 1;
 
-      if ( $ppbj > 0 )
-         $max_groups = min( $max_groups, max( 1, (int) ( $max_procs / $ppbj ) ) );
-
-      return $max_groups;
+      return min( $limit, $desired > 0 ? (int)( $maxproc / $desired ) : 0 );
    }
 }

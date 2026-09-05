@@ -754,21 +754,7 @@ class jobsubmit
       $tasks_per_node = $group_plan[ 'tasks_per_node' ];
 
       $requested = max( 1, (int)( $parameters[ 'req_mgroupcount' ] ?? 1 ) );
-      $limit     = 32;
-      $mciters   = (int)( $parameters[ 'mc_iterations' ] ?? 1 );
-
-      if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
-         $limit = 1;
-      else if ( $mciters > 1 )
-         $limit = min( $limit, max( 1, (int)( $mciters / 2 ) ) );
-
-      ## Parallel masters needs at least three ranks per group.  Below that,
-      ## use the standard single-master path instead.
-      if ( $desired < 3 )
-         $limit = 1;
-
-      $capacity_groups = $desired > 0 ? (int)( $maxproc / $desired ) : 0;
-      $resolved        = min( $requested, $limit, $capacity_groups );
+      $resolved  = min( $requested, $this->group_ceiling( $desired, $maxproc ) );
 
       if ( $resolved < 1 )
       {
@@ -826,26 +812,35 @@ class jobsubmit
              : $default;
    }
 
-   ## The group ceiling on its own, for the UI and for focused tests.
-   ## These limit rules duplicate resource_plan()'s and will drift if only
-   ## one is edited. resource_plan() is the authority; this wants merging.
-   public function max_mgroupcount()
+   ## How many groups this job may run, ignoring what was requested. The
+   ## ceiling is the lower of what the method allows and what the cluster's
+   ## rank budget holds, and is 0 when one intact group does not fit at all.
+   protected function group_ceiling( $desired, $maxproc )
    {
-      $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $parameters = $this->data[ 'job' ][ 'jobParameters' ];
-      $maxproc    = max( 0, (int) $this->grid[ $cluster ][ 'maxproc' ] );
-      $desired    = $this->tasks_per_group_plan()[ 'desired' ];
-      $mciters    = (int)( $parameters[ 'mc_iterations' ] ?? 1 );
-      $limit      = 32;
+      $mciters = (int)( $this->data[ 'job' ][ 'jobParameters' ][ 'mc_iterations' ] ?? 1 );
+      $limit   = 32;
 
       if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
          $limit = 1;
       else if ( $mciters > 1 )
          $limit = min( $limit, max( 1, (int)( $mciters / 2 ) ) );
 
+      ## Parallel masters needs at least three ranks per group. Below that,
+      ## force one group so the standard single-master path runs instead.
       if ( $desired < 3 )
          $limit = 1;
 
       return min( $limit, $desired > 0 ? (int)( $maxproc / $desired ) : 0 );
+   }
+
+   ## The ceiling on its own, for the UI and for focused tests. resource_plan()
+   ## applies the same one, then clamps it by what the user asked for.
+   public function max_mgroupcount()
+   {
+      $cluster = $this->data[ 'job' ][ 'cluster_shortname' ];
+
+      return $this->group_ceiling(
+         $this->tasks_per_group_plan()[ 'desired' ],
+         max( 0, (int) $this->grid[ $cluster ][ 'maxproc' ] ) );
    }
 }

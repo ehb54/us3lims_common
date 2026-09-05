@@ -726,7 +726,7 @@ class jobsubmit
    ##   node_count                 nodes required to hold total_tasks
    ##
    ## Callers print these. Nothing downstream derives them a second time.
-   function resource_plan()
+   public function resource_plan()
    {
       $cluster       = $this->data[ 'job' ][ 'cluster_shortname' ];
       $cfg           = $this->grid[ $cluster ];
@@ -809,7 +809,7 @@ class jobsubmit
 
    ## Node count alone, for the tests that assert placement in isolation.
    ## No production caller remains: submit_slurm consumes the whole plan.
-   function nodes()
+   public function nodes()
    {
       $plan = $this->resource_plan();
       return $plan === false ? 0 : $plan[ 'node_count' ];
@@ -829,7 +829,7 @@ class jobsubmit
    ## The group ceiling on its own, for the UI and for focused tests.
    ## These limit rules duplicate resource_plan()'s and will drift if only
    ## one is edited. resource_plan() is the authority; this wants merging.
-   function max_mgroupcount()
+   public function max_mgroupcount()
    {
       $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];

@@ -23,20 +23,14 @@ $global_max_run_time_hours   = 0;
 
 ## abandonment ceiling, in hours since last status update.
 ##
-## The stall timers above measure elapsed time, so an outage that stops status
-## updates makes every waiting job look hung. gridctl therefore checks whether
-## the cluster is answering before firing a stall timer, and defers if it is
-## not -- the jobs are usually fine and the LIMS is blind.
-##
-## This is the ceiling on that deferral. Without one, a cluster that is
-## decommissioned, renamed, or simply never coming back holds its jobs in
-## 'submitted' forever and no operator ever sees them. Past this many hours of
-## an unreachable cluster the job is closed out as a timeout, with autoflow
-## status CLUSTER_UNAVAILABLE so the reason is not confused with a job failure.
+## gridctl defers the stall timers above while a cluster is unreachable. This
+## caps that deferral: past this many hours the job is closed out as a
+## timeout, with autoflow status CLUSTER_UNAVAILABLE so the reason is not
+## confused with a job failure. Zero defers indefinitely.
 ##
 ## Make it comfortably longer than a routine maintenance window: it should
 ## catch a site that is gone, not a site that is down for the afternoon.
-## Set to zero to defer indefinitely instead (the pre-ceiling behaviour).
+## cluster_probe_outage_verdict() in gridctl explains the policy.
 $global_cluster_abandon_hours = 72;
 
 ## after a job reports COMPLETE, jobmonitor waits for the cluster's (UDP)

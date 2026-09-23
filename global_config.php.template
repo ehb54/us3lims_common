@@ -49,79 +49,18 @@ $global_complete_max_seconds   = 21600;
 ## would risk creating a duplicate. Reconcile an uncertain submission on the
 ## scheduler before asking LIMS to submit it again.
 
-## ---------------------------------------------------------------------------
-## remote execution (class/remote_exec.php)
-##
-## Every ssh/scp call to a cluster is bounded twice over: ssh's own
-## ConnectTimeout bounds the handshake, and timeout(1) bounds total wall clock.
-## Both are needed. ConnectTimeout cannot interrupt a command that connected
-## successfully and is now blocked in uninterruptible I/O on an unresponsive
-## parallel filesystem -- the session is healthy, keepalives are answered, and
-## the command simply never returns. Only the external kill bounds that, and
-## it is the case that hung the job monitors during the 2026 Expanse/Lustre
-## incident.
-##
-## Connect, short-command, and file-copy budgets remain distinct because their
-## safe durations differ. Their defaults, transport retry/backoff, breaker
-## threshold/cooldown, and timeout(1) discovery are implementation policy in
-## class/remote_exec.php, not routine deployment settings.
+## Remote execution budgets, retries and breaker policy are defined in
+## class/remote_exec.php. GNU timeout is required for wall-clock limits.
 
-## how long a gfac.cluster_status row stays trustworthy, in seconds.
-## The health probe is a cron job and cron jobs die. Past this age a row is
-## treated as 'down' rather than as its last recorded value, so a cluster that
-## went down while the probe was wedged does not stay selectable in the
-## queue-setup UI on the strength of a stale 'up'.
-##
-## Note that this really is 'down' and not 'unknown': a stale row makes the
-## cluster unselectable, exactly as a probe that found it dead would. That is
-## the intended trade. Refusing a submission to a cluster we have no current
-## information about costs the user seconds; accepting one for a cluster that
-## is actually unreachable costs them the run.
-##
-## Set to a small multiple of the probe's cron interval. Set to zero to
-## disable the age check and trust each row's recorded value however old it
-## is, which is the behaviour this setting was added to end.
+## Maximum age of cluster health records in seconds. Stale records are
+## treated as down. Set to a few probe intervals, or zero to disable.
 $global_cluster_status_max_age_seconds = 900;
 
-## NOTE: the probe escalation ladder is deliberately NOT configurable.
-## One failed health probe records 'warn'; a second consecutive failure
-## records 'down' (gridctl/cluster_status.php, escalate_probe_failure).
-## The count is fixed at two because the ladder uses the cluster_status.status
-## column itself as its memory, and that holds one bit of history. Any other
-## count needs a separate counter, and the count is not a value a site has a
-## reason to change: how quickly a flapping cluster leaves the queue-setup UI
-## is governed by the probe's cron interval, not by this.
-##
-## Do not add a $global_cluster_down_after_failures key. Nothing reads one, so
-## setting it has no effect and gives no warning.
-##
-## There is likewise no aggregated admin alert per cluster outage. When jobs are abandoned for an unreachable cluster
-## (job_state_machine::abandon_for_outage) the cron sweep in gridctl.php mails
-## the admins once per affected job, and mail_to_admin_once deduplicates only
-## within a single jobmonitor process, which is one process per job. Collapsing
-## those into one alert per cluster is worth doing and is separate work: the
-## alert belongs to the outage, not to a probe count.
 
-## ---------------------------------------------------------------- circuit breaker
-##
-## Shared, cross-process memory of which clusters are not answering. Retry with
-## backoff is right for one call and wrong in aggregate: every queued job has
-## its own jobmonitor process, so during an outage each one independently
-## rediscovers the same dead login node by making its own attempts against it.
-## The breaker lets the first few processes record the outage and everyone else
-## fail fast without touching the network until the cooldown expires.
-##
-## directory for the per-cluster state files. Must be writable by every account
-## that talks to a cluster (the web tier's apache user and the us3 cron/daemon
-## user), or the breaker silently disables itself and behaviour reverts to
-## plain per-process retry -- degraded, but never worse than before it existed.
-##
-## Left commented deliberately. The default is owned by remote_exec::BREAKER_DIR
-## and is '/var/tmp/us3-circuit-breaker'. Restating it here would give it two
-## owners, so a host that had not copied the current template would use a
-## different directory than one that had, and the breaker's cross-process state
-## would silently stop being shared. Uncomment only to move the directory, and
-## then only to a path both accounts can write.
+## Optional shared breaker directory; defaults to remote_exec::BREAKER_DIR.
+## Provision it with owner/group permissions that let every cluster-calling
+## account write it. Automatic creation uses 0770 and does not establish a
+## shared group. An unwritable directory disables shared outage tracking.
 
 ## $global_circuit_breaker_dir = '/var/tmp/us3-circuit-breaker';
 
@@ -139,139 +78,54 @@ $single_tenant_deployment = false;
 
 ## $default_local_cluster = 'us3iab-node0';
 
-## define all possible clusters for this server.
-##
-## CLUSTER CONFIGURATION COMES FROM THREE LEVELS. This file, the common one,
-## defines what each cluster IS: its hostname, queue, sizing and limits, in
-## $cluster_details below. Which of those clusters a given LIMS instance may
-## actually use is a separate decision, made in $cluster_configuration in a
-## cluster_config.php, and that file is looked for at two levels in turn:
-##
-##   1. dbinst    <instance dir>/cluster_config.php
-##                the instance's own file, if it has one
-##   2. newlims   <web root>/uslims3_newlims/cluster_config.php
-##                the shared default from the registration interface
-##
-## The first file found wins outright. The levels do not merge, because each
-## one assigns $cluster_configuration whole.
-##
-## A cluster is offered, and accepted, only when it is active in BOTH places:
-## 'active' => true here, and 'active' => true in the winning
-## $cluster_configuration. Both lib/utility.php (which builds the queue-setup
-## list) and class/jobsubmit.php (which decides what a submission may reach)
-## apply that intersection, so "not offered" and "not accepted" are one
-## decision rather than two that can drift apart.
+## Define cluster connection details and resource limits here.
+## Instance cluster_config.php selects which clusters may be used; loaders
+## fall back to ../cluster_config.php, then ../uslims3_newlims/cluster_config.php.
+## The first existing file wins. A cluster must be active in both configurations.
 
-## SSH-Slurm cluster config keys:
+## SSH-Slurm configuration:
+## Required keys:
+##   active    bool    enable the cluster globally
+##   name      string  hostname; SSH defaults to us3@name
+##   workdir   string  remote directory prefix for per-request directories
+##   sshport   int     SSH port
+##   queue     string  Slurm partition
+##   maxtime   int     walltime limit in minutes; 0 means unlimited
+##   ppn       int     task capacity per node
+##   ppbj      int     tasks per base job
+##   maxproc   int     maximum tasks per job
 ##
-##   Required:
-##     name       string  SSH hostname (used as login target if 'login' not set)
-##     login      string  SSH login target, e.g. user@host (overrides name)
-##     workdir    string  base path on submithost; job subdirectory appended at runtime
-##     sshport    int     SSH port (normally 22)
-##     queue      string  Slurm partition name
-##     maxtime    int     maximum walltime in minutes; the computed estimate and
-##                        wall_override are both clamped to it (0 = unlimited:
-##                        no clamp, and 00:00:00 when usemaxtime is set)
-##     ppn        int     procs per node
-##     ppbj       int     procs per base job
-##     maxproc    int     maximum total procs
+## Optional connection and script settings:
+##   login                string  SSH user@host, overriding us3@name
+##   ssh_host_key_policy  string  accept-new (default), or yes for preinstalled keys
+##   env_script_lines     string  shell preamble for modules and environment variables
+##   mpi_launcher         string  mpirun (default), srun, or ibrun
+##   sbatch_directives    array   complete single-line "#SBATCH " directives
+##                               mempercore supplies --mem-per-cpu if this is empty
+##   usemaxtime           bool    use maxtime directly (0 emits 00:00:00)
+##   wall_override        int     fixed walltime in minutes unless usemaxtime is set
+##                               estimates and overrides are capped by maxtime
 ##
-##   Environment:
-##     env_script_lines  string  verbatim shell preamble written into the Slurm script
-##                               before the MPI launch line; include module commands,
-##                               PATH/LD_LIBRARY_PATH exports, etc.
+## Independent sizing settings:
+##   single_node         bool   require one node and maxproc <= ppn (default false)
+##   fixed_capacity      bool   apply the per-group floor below (default false)
+##   procs_per_mgroup    int    per-group rank floor, capped by ppn (default 16);
+##                             applies only with fixed_capacity, including GA demes
+##   cg_time_multiplier  float  extra CG walltime factor with fixed_capacity (default 4)
+##   pmg                 bool   enable parallel Monte Carlo groups
+##   pmgonly             bool   offer this cluster only for PMG jobs
 ##
-##   MPI launcher:
-##     mpi_launcher  string  'mpirun' (default) | 'srun' | 'ibrun'
-##                           mpirun: standard OpenMPI, used for most clusters
-##                           srun:   Slurm-native; use for Anvil, Expanse
-##                           ibrun:  TACC wrapper; required for Lonestar6, Stampede2
-##
-##   Optional scheduler/resource keys:
-##     usemaxtime    bool  use maxtime directly instead of computed estimate;
-##                         set maxtime=0 for unlimited (emits 00:00:00 to Slurm)
-##     wall_override int   fixed walltime in minutes (overrides computed; ignored if
-##                         usemaxtime; still clamped to maxtime)
-##     ssh_host_key_policy string  'accept-new' (default) trusts an unknown host
-##                         key on first use and still refuses a changed one.
-##                         'yes' requires the key to be installed in advance and
-##                         is right for a provisioned cluster, where first-use
-##                         trust buys nothing. No other value is accepted.
-##     sbatch_directives array  site-specific batch directives, for example a
-##                              --mem-per-cpu or --exclusive policy. Each entry
-##                              is emitted verbatim, so it must be a complete
-##                              single line beginning "#SBATCH " with no
-##                              embedded newline; the emitter rejects anything
-##                              else rather than writing a malformed script.
-##                              Replaces mempercore. A config still carrying
-##                              mempercore and no sbatch_directives keeps
-##                              working: it is read as --mem-per-cpu.
-##
-##   Sizing keys. These are three independent axes -- do not assume setting
-##   one implies another. A co-located appliance with more than one compute
-##   node, for instance, sets fixed_capacity without single_node.
-##
-##     TOPOLOGY
-##     single_node   bool  confine the job to exactly one node (default false).
-##                         This is a constraint on the plan, not a collapse
-##                         applied after sizing: maxproc must not exceed ppn,
-##                         and a plan whose total rank count will not fit on
-##                         one node is refused rather than silently shrunk.
-##
-##     CAPACITY
-##     fixed_capacity    bool  size jobs to this box's own core count rather
-##                             than requesting a share of a large shared
-##                             scheduler (default false). Set this for USiaB
-##                             appliances and small dedicated clusters.
-##     procs_per_mgroup  int   floor on the ranks allotted to one parallel
-##                             model group (default 16), capped by ppn so it
-##                             can never ask for more than a node holds. It
-##                             sets that floor and the GA deme floor. It no
-##                             longer sets the group ceiling: the ceiling is
-##                             maxproc divided by the ranks one intact group
-##                             actually needs, which procs_per_mgroup only
-##                             raises from below. Only consulted when
-##                             fixed_capacity is set.
-##
-##     PERFORMANCE
-##     cg_time_multiplier  float  extra walltime factor for custom-grid (CG)
-##                                methods on this box (default 4.0). Only
-##                                consulted when fixed_capacity is set; a
-##                                fast fixed-capacity box should lower it.
-##
-##   Exception-only remote execution policy. Normal clusters omit this key.
-##   When operational evidence shows one site needs a different wall-clock
-##   budget, add only the affected field. remote_exec validates the name, type,
-##   and safe range before making a connection; retry and breaker policy cannot
-##   be overridden here.
-##
-##     'remote_exec_overrides' => [
-##         'connect_timeout_seconds' => 30,   # allowed 1..300
-##         'command_timeout_seconds' => 180,  # allowed 1..3600
-##         'copy_timeout_seconds'    => 1800, # allowed 1..86400
-##     ]
-##
-##   DEPRECATED:
-##     pmg           bool  parallel Monte Carlo group support enabled
-##     pmgonly       bool  cluster accepts PMG jobs only
+## Optional timeout exceptions; omit fields that use remote_exec defaults.
+## Retry and breaker policies cannot be overridden here.
+##   'remote_exec_overrides' => [
+##       'connect_timeout_seconds' => 30,   # integer 1..300
+##       'command_timeout_seconds' => 180,  # integer 1..3600
+##       'copy_timeout_seconds'    => 1800, # integer 1..86400
+##   ]
 
 $cluster_details =
     [
-     ## -----------------------------------------------------------------------
-     ## Anvil (Purdue/RCAC)
-     ## login: x-us3@anvil.rcac.purdue.edu  — doc-supported (Anvil ACCESS allocation)
-     ## workdir: /anvil/projects/x-mcb070039n/us3 — project allocation path; subdirectory
-     ##          'work' or similar must exist and be writable — NEEDS MANUAL VERIFICATION
-     ## mpi_launcher: srun — Anvil docs explicitly show srun for OpenMPI jobs
-     ## env_script_lines: Anvil is module-based; exact UltraScan module names for the
-     ##   x-us3 account are not in public docs. Structure should be:
-     ##     module purge
-     ##     module load <openmpi-module>
-     ##     module load <qt-module>        (if installed as a module)
-     ##     export PATH=...               (if us_mpi_analysis is not in a module)
-     ##   NEEDS MANUAL VERIFICATION before activating.
-     ## -----------------------------------------------------------------------
+     ## Anvil: verify the work directory and configure modules before activation.
      'anvil' => [
          'active'              => false
          ,'name'               => 'anvil.rcac.purdue.edu'
@@ -333,18 +187,9 @@ $cluster_details =
          ,'mpi_launcher'       => 'srun'
          ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for x-us3 account"
      ]
-     ## -----------------------------------------------------------------------
-     ## Bridges-2 (PSC)
-     ## login: us3@bridges2.psc.edu — PSC login alias; doc-supported
-     ## workdir: /ocean/projects/mcb210002p/us3/airavata-workdirs — verified
-     ##          readable/writable from both LIMS submission origins on 2026-08-27.
-     ##          The historical directory name is retained until an approved remote
-     ##          directory migration is completed; changing only this template breaks staging.
-     ## mpi_launcher: mpirun — PSC docs support mpirun; no ibrun required
-     ## env_script_lines: Bridges-2 is module-based. Exact module names for the us3
-     ##   account not in public docs.
-     ##   NEEDS MANUAL VERIFICATION before activating.
-     ## -----------------------------------------------------------------------
+     ## Bridges-2: configure MPI and UltraScan modules before activation.
+     ## Keep airavata-workdirs until the remote directory is migrated; changing
+     ## only this template breaks staging and result collection.
      ,'bridges2' => [
          'active'              => false
          ,'name'               => 'bridges2.psc.edu'
@@ -373,13 +218,7 @@ $cluster_details =
          ,'pmgonly'            => true
          ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for us3 account"
      ]
-     ## -----------------------------------------------------------------------
-     ## Chinook (U Montana HPC)
-     ## login: falls back to name (chinook.hs.umt.edu) — no login key needed
-     ## workdir: /home/us3/lims/work/ — us3 home, known working
-     ## mpi_launcher: mpirun (default)
-     ## env_script_lines: known working config
-     ## -----------------------------------------------------------------------
+     ## Chinook (U Montana HPC).
      ,'chinook-local' => [
          'active'              => false
          ,'name'               => 'chinook.hs.umt.edu'
@@ -420,18 +259,9 @@ $cluster_details =
          ,'pmg'                => true
          ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
      ]
-     ## -----------------------------------------------------------------------
-     ## Expanse (SDSC)
-     ## login: us3@login.expanse.sdsc.edu — SDSC docs confirm this login host
-     ## workdir: /expanse/lustre/scratch/us3/temp_project/airavata-workingdirs —
-     ##          verified readable/writable from both LIMS submission origins on
-     ##          2026-08-27. The historical directory name is retained until an
-     ##          approved remote migration; the proposed /work path does not exist.
-     ## mpi_launcher: srun — SDSC Expanse docs recommend srun for MPI inside Slurm jobs
-     ## env_script_lines: `module load ultrascan3/4.0` was verified on 2026-08-27
-     ##   to resolve both /home/us3/expanse/bin/us_mpi_analysis and srun. Do not
-     ##   prepend `module purge`: doing so removes the Slurm launcher from PATH.
-     ## -----------------------------------------------------------------------
+     ## Expanse: preserve the module environment; module purge removes srun from PATH.
+     ## Keep airavata-workingdirs until the remote directory is migrated; changing
+     ## only this template breaks staging and result collection.
      ,'expanse' => [
          'active'              => false
          ,'name'               => 'expanse.sdsc.edu'
@@ -477,16 +307,8 @@ $cluster_details =
          ,'mpi_launcher'       => 'srun'
          ,'env_script_lines'   => "module load ultrascan3/4.0"
      ]
-     ## -----------------------------------------------------------------------
-     ## Lonestar6 (TACC)
-     ## login: us3@ls6.tacc.utexas.edu — TACC docs confirm this login host
-     ## workdir: /work/01623/us3/ls6/us3 — TACC $WORK filesystem, allocation-based path;
-     ##          NEEDS MANUAL VERIFICATION (exact path under allocation)
-     ## mpi_launcher: ibrun — required by TACC; ibrun reads SLURM_NTASKS from #SBATCH -n
-     ## env_script_lines: TACC uses Lmod. ibrun does not need explicit MPI path exports
-     ##   (it's a wrapper). UltraScan binary/Qt paths will be needed.
-     ##   NEEDS MANUAL VERIFICATION before activating.
-     ## -----------------------------------------------------------------------
+     ## Lonestar6: verify the allocation work directory and configure modules
+     ## before activation. ibrun reads the task count from Slurm.
      ,'lonestar6-gamc' => [
          'active'              => false
          ,'name'               => 'ls6.tacc.utexas.edu'
@@ -503,10 +325,7 @@ $cluster_details =
          ,'mpi_launcher'       => 'ibrun'
          ,'env_script_lines'   => "module purge\n## TODO: load correct Qt/UltraScan modules; ibrun does not need explicit MPI exports"
      ]
-     ## -----------------------------------------------------------------------
-     ## Stampede2 (TACC) — DECOMMISSIONED January 2024
-     ## Kept as a config record; must not be activated.
-     ## -----------------------------------------------------------------------
+     ## Stampede2 is retired; do not activate.
      ,'stampede2' => [
          'active'              => false
          ,'name'               => 'stampede2.tacc.xsede.org'
@@ -558,11 +377,8 @@ $cluster_details =
          ,'usemaxtime'         => true
          ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
      ]
-     ## ppn/ppbj/maxproc below are shipped defaults, sized for the smallest
-     ## appliance. Set them to the node's real capacity at install time and
-     ## they stay set: nothing rewrites this file afterwards. ppn must equal
-     ## the node's Slurm CPUTot, or the scheduler refuses work sized past
-     ## what it registered.
+     ## Set ppn, ppbj and maxproc to the appliance capacity at installation.
+     ## ppn must match Slurm CPUTot.
      ,'us3iab-node0' => [
          'active'              => true
          ,'name'               => 'us3iab-node0.localhost'

@@ -57,22 +57,8 @@ class jobsubmit
            return;
        }
 
-       ## Cluster configuration comes from three levels, in this precedence
-       ## order, matching lib/utility.php exactly:
-       ##
-       ##   1. dbinst    $full_path/cluster_config.php
-       ##   2. site      ../cluster_config.php  (legacy, not a designed level)
-       ##   3. newlims   ../uslims3_newlims/cluster_config.php
-       ##
-       ## First file found wins outright; the levels do not merge, because
-       ## each file assigns $cluster_configuration whole.
-       ##
-       ## The site-level candidate is here only to keep the two loaders
-       ## byte-identical in what they resolve. utility.php reached that path
-       ## by accident, through a relative include resolved against the working
-       ## directory, and it was the only dbinst candidate it had -- so an
-       ## instance with its own cluster_config.php was honoured here and
-       ## ignored there.
+       ## Match lib/utility.php: instance, site, then newlims configuration.
+       ## Use the first existing file; configurations do not merge.
 
        $dbinst_config_candidates = array(
            rtrim( $full_path, '/' ) . '/cluster_config.php'
@@ -129,9 +115,7 @@ class jobsubmit
            return;
        }
 
-       ## Required keys for every SSH-Slurm cluster entry.
-       ## 'submittype' and 'httpport' are historical Airavata fields; no longer
-       ## required by submit_slurm.php but may still appear in config — tolerated.
+       ## Required keys for SSH-Slurm cluster entries.
        $reqkey = [
            'active'
            ,'name'
@@ -158,17 +142,7 @@ class jobsubmit
                continue;
            }
 
-           ## The instance's cluster_config.php is the per-instance override:
-           ## it decides which of global_config.php's clusters THIS LIMS
-           ## instance is allowed to use. lib/utility.php applies it when it
-           ## builds the queue-setup list, so a cluster switched off there
-           ## disappears from the UI.
-           ##
-           ## This loop used to consult $cluster_details alone. The two filters
-           ## therefore disagreed: a cluster the instance had switched off was
-           ## hidden from the UI but still accepted here, so a CLI submission
-           ## or a hand-built request could still land a job on it. Apply the
-           ## same test, so "not offered" and "not accepted" are one decision.
+           ## Only accept clusters enabled in both global and instance configuration.
 
            if ( !array_key_exists( $k, $cluster_configuration ) ) {
                $debug_msg( "cluster $k not present in \$cluster_configuration", $debug );
@@ -228,7 +202,9 @@ class jobsubmit
    function status()
    {
       if ( isset( $this->data['dataset']['status'] ) )
+      {
          return $this->data['dataset']['status'];
+      }
 
       return 'Status unavailable';
    }
@@ -286,7 +262,9 @@ class jobsubmit
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'job' )
+         {
               break;
+         }
 
          if ( $parser->nodeType == XMLReader::ELEMENT )
          {
@@ -342,7 +320,9 @@ class jobsubmit
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'database' )
+         {
               break;
+         }
 
          if ( $parser->nodeType == XMLReader::ELEMENT )
          {
@@ -380,10 +360,14 @@ class jobsubmit
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'jobParameters' )
+         {
               break;
+         }
 
          $tag = $parser->name;
-         if ( $tag == "#text" ) continue;
+         if ( $tag == "#text" )
+         { continue;
+         }
 
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
       }
@@ -395,13 +379,17 @@ class jobsubmit
    {
       $dataset = array();
 
-      if ( ! isset( $this->data[ 'dataset' ] ) ) $this->data[ 'dataset' ] = array();
+      if ( ! isset( $this->data[ 'dataset' ] ) )
+      { $this->data[ 'dataset' ] = array();
+      }
 
       while ( $parser->read() )
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'dataset' )
+         {
               break;
+         }
 
          $tag = $parser->name;
 
@@ -428,7 +416,9 @@ class jobsubmit
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'files' )
+         {
               break;
+         }
 
          $tag = $parser->name;
 
@@ -454,10 +444,14 @@ class jobsubmit
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'parameters' )
+         {
               break;
+         }
 
          $tag = $parser->name;
-         if ( $tag == "#text" ) continue;
+         if ( $tag == "#text" )
+         { continue;
+         }
 
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
       }
@@ -498,7 +492,7 @@ class jobsubmit
          $time  = (int)( ($time + 59) / 60 ); ## Round up to minutes
       }
 
-      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )  ## PCSA
+      elseif ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )  ## PCSA
       {  ## PCSA
          $vsize      = isset( $parameters[ 'vars_count' ] )
                        ? $parameters[ 'vars_count' ]
@@ -510,10 +504,16 @@ class jobsubmit
                        ? $parameters[ 'curve_type' ]
                        : "SL";
          if ( preg_match( "/HL/", $curvtype ) )
+         {
             $time       = $vsize * $gfiters;
+         }
          else
+         {
             $time       = $vsize * $vsize * $gfiters;
-         if ( $ti_noise || $ri_noise ) $time *= 2;
+         }
+         if ( $ti_noise || $ri_noise )
+         { $time *= 2;
+         }
          $time       = $time / 4;        ## Base time is 15 seconds
          $time       = max( $time, 30 ); ## Minimum PCSA time is 30 minutes
       }
@@ -532,15 +532,23 @@ class jobsubmit
                {  ## If fitting both meniscus and bottom, multiply again
                   $fselect    = $parameters[ 'fit_mb_select' ];
                   if ( $fselect == 3 )
+                  {
                      $time      *= $points;
+                  }
                }
             }
          }
 
-         if ( $ti_noise || $ri_noise ) $time *= 2;
+         if ( $ti_noise || $ri_noise )
+         { $time *= 2;
+         }
          ## Double time for each noise option used
-         if ( $ti_noise )  $time *= 2;
-         if ( $ri_noise )  $time *= 2;
+         if ( $ti_noise )
+         {  $time *= 2;
+         }
+         if ( $ri_noise )
+         {  $time *= 2;
+         }
 
          if (  isset( $parameters[ 's_grid_points' ] )  &&
                isset( $parameters[ 'ff0_grid_points' ] ) )
@@ -549,17 +557,25 @@ class jobsubmit
             $gpts_k     = $parameters[ 'ff0_grid_points' ];
             $gpts_t     = $gpts_s * $gpts_k;
             if ( $gpts_t > 200000 )
+            {
                $time      *= 8;
-            else if ( $gpts_t > 100000 )
+            }
+            elseif ( $gpts_t > 100000 )
+            {
                $time      *= 4;
-            else if ( $gpts_t > 50000 )
+            }
+            elseif ( $gpts_t > 50000 )
+            {
                $time      *= 2;
+            }
          }
 
          if ( isset( $dsparams[ 'simpoints' ] ) )
          {
             $simpts     = $dsparams[ 'simpoints' ];
-            if ( $simpts < 1 ) $simpts = 1;
+            if ( $simpts < 1 )
+            { $simpts = 1;
+            }
             $spfact     = (int)( ( $simpts + 999 ) / 1000 );
             $time      *= $spfact;
          }
@@ -567,14 +583,15 @@ class jobsubmit
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
          {
             $time *= 8;
-            ## How much slower custom-grid work runs here is a performance
-            ## property of the box, not a topology or capacity one, so it is
-            ## a per-cluster magnitude rather than a boolean: a fast
-            ## fixed-capacity box and a slow one need not share the same x4.
+            ## Apply the configured custom-grid slowdown for fixed-capacity clusters.
             $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity', false );
             if ( $fixed_capacity )
+            {
                $time *= (float) $this->cluster_opt( $cluster, 'cg_time_multiplier', 4.0 );
-            else if ( $mxiters > 0 )  $time *= 2;
+            }
+            elseif ( $mxiters > 0 )
+            {  $time *= 2;
+            }
          }
       }
 
@@ -583,10 +600,14 @@ class jobsubmit
       if ( isset( $parameters[ 'mc_iterations' ] ) )
       {
          $montecarlo = $parameters[ 'mc_iterations' ];
-         if ( $montecarlo > 0 )  $time *= $montecarlo;
+         if ( $montecarlo > 0 )
+         {  $time *= $montecarlo;
+         }
       }
 
-      if ( $mxiters > 0 )  $time *= $mxiters;
+      if ( $mxiters > 0 )
+      {  $time *= $mxiters;
+      }
 
       $time *= $dset_count;                   ## times number of datasets
       $time  = (int)( ( $time * 11 ) / 10 );  ## Padding (+10%)
@@ -595,12 +616,18 @@ class jobsubmit
       if ( $montecarlo > 1  ||  $dset_count > 1 )
       {
          if ( isset( $this->data[ 'job' ][ 'mgroupcount' ] ) )
+         {
             $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
+         }
          else
+         {
             $mgroupcount = 1;
+         }
       }
       else
+      {
          $mgroupcount = 1;
+      }
 
       $mgroupcount = max( $mgroupcount, 1 );
 
@@ -641,22 +668,11 @@ class jobsubmit
 
       $time = max( $time, 5 );         ## Minimum time is 5 minutes
 
-      ## pmg is only enabled on clusters that have it set
-
-      if ( !array_key_exists( 'pmg', $this->grid[ $cluster ] ) ||
-           !$this->grid[ $cluster ]['pmg'] ) {
-          $mgroupcount = 1;
-      }
-
       return (int)$time;
    }
 
-   ## Size ONE intact analysis group. Capacity does not clamp the answer: a
-   ## group too large for the cluster is refused by the caller, because
-   ## shrinking it changes the analysis that was asked for.
-   ##
-   ## Not pure: the GA demes==1 branch backfills grid[ppbj]. Re-running
-   ## converges on the same value, so the repeat calls are safe.
+   ## Size one analysis group without reducing it to fit cluster capacity.
+   ## The GA demes=1 case also updates ppbj; repeated calls are stable.
    protected function tasks_per_group_plan()
    {
       $cluster       = $this->data[ 'job' ][ 'cluster_shortname' ];
@@ -671,29 +687,20 @@ class jobsubmit
       ## What one intact group asks for; refused below if it cannot fit.
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
       {
-         $demes = isset( $parameters[ 'demes' ] ) ? (int) $parameters[ 'demes' ] : 1;
-         if ( $demes == 1 )
-         {
-            $demes = $ppbj - 1;
-            if ( $fixed )
-               $demes = max( $minimum - 1, $demes );
-            if ( $ppbj == 9 )
-               $demes = max( 17, $demes );
-            $ppbj = $demes + 1;
-            $this->grid[ $cluster ][ 'ppbj' ] = $ppbj;
-         }
-         $method_demand = (int)( ( $demes + $ppbj ) / $ppbj ) * $ppbj;
+         $method_demand = $this->gaTasksPerGroup( $cluster, $parameters, $ppbj, $fixed, $minimum );
       }
-      else if ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
+      elseif ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
       {
          $gsize = (int) $parameters[ 'uniform_grid' ];
          $method_demand = min( $ppbj, $gsize * $gsize );
       }
-      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
+      elseif ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
       {
          $vsize = (int) $parameters[ 'vars_count' ];
          if ( $parameters[ 'curve_type' ] != 'HL' )
+         {
             $vsize *= $vsize;
+         }
          $method_demand = min( $ppbj, $vsize );
       }
       else
@@ -711,21 +718,29 @@ class jobsubmit
       ];
    }
 
-   ## The single authority on how this job is sized and placed. Returns the
-   ## whole plan, or false with an explanation appended to message[] when the
-   ## job cannot be run on this cluster as configured.
-   ##
-   ## Keys, all integers:
-   ##   minimum_tasks_per_group    allocation floor for one group
-   ##   desired_tasks_per_group    what one intact group asks for
-   ##   requested_groups           what the user asked for, unclamped
-   ##   resolved_groups            what the cluster will actually run
-   ##   allocated_tasks_per_group  ranks each resolved group receives
-   ##   total_tasks                the MPI world size (#SBATCH -n)
-   ##   tasks_per_node             the node's rank capacity (--ntasks-per-node)
-   ##   node_count                 nodes required to hold total_tasks
-   ##
-   ## Callers print these. Nothing downstream derives them a second time.
+   private function gaTasksPerGroup( $cluster, $parameters, $ppbj, $fixed, $minimum )
+   {
+      $demes = isset( $parameters[ 'demes' ] ) ? (int) $parameters[ 'demes' ] : 1;
+      if ( $demes == 1 )
+      {
+         $demes = $ppbj - 1;
+         if ( $fixed )
+         {
+            $demes = max( $minimum - 1, $demes );
+         }
+         if ( $ppbj == 9 )
+         {
+            $demes = max( 17, $demes );
+         }
+         $ppbj = $demes + 1;
+         $this->grid[ $cluster ][ 'ppbj' ] = $ppbj;
+      }
+      return (int)( ( $demes + $ppbj ) / $ppbj ) * $ppbj;
+   }
+
+   ## Return the resource plan, or false with an error when it cannot fit.
+   ## Integer fields describe per-group demand, requested/resolved group counts,
+   ## allocated ranks per group, total MPI tasks, node capacity and node count.
    public function resource_plan()
    {
       $cluster       = $this->data[ 'job' ][ 'cluster_shortname' ];
@@ -735,16 +750,19 @@ class jobsubmit
       $maxproc       = max( 0, (int) $cfg[ 'maxproc' ] );
       $configured_ppn = (int) $cfg[ 'ppn' ];
 
+      $configurationError = '';
       if ( $configured_ppn < 1 )
       {
-         $this->message[] = "ERROR: cluster $cluster has an invalid tasks-per-node capacity";
-         return false;
+         $configurationError = "ERROR: cluster $cluster has an invalid tasks-per-node capacity";
       }
-
-      if ( $single  &&  $maxproc > $configured_ppn )
+      elseif ( $single  &&  $maxproc > $configured_ppn )
       {
-         $this->message[] = "ERROR: single-node cluster $cluster permits $maxproc tasks per job,"
-                          . " but only $configured_ppn tasks on its node";
+         $configurationError = "ERROR: single-node cluster $cluster permits $maxproc tasks per job,"
+                             . " but only $configured_ppn tasks on its node";
+      }
+      if ( $configurationError !== '' )
+      {
+         $this->message[] = $configurationError;
          return false;
       }
 
@@ -766,15 +784,6 @@ class jobsubmit
       $allocated = $desired;
       $total     = $allocated * $resolved;
 
-      ## Defensive: total is bounded by maxproc, and maxproc by the node's
-      ## capacity, so the checks above should already have caught this.
-      if ( $single  &&  $total > $tasks_per_node )
-      {
-         $this->message[] = "ERROR: single-node cluster $cluster permits $tasks_per_node"
-                          . " tasks per node, but the resolved plan needs $total";
-         return false;
-      }
-
       $plan = [
          'minimum_tasks_per_group'   => (int) $minimum,
          'desired_tasks_per_group'   => (int) $desired,
@@ -793,8 +802,7 @@ class jobsubmit
       return $plan;
    }
 
-   ## Node count alone, for the tests that assert placement in isolation.
-   ## No production caller remains: submit_slurm consumes the whole plan.
+   ## Return the planned node count, or zero when sizing fails.
    public function nodes()
    {
       $plan = $this->resource_plan();
@@ -805,7 +813,9 @@ class jobsubmit
    protected function cluster_opt( $cluster, $key, $default )
    {
       if ( ! array_key_exists( $cluster, $this->grid ) )
+      {
          return $default;
+      }
 
       return array_key_exists( $key, $this->grid[ $cluster ] )
              ? $this->grid[ $cluster ][ $key ]
@@ -820,21 +830,28 @@ class jobsubmit
       $mciters = (int)( $this->data[ 'job' ][ 'jobParameters' ][ 'mc_iterations' ] ?? 1 );
       $limit   = 32;
 
-      if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
+      $cluster = $this->data[ 'job' ][ 'cluster_shortname' ];
+      if ( ! $this->cluster_opt( $cluster, 'pmg', false )
+           || preg_match( "/SA/", $this->data[ 'method' ] ) )
+      {
          $limit = 1;
-      else if ( $mciters > 1 )
+      }
+      elseif ( $mciters > 1 )
+      {
          $limit = min( $limit, max( 1, (int)( $mciters / 2 ) ) );
+      }
 
       ## Parallel masters needs at least three ranks per group. Below that,
       ## force one group so the standard single-master path runs instead.
       if ( $desired < 3 )
+      {
          $limit = 1;
+      }
 
       return min( $limit, $desired > 0 ? (int)( $maxproc / $desired ) : 0 );
    }
 
-   ## The ceiling on its own, for the UI and for focused tests. resource_plan()
-   ## applies the same one, then clamps it by what the user asked for.
+   ## Return the group ceiling before applying the requested group count.
    public function max_mgroupcount()
    {
       $cluster = $this->data[ 'job' ][ 'cluster_shortname' ];

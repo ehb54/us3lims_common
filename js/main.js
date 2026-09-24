@@ -86,7 +86,7 @@ document.addEventListener('change', function(event) {
     main_debug && console.log( 'change event' );
     if ( event.target ) {
         main_debug && console.dir( event.target );
-        if ( event.target.classList.contains( 'onchange-form-submit') ) {        
+        if ( event.target.classList.contains( 'onchange-form-submit') ) {
             event.preventDefault();
             main_debug && console.log( 'change event target has class onchange-form-submit' );
             event.target.form.submit();
@@ -239,6 +239,12 @@ document.addEventListener('click', function(event) {
                 }
                 return false;
             }
+        } else if ( event.target.classList.contains( 'onclick-alert-arg') ) {
+            event.preventDefault();
+            if ( event.target.dataset.arg ) {
+                alert( event.target.dataset.arg );
+            }
+            return false;
         } else if ( event.target.classList.contains( 'onclick-window-location-arg') ) {
             event.preventDefault();
             main_debug && console.log( 'click event target has class onclick-window-location-arg' );

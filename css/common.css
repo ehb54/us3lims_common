@@ -565,6 +565,10 @@ fieldset#clusters tr.subheader th
     color: green;
 }
 
+.text-darkorange {
+    color: DarkOrange;
+}
+
 .text-left {
     text-align: left;
 }

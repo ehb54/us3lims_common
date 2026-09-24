@@ -284,64 +284,27 @@ document.addEventListener('click', function(event) {
 });
 
 document.addEventListener('submit', function(event) {
-    main_debug && console.log( 'submit event' );
-    if ( event.target ) {
-        main_debug && console.dir( event.target );
-        if ( event.target.classList.contains( 'onsubmit-return-validate-this') ) {
-            event.preventDefault();
-            main_debug && console.log( 'submit event target has class onsubmit-return-validate-this' );
-            return validate( event.target );
-        } else if ( event.target.classList.contains( 'onsubmit-return-validate-this-args') ) {
-            event.preventDefault();
-            main_debug && console.log( 'submit event target has class onsubmit-return-validate-this-args' );
-            if ( !event.target.dataset.args ) {
-                console.error( "submit event onsubmit-return-validate-this-args has no dataset.args" );
-                return false;
-            }
-            main_debug && console.dir( event.target.dataset.args );
-            try {
-                const args = JSON.parse( event.target.dataset.args );
-                validate( event.target, ...args );
-                return false;
-            } catch( error ) {
-                if ( error instanceof SyntaxError ) {
-                    console.error( 'submit event onsubmit-return-validate-this-args parsing dataset.args encountered invalid JSON:', error.message );
-                } else {
-                    console.error( 'submit event onsubmit-return-validate-this-args parsing dataset.args encountered an error', error );
-                }
-                return false;
-            }
-        } else if ( event.target.classList.contains( 'onsubmit-return-validate-solutes-args') ) {
-            event.preventDefault();
-            main_debug && console.log( 'submit event target has class onsubmit-return-validate-solutes-args' );
-            if ( !event.target.dataset.args ) {
-                console.error( "submit event onsubmit-return-validate-solutes-args has no dataset.args" );
-                return false;
-            }
-            main_debug && console.dir( event.target.dataset.args );
-            try {
-                const args = JSON.parse( event.target.dataset.args );
-                return validate_solutes( ...args );
-            } catch( error ) {
-                if ( error instanceof SyntaxError ) {
-                    console.error( 'submit event onsubmit-return-validate-solutes-args parsing dataset.args encountered invalid JSON:', error.message );
-                } else {
-                    console.error( 'submit event onsubmit-return-validate-solutes-args parsing dataset.args encountered an error', error );
-                }
-                return false;
-            }
-        } else {
-            main_debug && console.error( 'unknown or unsupported submit event received, returning true' );
-            main_debug && console.dir( event.target );
-            return true;
-        }
+    const form = event.target;
+    if ( !form ) return;
+    const simple = form.classList.contains( 'onsubmit-return-validate-this' );
+    const withArgs = form.classList.contains( 'onsubmit-return-validate-this-args' );
+    const solutes = form.classList.contains( 'onsubmit-return-validate-solutes-args' );
+    if ( !simple && !withArgs && !solutes ) return;
+
+    try {
+        const args = simple ? [] : JSON.parse( form.dataset.args );
+        if ( !Array.isArray( args ) ) throw new Error( 'validation arguments must be an array' );
+        const valid = solutes ? validate_solutes( ...args ) : validate( form, ...args );
+        // addEventListener ignores a returned boolean. Preserve native submit
+        // (including its clicked button) on success and cancel only on failure.
+        if ( valid === false ) event.preventDefault();
+    } catch ( error ) {
+        event.preventDefault();
+        console.error( 'submit validation failed:', error );
     }
 });
 
-// Submit-progress display, formerly an inline <script> in class/progress.php.
-// The element is looked up lazily because main.js loads from <head>, whereas
-// class/progress.php is included part-way down the body.  Initial hidden state
-// comes from the d-none class rather than a hide() call at parse time.
+
 us_submit_prog     = {};
 us_submit_prog.msg = {};
 

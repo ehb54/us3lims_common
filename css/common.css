@@ -288,6 +288,11 @@ div#sidebar {
   color                 : white;
 }
 
+/* Outranks div#sidebar so the utility class replaces the former inline style. */
+div#sidebar.pb-30em {
+  padding-bottom        : 30em;
+}
+
 div#sidebar h4 {
   margin                : 0;
   padding-top           : 1em;

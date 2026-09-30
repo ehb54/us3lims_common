@@ -301,6 +301,8 @@ document.addEventListener('submit', function(event) {
     } catch ( error ) {
         event.preventDefault();
         console.error( 'submit validation failed:', error );
+        alert( 'This form could not be checked, so it was not submitted. '
+             + 'Please review the values and try again.' );
     }
 });
 

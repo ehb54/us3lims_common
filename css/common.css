@@ -74,6 +74,11 @@ table.style1 {
   margin                : 2em 1em;
 }
 
+/* Outranks table.style1 so list tables keep their former inline 95% width. */
+table.style1.w-95p {
+  width                 : 95%;
+}
+
 table.style1 thead th {
   font-family           : Arial, Helvetica, sans-serif;
   font-size             : 14px;

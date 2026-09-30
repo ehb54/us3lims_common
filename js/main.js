@@ -164,7 +164,7 @@ document.addEventListener('click', function(event) {
             print_version();
             return false;
         } else if ( event.target.classList.contains( 'onclick-reset-message' ) ) {
-            event.preventDefault();
+            // Radio/checkbox target: preventDefault would revert the click.
             main_debug && console.log( 'click event target has class onclick-reset-message' );
             reset_message();
             return false;
@@ -256,7 +256,7 @@ document.addEventListener('click', function(event) {
             window.location=event.target.dataset.arg;
             return false;
         } else if ( event.target.classList.contains( 'onclick-hide-arg') ) {
-            event.preventDefault();
+            // Radio/checkbox target: preventDefault would revert the click.
             main_debug && console.log( 'click event target has class onclick-hide-arg' );
             if ( !event.target.dataset.arg ) {
                 console.error( "click event onclick-hide-arg has no dataset.arg" );
@@ -266,7 +266,7 @@ document.addEventListener('click', function(event) {
             hide( event.target.dataset.arg );
             return false;
         } else if ( event.target.classList.contains( 'onclick-show-ctl-arg') ) {
-            event.preventDefault();
+            // Radio/checkbox target: preventDefault would revert the click.
             main_debug && console.log( 'click event target has class onclick-show-ctl-arg' );
             if ( !event.target.dataset.arg ) {
                 console.error( "click event onclick-show-ctl-arg has no dataset.arg" );

@@ -19,7 +19,8 @@ class remote_exec
 
    ## Use a shared path outside service-private /tmp directories.
    ## Override with $global_circuit_breaker_dir when needed.
-   const BREAKER_DIR = '/var/tmp/us3-circuit-breaker';
+   ## Under ~us3/lims/etc (see breaker()); /var/tmp is split by PrivateTmp and aged out.
+   const BREAKER_DIR = '/home/us3/lims/etc/circuit-breaker';
 
    ## Result classifications. Callers branch on these, never on exit codes.
 
@@ -157,6 +158,10 @@ class remote_exec
     */
    private function unframe( $result, $nonce )
    {
+      ## 'began': the framed command started on the remote side (its begin
+      ## marker came back). Without it, the remote command provably never ran.
+      $result[ 'began' ] = false;
+
       if ( ! isset( $result[ 'stdout' ] ) || ! is_array( $result[ 'stdout' ] ) )
       {
          return $result;
@@ -181,6 +186,7 @@ class remote_exec
          return $result;
       }
 
+      $result[ 'began' ] = true;
       $kept = array();
 
       for ( $i = $first + 1; $i < count( $lines ); $i++ )
@@ -290,6 +296,17 @@ class remote_exec
       $retry_wait = array_key_exists( 'retry_wait', $opts )
                   ? $opts[ 'retry_wait' ] : $this->policy[ 'retry_wait_seconds' ];
 
+      ## M4: a cluster with no configuration entry has no host to contact.
+      if ( ! $this->is_configured() )
+      {
+         $this->logf( "$label: cluster '{$this->cluster}' is not configured; not contacting it" );
+         $result = $this->result( self::REMOTE_FAIL, self::EXIT_SSH_ERROR, array(),
+            "cluster '{$this->cluster}' is not configured in \$cluster_details", $cmd );
+         $result[ 'attempts' ] = 0;
+         $this->last = $result;
+         return $result;
+      }
+
       ## Health probes bypass the breaker to detect recovery.
       $use_breaker = ! isset( $opts[ 'breaker' ] ) || $opts[ 'breaker' ] !== false;
       $breaker     = $use_breaker ? $this->breaker() : null;
@@ -323,7 +340,7 @@ class remote_exec
          $result = $this->once( $wrapped, $cmd, $label, $attempt );
 
          if ( $result[ 'class' ] === self::OK || $result[ 'class' ] === self::REMOTE_FAIL
-              || $attempt > $retries )
+              || $attempt > $retries || $this->is_permanent_failure( $result[ 'stderr' ] ) )
          {
             break;
          }
@@ -336,7 +353,7 @@ class remote_exec
 
       ## Both OK and REMOTE_FAIL prove the transport works, so both close the
       ## breaker. Only a transport fault counts against the cluster.
-      if ( $breaker !== null )
+      if ( $breaker !== null && ! $this->is_permanent_failure( $result[ 'stderr' ] ) )
       {
          if ( remote_exec_infra_fault( $result ) )
          {
@@ -365,6 +382,13 @@ class remote_exec
       return $this;
    }
 
+   ## The us3 account's lims/etc, shared by the web tier and the daemons.
+   private static function default_breaker_dir()
+   {
+      $us3 = function_exists( 'posix_getpwnam' ) ? posix_getpwnam( 'us3' ) : false;
+      return $us3 ? $us3[ 'dir' ] . '/lims/etc/circuit-breaker' : self::BREAKER_DIR;
+   }
+
    /** Returns null when no breaker is configured or available. */
    private function breaker()
    {
@@ -387,7 +411,7 @@ class remote_exec
       }
 
       $this->breaker = new circuit_breaker(
-         $GLOBALS[ 'global_circuit_breaker_dir' ]              ?? self::BREAKER_DIR,
+         $GLOBALS[ 'global_circuit_breaker_dir' ] ?? self::default_breaker_dir(),
          self::BREAKER_FAILURES,
          self::BREAKER_COOLDOWN_SECONDS,
          $this->log
@@ -408,7 +432,7 @@ class remote_exec
       $stderr = is_readable( $stderr_tmp ) ? trim( file_get_contents( $stderr_tmp ) ) : '';
       @unlink( $stderr_tmp );
 
-      $class = $this->classify( $exit_code, $stderr );
+      $class = $this->classify( $exit_code, $stderr, strpos( $cmd, '/usr/bin/scp' ) === 0 );
 
       $this->logf( "$label attempt $attempt: exit=$exit_code class=$class cmd=$cmd"
                    . ( $stderr !== '' ? " stderr=$stderr" : '' ) );
@@ -417,7 +441,7 @@ class remote_exec
    }
 
    /** Classify timeout codes, success, transport errors, then command failures. */
-   public function classify( $exit_code, $stderr )
+   public function classify( $exit_code, $stderr, $is_scp = false )
    {
       if ( $exit_code === self::EXIT_TIMEOUT || $exit_code === self::EXIT_KILLED )
       {
@@ -429,9 +453,20 @@ class remote_exec
          return self::OK;
       }
 
-      ## Treat exit 255 as a transport fault even if a remote command returned it.
-      $transportFailed = $this->is_transport_error( $stderr ) || $exit_code === self::EXIT_SSH_ERROR;
+      ## ssh reports its own failures as exit 255; a remote command's stderr (for
+      ## example munge's "Connection refused") must not read as a transport fault.
+      ## scp reports transport failures as exit 1, so only scp needs the patterns.
+      $transportFailed = $exit_code === self::EXIT_SSH_ERROR
+                         || ( $is_scp && $this->is_transport_error( $stderr ) );
       return $transportFailed ? self::UNREACHABLE : self::REMOTE_FAIL;
+   }
+
+   /** Authentication and host-key failures are configuration errors: retrying cannot help. */
+   public function is_permanent_failure( $stderr )
+   {
+      return (bool) preg_match(
+         '/Permission denied \(publickey|Host key verification failed|Too many authentication failures/i',
+         (string) $stderr );
    }
 
    /** Recognize transport failures, including SCP failures reported as exit 1. */
@@ -481,7 +516,7 @@ class remote_exec
       $connect = $this->operationTimeout(
          array(), 'connect_timeout_seconds', 'connect_timeout_seconds' );
 
-      return '-p ' . (int) $this->port() . ' -x'
+      return '-p ' . (int) $this->port() . ' -n -x'
            . ' -o BatchMode=yes'
            . ' -o ConnectTimeout=' . (int) $connect
            . ' -o ServerAliveInterval=15'
@@ -505,7 +540,8 @@ class remote_exec
 
    private function hostKeyPolicy()
    {
-      $value = $this->details[ 'ssh_host_key_policy' ] ?? 'accept-new';
+      ## Unknown host keys are rejected unless a cluster opts in (e.g. while provisioning).
+      $value = $this->details[ 'ssh_host_key_policy' ] ?? 'yes';
       if ( ! in_array( $value, [ 'yes', 'accept-new' ], true ) )
       {
          throw new InvalidArgumentException( 'ssh_host_key_policy must be yes or accept-new' );

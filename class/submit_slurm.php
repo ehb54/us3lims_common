@@ -716,14 +716,16 @@ class submit_slurm extends jobsubmit
    ## Ensures the block is separated from the surrounding script with a trailing newline.
    private function buildEnvLines( $cfg )
    {
-      $block = trim( $cfg[ 'env_script_lines' ] ?? '' );
-      if ( $block === '' )
+      ## The key must be present: an old config without it would start the job
+      ## with no modules or MPI and fail at runtime. An empty value is a
+      ## deliberate "nothing to set up" (binaries already on the default PATH).
+      if ( ! array_key_exists( 'env_script_lines', $cfg ) )
       {
-         ## Without it the job starts with no modules or MPI and fails at runtime.
-         throw new UnexpectedValueException( "cluster has no env_script_lines in global_config.php;"
-            . " run php ~us3/lims/database/utils/uslims_upgrade.php" );
+         throw new UnexpectedValueException( "cluster has no env_script_lines in global_config.php"
+            . " (use '' if it needs none); run php ~us3/lims/database/utils/uslims_upgrade.php" );
       }
-      return "\n" . $block . "\n\n";
+      $block = trim( (string) $cfg[ 'env_script_lines' ] );
+      return $block !== '' ? "\n" . $block . "\n\n" : "\n";
    }
 
 }

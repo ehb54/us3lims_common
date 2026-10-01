@@ -105,7 +105,8 @@ $single_tenant_deployment = false;
 ##   login                string  SSH user@host, overriding us3@name
 ##   ssh_host_key_policy  string  yes (default: unknown host keys are rejected), or
 ##                                accept-new while provisioning (OpenSSH 7.6+)
-##   env_script_lines     string  shell preamble for modules and environment variables
+##   env_script_lines     string  shell preamble for modules and environment variables;
+##                                required, '' when the cluster needs none
 ##   mpi_launcher         string  mpirun (default), srun, or ibrun
 ##   sbatch_directives    array   complete single-line "#SBATCH " directives
 ##                               mempercore supplies --mem-per-cpu if this is empty

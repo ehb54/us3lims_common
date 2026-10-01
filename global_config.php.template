@@ -33,6 +33,12 @@ $global_max_run_time_hours   = 0;
 ## cluster_probe_outage_verdict() in gridctl explains the policy.
 $global_cluster_abandon_hours = 72;
 
+## sbatch retries, only when ssh never ran the command (connect failure or an
+## open breaker); an sbatch that started is never repeated. Per-cluster
+## 'submit_retries' / 'submit_retry_wait' override these.
+$global_sbatch_submit_retries            = 3;
+$global_sbatch_submit_retry_wait_seconds = 5;
+
 ## after a job reports COMPLETE, jobmonitor waits for the cluster's (UDP)
 ## "Finished" message before finalizing.  Because UDP is unreliable, it will
 ## finalize anyway once $global_complete_grace_seconds have elapsed since the

@@ -199,16 +199,6 @@ document.addEventListener('click', function(event) {
             main_debug && console.log( 'click event target has class onclick-return-toggle-advanced' );
             event.preventDefault();
             return toggle('advanced');
-        } else if ( event.target.classList.contains( 'onclick-show-info-arg') ) {
-            event.preventDefault();
-            main_debug && console.log( 'click event target has class onclick-show-info-arg' );
-            if ( !event.target.dataset.arg ) {
-                console.error( "click event onclick-show-info-arg has no dataset.arg" );
-                return false;
-            }
-            main_debug && console.dir( event.target.dataset.arg );
-            show_info( event.target.dataset.arg );
-            return false;
         } else if ( event.target.classList.contains( 'onclick-show-report-detail-arg') ) {
             event.preventDefault();
             main_debug && console.log( 'click event target has class onclick-show-report-detail-arg' );
@@ -305,47 +295,3 @@ document.addEventListener('submit', function(event) {
              + 'Please review the values and try again.' );
     }
 });
-
-
-us_submit_prog     = {};
-us_submit_prog.msg = {};
-
-us_submit_prog.element = function() {
-    return document.getElementById( "_submitprogress" );
-};
-
-us_submit_prog.update = function( msg ) {
-    const ele = us_submit_prog.element();
-    if ( ele ) {
-        ele.innerHTML = msg;
-    }
-};
-
-us_submit_prog.append = function( msg ) {
-    const ele = us_submit_prog.element();
-    if ( ele ) {
-        ele.innerHTML += "<br>" + msg;
-    }
-};
-
-us_submit_prog.show = function() {
-    const ele = us_submit_prog.element();
-    if ( ele ) {
-        ele.classList.remove( 'd-none' );
-    }
-};
-
-us_submit_prog.hide = function() {
-    const ele = us_submit_prog.element();
-    if ( ele ) {
-        ele.classList.add( 'd-none' );
-    }
-};
-
-us_submit_prog.msg.prep = function( x ) {
-    us_submit_prog.update( `preparing datasets - ${x} remaining` );
-};
-
-us_submit_prog.msg.submit = function( x ) {
-    us_submit_prog.update( `submitting ${x}` );
-};

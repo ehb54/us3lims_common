@@ -36,14 +36,6 @@
     padding: 0 1em;
 }
 
-.font-mono-center-20px {
-    color: darkblue;
-    background: white;
-    font-family: monospace;
-    font-size: 20px;
-    text-align: center
-}
-
 .m-2em-0-20em {
     margin: 2em 0em 20em;
 }

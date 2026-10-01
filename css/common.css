@@ -449,6 +449,19 @@ fieldset#clusters tr.subheader th
   font-size  : x-small;
 }
 
+.submit-progress {
+  color                 : darkblue;
+  background            : white;
+  font-family           : monospace;
+  font-size             : 20px;
+  text-align            : center;
+}
+
+/* Only the newest progress line shows; all are hidden once the page follows */
+.submit-progress:has(~ *) {
+  display               : none;
+}
+
 #fixed {
   table-layout: fixed;
   word-wrap: break-word;

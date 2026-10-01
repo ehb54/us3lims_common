@@ -711,6 +711,17 @@ class jobsubmit
       $method_demand = max( $method_demand, $ppbj );
       $desired       = max( $method_demand, $minimum );
 
+      ## GA: one MPI rank per deme plus the master. More demes than the cluster
+      ## permits are limited to its capacity, as the GA page says, not refused.
+      $maxproc = (int) $cfg[ 'maxproc' ];
+      if ( preg_match( "/GA/", $this->data[ 'method' ] )  &&  $maxproc > 1  &&  $desired > $maxproc )
+      {
+         $note = "GA limited to $maxproc tasks (" . ( $maxproc - 1 ) . " demes) on cluster $cluster";
+         if ( ! in_array( $note, $this->message, true ) )
+            $this->message[] = $note;
+         $desired = $maxproc;
+      }
+
       return [
          'minimum'      => (int) $minimum,
          'desired'      => (int) $desired,
@@ -721,6 +732,7 @@ class jobsubmit
    private function gaTasksPerGroup( $cluster, $parameters, $ppbj, $fixed, $minimum )
    {
       $demes = isset( $parameters[ 'demes' ] ) ? (int) $parameters[ 'demes' ] : 1;
+      $auto  = ( $demes == 1 );    ## the user left the deme count to the system
       if ( $demes == 1 )
       {
          $demes = $ppbj - 1;
@@ -735,7 +747,17 @@ class jobsubmit
          $ppbj = $demes + 1;
          $this->grid[ $cluster ][ 'ppbj' ] = $ppbj;
       }
-      return (int)( ( $demes + $ppbj ) / $ppbj ) * $ppbj;
+      $tasks = (int)( ( $demes + $ppbj ) / $ppbj ) * $ppbj;
+
+      ## As on main: with the deme count left to the system and fewer than 16
+      ## tasks per base job, GA runs twice the ranks. Several small demes evolve
+      ## better than one large one, where a dominant trait can eliminate
+      ## competitors before they are fully expressed. An explicit count is kept.
+      if ( $auto  &&  (int) $this->grid[ $cluster ][ 'ppbj' ] < 16 )
+      {
+         $tasks *= 2;
+      }
+      return $tasks;
    }
 
    ## Return the resource plan, or false with an error when it cannot fit.

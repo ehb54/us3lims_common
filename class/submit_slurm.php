@@ -64,7 +64,7 @@ class submit_slurm extends jobsubmit
          }
          else
          {
-            $this->message[] = "ERROR: job {$this->data['eprfile']} was accepted, but submission"
+            $this->message[] = "WARNING: job {$this->data['eprfile']} was accepted, but submission"
                              . " setup failed: " . $error->getMessage();
          }
       }
@@ -89,19 +89,19 @@ class submit_slurm extends jobsubmit
 
       $this->message[] = "stage_files: cluster=$cluster login=$login workdir=$workdir";
 
-      ## Create the working directory on the submithost
-      $mk = $this->ssh( $cluster, "/bin/mkdir -p $workdir", [ 'label' => 'stage:mkdir' ] );
-      if ( ! $mk[ 'ok' ] ) {
-         $this->stage_error = $this->stageFailure( 'mkdir', $workdir, $mk );
-         return false;
-      }
-
-      ## Generate slurm script locally
+      ## Generate (and check) the slurm script locally before touching the cluster
       $slufile = $this->write_slurm_script( $cluster, $requestID, $workdir, $tarfile );
       if ( $slufile === false ) {
          ## The specific reason is already in message[]; this is the
          ## autoflow failure category.
          $this->stage_error = 'resource plan rejected';
+         return false;
+      }
+
+      ## Create the working directory on the submithost
+      $mk = $this->ssh( $cluster, "/bin/mkdir -p $workdir", [ 'label' => 'stage:mkdir' ] );
+      if ( ! $mk[ 'ok' ] ) {
+         $this->stage_error = $this->stageFailure( 'mkdir', $workdir, $mk );
          return false;
       }
 
@@ -274,27 +274,42 @@ class submit_slurm extends jobsubmit
    ## ID did not make it back across SSH.
    private function attemptSubmit( $cluster, $workdir )
    {
-      $result = $this->sbatchOnce( $cluster, $workdir, 1 );
+      ## A retry is safe only when sbatch provably never started (the command's
+      ## begin marker never came back, e.g. a connect failure or an open breaker).
+      $retries = (int) ( $this->grid[ $cluster ][ 'submit_retries' ]
+                         ?? $GLOBALS[ 'global_sbatch_submit_retries' ] ?? 3 );
+      $wait    = (int) ( $this->grid[ $cluster ][ 'submit_retry_wait' ]
+                         ?? $GLOBALS[ 'global_sbatch_submit_retry_wait_seconds' ] ?? 5 );
 
-      if ( $result[ 'ok' ] ) {
-         return array(
-            'submit_ok' => true,
-            'job_id'    => $result[ 'job_id' ],
-            'error'     => '',
-            'attempt'   => 1,
-         );
+      for ( $attempt = 1; ; $attempt++ )
+      {
+         $result = $this->sbatchOnce( $cluster, $workdir, $attempt );
+
+         if ( $result[ 'ok' ] ) {
+            return array( 'submit_ok' => true, 'job_id' => $result[ 'job_id' ], 'error' => '', 'attempt' => $attempt );
+         }
+
+         ## Unreachable with no begin marker: ssh never ran the command.
+         $never_started = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE && empty( $result[ 'began' ] );
+         if ( ! $never_started || $attempt > $retries ) {
+            break;
+         }
+
+         $this->pause( $wait );
+         $wait *= 2;
       }
 
-      $error = $result[ 'error' ]
-             . "; automatic retry disabled because sbatch is non-idempotent; "
-             . "the submission outcome may be unknown, so reconcile on the cluster before resubmitting";
+      $error = $never_started
+             ? $result[ 'error' ] . "; sbatch never started, so nothing was submitted"
+             : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
+               . " outcome is unknown: reconcile on the cluster before resubmitting";
 
-      return array(
-         'submit_ok' => false,
-         'job_id'    => '',
-         'error'     => $error,
-         'attempt'   => 1,
-      );
+      return array( 'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt );
+   }
+
+   protected function pause( $seconds )
+   {
+      sleep( $seconds );
    }
 
    ## Run sbatch --parsable once via SSH and validate the result.
@@ -335,7 +350,8 @@ class submit_slurm extends jobsubmit
                  ? "cluster unreachable ({$res['class']}): $detail"
                  : "sbatch exited $exit_code: $detail";
 
-         return array( 'ok' => false, 'job_id' => '', 'error' => $error, 'class' => $res[ 'class' ] );
+         return array( 'ok' => false, 'job_id' => '', 'error' => $error, 'class' => $res[ 'class' ],
+                       'began' => ! empty( $res[ 'began' ] ) );
       }
 
       ## Parse --parsable output: "12345" or "12345;clustername"
@@ -382,7 +398,8 @@ class submit_slurm extends jobsubmit
    }
 
    ## Record the job in both databases and launch jobmonitor.
-   ## Keep the ERROR: prefix: submission pages use it to detect failures.
+   ## After sbatch accepted the job, problems are WARNING: (the job is running);
+   ## ERROR: is kept for submissions that did not happen.
    public function update_db()
    {
       $ok = true;
@@ -399,7 +416,7 @@ class submit_slurm extends jobsubmit
       ## Write to instance DB
       $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
       if ( ! $link ) {
-         $this->message[] = "ERROR: cannot connect to $dbhost:$dbname - job is running but unrecorded";
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: cannot connect to $dbhost:$dbname - job is running but unrecorded";
          return false;
       }
 
@@ -410,7 +427,7 @@ class submit_slurm extends jobsubmit
              . "gfacID='$slurm_id'";
       $result = mysqli_query( $link, $query );
       if ( ! $result ) {
-         $this->message[] = "ERROR: HPCAnalysisResult insert failed - job is running but "
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: HPCAnalysisResult insert failed - job is running but "
                           . "unrecorded: " . mysqli_error( $link );
          mysqli_close( $link );
          return false;
@@ -425,7 +442,7 @@ class submit_slurm extends jobsubmit
                 . "WHERE requestID='$autoflowID'";
          $result = mysqli_query( $link, $query );
          if ( ! $result ) {
-            $this->message[] = "ERROR: autoflowAnalysis update failed - the pipeline will not "
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: autoflowAnalysis update failed - the pipeline will not "
                              . "advance: " . mysqli_error( $link );
             $ok = false;
          }
@@ -436,7 +453,7 @@ class submit_slurm extends jobsubmit
       ## Write to global gfac DB (job tracking)
       $gfac_link = mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
       if ( ! $gfac_link ) {
-         $this->message[] = "ERROR: cannot connect to global DB $globaldbhost:$globaldbname - "
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: cannot connect to global DB $globaldbhost:$globaldbname - "
                           . "job will not be tracked";
          return false;
       }
@@ -448,7 +465,7 @@ class submit_slurm extends jobsubmit
              . "us3_db='$dbname'";
       $result = mysqli_query( $gfac_link, $query );
       if ( ! $result ) {
-         $this->message[] = "ERROR: gfac.analysis insert failed - job will not be tracked or "
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "
                           . "cleaned up: " . mysqli_error( $gfac_link );
          $ok = false;
       }
@@ -466,7 +483,7 @@ class submit_slurm extends jobsubmit
          $exit_code = $res[ 'class' ] === remote_exec::OK ? 0 : 1;
          if ( $exit_code !== 0 )
          {
-            $this->message[] = 'ERROR: monitor transport failed: ' . $res[ 'class' ];
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: monitor transport failed: " . $res[ 'class' ];
          }
       } else {
          $php     = escapeshellarg( $this->monitor_php_binary() );
@@ -492,7 +509,7 @@ class submit_slurm extends jobsubmit
 
       if ( $exit_code !== 0 ) {
          ## A failed monitor launch leaves the recorded job without monitoring.
-         $this->message[] = "ERROR: jobmonitor launch failed (exit=$exit_code) - job will not "
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: jobmonitor launch failed (exit=$exit_code) - job will not "
                           . "be monitored";
          $ok = false;
       } else {
@@ -700,7 +717,13 @@ class submit_slurm extends jobsubmit
    private function buildEnvLines( $cfg )
    {
       $block = trim( $cfg[ 'env_script_lines' ] ?? '' );
-      return $block !== '' ? "\n" . $block . "\n\n" : "\n";
+      if ( $block === '' )
+      {
+         ## Without it the job starts with no modules or MPI and fails at runtime.
+         throw new UnexpectedValueException( "cluster has no env_script_lines in global_config.php;"
+            . " run php ~us3/lims/database/utils/uslims_upgrade.php" );
+      }
+      return "\n" . $block . "\n\n";
    }
 
 }

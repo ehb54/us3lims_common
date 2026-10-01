@@ -156,6 +156,16 @@ class circuit_breaker
          @mkdir( $this->dir, 0770, true );
       }
 
+      ## Shared state that decides whether a cluster is contacted: refuse a
+      ## symlinked directory or one owned by anyone but us3 or root.
+      $us3   = function_exists( 'posix_getpwnam' ) ? posix_getpwnam( 'us3' ) : false;
+      $owner = @fileowner( $this->dir );
+      if ( is_link( $this->dir ) || ( $us3 && $owner !== $us3[ 'uid' ] && $owner !== 0 ) )
+      {
+         $this->log( "state directory {$this->dir} is a symlink or not owned by us3; breaker disabled" );
+         return $this->usable = false;
+      }
+
       return $this->usable = ( is_dir( $this->dir ) && is_writable( $this->dir ) );
    }
 
@@ -163,6 +173,11 @@ class circuit_breaker
    private function read( $cluster )
    {
       if ( ! $this->usable() )
+      {
+         return null;
+      }
+
+      if ( is_link( $this->path( $cluster ) ) )
       {
          return null;
       }
@@ -176,9 +191,10 @@ class circuit_breaker
          return null;
       }   ## torn or corrupt write: treat as closed and let it be overwritten
 
+      ## Never open for longer than one cooldown, whatever the file says.
       return array(
          'failures'   => (int) $state[ 'failures' ],
-         'open_until' => (int) $state[ 'open_until' ],
+         'open_until' => min( (int) $state[ 'open_until' ], time() + $this->cooldown ),
          'updated'    => (int) ( $state[ 'updated' ] ?? 0 ),
       );
    }
@@ -195,10 +211,11 @@ class circuit_breaker
       }
 
       $path = $this->path( $cluster );
-      $tmp  = $path . '.' . getmypid() . '.tmp';
+      $tmp  = @tempnam( $this->dir, '.brk-' );   ## a new file: never follows a planted symlink
 
-      if ( @file_put_contents( $tmp, json_encode( $state ) ) === false )
+      if ( $tmp === false || @file_put_contents( $tmp, json_encode( $state ) ) === false )
       {
+         if ( $tmp !== false ) @unlink( $tmp );
          return;
       }
 

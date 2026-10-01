@@ -23,10 +23,10 @@ $global_max_run_time_hours   = 0;
 
 ## abandonment ceiling, in hours since last status update.
 ##
-## gridctl defers the stall timers above while a cluster is unreachable. This
-## caps that deferral: past this many hours the job is closed out as a
-## timeout, with autoflow status CLUSTER_UNAVAILABLE so the reason is not
-## confused with a job failure. Zero defers indefinitely.
+## While a cluster is unreachable gridctl defers the stall timers above, and
+## keeps retrying a finished job's results. This caps both: past this many
+## hours the job is closed out as failed. With the stall timers at zero it
+## only limits the result retries. Zero defers indefinitely.
 ##
 ## Make it comfortably longer than a routine maintenance window: it should
 ## catch a site that is gone, not a site that is down for the afternoon.
@@ -57,12 +57,12 @@ $global_complete_max_seconds   = 21600;
 $global_cluster_status_max_age_seconds = 900;
 
 
-## Optional shared breaker directory; defaults to remote_exec::BREAKER_DIR.
-## Provision it with owner/group permissions that let every cluster-calling
-## account write it. Automatic creation uses 0770 and does not establish a
-## shared group. An unwritable directory disables shared outage tracking.
+## Optional shared breaker directory; defaults to ~us3/lims/etc/circuit-breaker.
+## Provision it as 2770 us3:<web group> so the web tier and the us3 daemons
+## share it. It must be owned by us3 (or root) and not be a symlink, or the
+## breaker is disabled. Not under /var/tmp: PrivateTmp splits it per service.
 
-## $global_circuit_breaker_dir = '/var/tmp/us3-circuit-breaker';
+## $global_circuit_breaker_dir = '/home/us3/lims/etc/circuit-breaker';
 
 ## does this install serve a single tenant (a USiaB appliance) or many
 ## (a shared LIMS host)?  governs whether the queue views scope rows to this
@@ -97,7 +97,8 @@ $single_tenant_deployment = false;
 ##
 ## Optional connection and script settings:
 ##   login                string  SSH user@host, overriding us3@name
-##   ssh_host_key_policy  string  accept-new (default), or yes for preinstalled keys
+##   ssh_host_key_policy  string  yes (default: unknown host keys are rejected), or
+##                                accept-new while provisioning (OpenSSH 7.6+)
 ##   env_script_lines     string  shell preamble for modules and environment variables
 ##   mpi_launcher         string  mpirun (default), srun, or ibrun
 ##   sbatch_directives    array   complete single-line "#SBATCH " directives

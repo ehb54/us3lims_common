@@ -251,7 +251,7 @@ $cluster_details =
          ,'ppbj'               => 8
          ,'maxproc'            => 128
          ,'pmg'                => true
-         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/home/us3/cluster/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/home/us3/cluster/bin:\$PATH"
+         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
      ]
      ,'demeler9-local' => [
          'active'              => false
@@ -383,7 +383,7 @@ $cluster_details =
          ,'maxproc'            => 8
          ,'single_node'        => true
          ,'usemaxtime'         => true
-         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
+         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
      ]
      ## Set ppn, ppbj and maxproc to the appliance capacity at installation.
      ## ppn must match Slurm CPUTot.
@@ -403,7 +403,7 @@ $cluster_details =
          ,'pmg'                => true
          ,'usemaxtime'         => true
          ,'single_node'        => true
-         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
+         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
      ]
      ,'us3iab-node1' => [
          'active'              => false
@@ -420,7 +420,7 @@ $cluster_details =
          ,'pmg'                => true
          ,'usemaxtime'         => true
          ,'single_node'        => true
-         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
+         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
      ]
 
     ];

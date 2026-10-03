@@ -458,7 +458,58 @@ class remote_exec
       ## scp reports transport failures as exit 1, so only scp needs the patterns.
       $transportFailed = $exit_code === self::EXIT_SSH_ERROR
                          || ( $is_scp && $this->is_transport_error( $stderr ) );
-      return $transportFailed ? self::UNREACHABLE : self::REMOTE_FAIL;
+
+      if ( $transportFailed )
+      {
+         return self::UNREACHABLE;
+      }
+
+      ## ssh succeeded but the scheduler behind it did not answer. That is an
+      ## infrastructure fault, not a command result: nothing was learned about the
+      ## job, and the cluster cannot take work. Classed as a command failure it
+      ## recorded a breaker *success* throughout a controller outage, and on a host
+      ## that reaches its own scheduler over ssh nothing else would ever fault.
+      if ( ! $is_scp && $this->is_scheduler_unreachable( $stderr ) )
+      {
+         return self::UNREACHABLE;
+      }
+
+      return self::REMOTE_FAIL;
+   }
+
+   /**
+    * Did the scheduler itself fail to answer? Separate from a job's own failure:
+    * these are slurmctld being down, restarting or saturated, which no retry of
+    * the command can turn into an answer about the job.
+    */
+   public function is_scheduler_unreachable( $stderr )
+   {
+      if ( (string) $stderr === '' )
+      {
+         return false;
+      }
+
+      $patterns = array(
+         ## sbatch, squeue, sinfo and scancel all report the controller this way.
+         'Unable to contact slurm ?controller',
+         'Unable to contact slurm controller \(connect failure\)',
+         ## The controller accepted the connection and then stopped answering.
+         'Socket timed out on send/recv operation',
+         'Zero Bytes were transmitted or received',
+         ## slurmctld up but its database is not, so it cannot answer either.
+         'Slurm temporarily unable to accept job',
+         'Slurmctld running but not accepting requests',
+      );
+
+      foreach ( $patterns as $pattern )
+      {
+         if ( preg_match( '#' . $pattern . '#i', (string) $stderr ) )
+         {
+            return true;
+         }
+      }
+
+      return false;
    }
 
    /** Authentication and host-key failures are configuration errors: retrying cannot help. */

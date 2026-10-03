@@ -125,6 +125,8 @@ $single_tenant_deployment = false;
 ##   sbatch_directives    array   complete single-line "#SBATCH " directives
 ##                               mempercore supplies --mem-per-cpu if this is empty
 ##   usemaxtime           bool    use maxtime directly (0 emits 00:00:00)
+##                               local clusters use maxtime 0 with usemaxtime: no limit;
+##                               only national HPC entries request a walltime
 ##   wall_override        int     fixed walltime in minutes unless usemaxtime is set
 ##                               estimates and overrides are capped by maxtime
 ##
@@ -247,7 +249,8 @@ $cluster_details =
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'batch'
-         ,'maxtime'            => 5760
+         ,'maxtime'            => 0
+         ,'usemaxtime'         => true
          ,'ppn'                => 64
          ,'ppbj'               => 8
          ,'maxproc'            => 64
@@ -260,7 +263,8 @@ $cluster_details =
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'batch'
-         ,'maxtime'            => 5760
+         ,'maxtime'            => 0
+         ,'usemaxtime'         => true
          ,'ppn'                => 128
          ,'ppbj'               => 8
          ,'maxproc'            => 128
@@ -274,7 +278,8 @@ $cluster_details =
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'batch'
-         ,'maxtime'            => 5760
+         ,'maxtime'            => 0
+         ,'usemaxtime'         => true
          ,'ppn'                => 128
          ,'ppbj'               => 8
          ,'maxproc'            => 128
@@ -374,7 +379,8 @@ $cluster_details =
          ,'workdir'            => '/home/bd142854e/cluster/work/'
          ,'sshport'            => 22
          ,'queue'              => 'griz_partition'
-         ,'maxtime'            => 5760
+         ,'maxtime'            => 0
+         ,'usemaxtime'         => true
          ,'ppn'                => 72
          ,'ppbj'               => 36
          ,'maxproc'            => 144

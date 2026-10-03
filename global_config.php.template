@@ -16,7 +16,8 @@ $admin_list = [
 ## these times are in hours *since last status update*
 ## status updates generally happen somewhat frequently
 ## if UDP messaging from the cluster isn't working, then status updates will be missed
-## set to zero to disable
+## set to zero to disable, which is the default: a job is left for its submitter
+## to cancel, since a missed status update is not evidence of a hang
 
 $global_max_queue_time_hours = 0;
 $global_max_run_time_hours   = 0;

@@ -1,8 +1,14 @@
 <?php
 /*
- * Share per-cluster transport failure counts across processes.
- * Calls fail fast after the threshold until the cooldown expires.
- * State files require a directory writable by all callers.
+ * Per-cluster transport failure counts, shared across the processes of one
+ * account. Calls fail fast after the threshold until the cooldown expires.
+ *
+ * State is kept per account, in a subdirectory of $dir owned by the account that
+ * writes it, with files at 0600. The web tier and the us3 daemons therefore each
+ * keep their own counts rather than sharing one group-writable file: a state file
+ * that decides whether a cluster is contacted should not be writable by another
+ * account. The cost is that a breaker tripped by the web tier does not back off
+ * the daemons, and the other way round; each still backs itself off.
  */
 
 class circuit_breaker
@@ -131,12 +137,42 @@ class circuit_breaker
 
    ## ---------------------------------------------------------------- internals
 
+   ## The account this process runs as, for the state subdirectory. The name when
+   ## it can be read, else the uid: both are stable and filename-safe.
+   private function account()
+   {
+      $uid = function_exists( 'posix_geteuid' ) ? posix_geteuid() : null;
+
+      if ( $uid !== null && function_exists( 'posix_getpwuid' ) )
+      {
+         $pw = @posix_getpwuid( $uid );
+         if ( is_array( $pw ) && isset( $pw[ 'name' ] ) && $pw[ 'name' ] !== '' )
+         {
+            return preg_replace( '/[^A-Za-z0-9._-]/', '_', $pw[ 'name' ] );
+         }
+      }
+
+      return $uid === null ? 'unknown' : (string) $uid;
+   }
+
+   /** Where this account's state files live. Public so an installer check and the
+    *  tests can look at the real location rather than rebuild the rule. */
+   public function state_directory()
+   {
+      return $this->dir . '/' . $this->account();
+   }
+
+   private function state_dir()
+   {
+      return $this->state_directory();
+   }
+
    private function path( $cluster )
    {
       ## Restrict cluster names to filename-safe characters.
       $safe = preg_replace( '/[^A-Za-z0-9._-]/', '_', (string) $cluster );
 
-      return $this->dir . '/' . $safe . '.brk';
+      return $this->state_dir() . '/' . $safe . '.brk';
    }
 
    private function usable()
@@ -156,8 +192,9 @@ class circuit_breaker
          @mkdir( $this->dir, 0770, true );
       }
 
-      ## Shared state that decides whether a cluster is contacted: refuse a
-      ## symlinked directory or one owned by anyone but us3 or root.
+      ## State that decides whether a cluster is contacted: refuse a symlinked
+      ## parent or one owned by anyone but us3 or root. The parent is shared
+      ## ground, so another account could otherwise plant something in it.
       $us3   = function_exists( 'posix_getpwnam' ) ? posix_getpwnam( 'us3' ) : false;
       $owner = @fileowner( $this->dir );
       if ( is_link( $this->dir ) || ( $us3 && $owner !== $us3[ 'uid' ] && $owner !== 0 ) )
@@ -166,7 +203,24 @@ class circuit_breaker
          return $this->usable = false;
       }
 
-      return $this->usable = ( is_dir( $this->dir ) && is_writable( $this->dir ) );
+      ## This account's own subdirectory, 0700: nothing another account writes can
+      ## change what this one believes about a cluster.
+      $mine = $this->state_dir();
+
+      if ( ! is_dir( $mine ) )
+      {
+         @mkdir( $mine, 0700, true );
+      }
+
+      $euid = function_exists( 'posix_geteuid' ) ? posix_geteuid() : null;
+      $own  = @fileowner( $mine );
+      if ( is_link( $mine ) || ( $euid !== null && $own !== $euid && $own !== 0 ) )
+      {
+         $this->log( "state directory $mine is a symlink or not owned by this account; breaker disabled" );
+         return $this->usable = false;
+      }
+
+      return $this->usable = ( is_dir( $mine ) && is_writable( $mine ) );
    }
 
    /** Returns null when there is no usable state, which callers read as "closed". */
@@ -211,13 +265,17 @@ class circuit_breaker
       }
 
       $path = $this->path( $cluster );
-      $tmp  = @tempnam( $this->dir, '.brk-' );   ## a new file: never follows a planted symlink
+      $tmp  = @tempnam( $this->state_dir(), '.brk-' );   ## a new file: never follows a planted symlink
 
       if ( $tmp === false || @file_put_contents( $tmp, json_encode( $state ) ) === false )
       {
          if ( $tmp !== false ) @unlink( $tmp );
          return;
       }
+
+      ## tempnam() already creates 0600; said explicitly because the mode is part
+      ## of the contract, not an incidental property of how the file was made.
+      @chmod( $tmp, 0600 );
 
       if ( ! @rename( $tmp, $path ) )
       {

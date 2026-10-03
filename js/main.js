@@ -291,7 +291,11 @@ document.addEventListener('submit', function(event) {
     } catch ( error ) {
         event.preventDefault();
         console.error( 'submit validation failed:', error );
+        // The message goes in the alert too. Without it the only way to find out
+        // what went wrong is the browser console, which is not somewhere a
+        // scientist reporting a failed submission will look.
+        const detail = error && error.message ? '\n\n' + error.message : '';
         alert( 'This form could not be checked, so it was not submitted. '
-             + 'Please review the values and try again.' );
+             + 'Please review the values and try again.' + detail );
     }
 });

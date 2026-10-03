@@ -458,7 +458,58 @@ class remote_exec
       ## scp reports transport failures as exit 1, so only scp needs the patterns.
       $transportFailed = $exit_code === self::EXIT_SSH_ERROR
                          || ( $is_scp && $this->is_transport_error( $stderr ) );
-      return $transportFailed ? self::UNREACHABLE : self::REMOTE_FAIL;
+
+      if ( $transportFailed )
+      {
+         return self::UNREACHABLE;
+      }
+
+      ## ssh succeeded but the scheduler behind it did not answer. That is an
+      ## infrastructure fault, not a command result: nothing was learned about the
+      ## job, and the cluster cannot take work. Classed as a command failure it
+      ## recorded a breaker *success* throughout a controller outage, and on a host
+      ## that reaches its own scheduler over ssh nothing else would ever fault.
+      if ( ! $is_scp && $this->is_scheduler_unreachable( $stderr ) )
+      {
+         return self::UNREACHABLE;
+      }
+
+      return self::REMOTE_FAIL;
+   }
+
+   /**
+    * Did the scheduler itself fail to answer? Separate from a job's own failure:
+    * these are slurmctld being down, restarting or saturated, which no retry of
+    * the command can turn into an answer about the job.
+    */
+   public function is_scheduler_unreachable( $stderr )
+   {
+      if ( (string) $stderr === '' )
+      {
+         return false;
+      }
+
+      $patterns = array(
+         ## sbatch, squeue, sinfo and scancel all report the controller this way.
+         'Unable to contact slurm ?controller',
+         'Unable to contact slurm controller \(connect failure\)',
+         ## The controller accepted the connection and then stopped answering.
+         'Socket timed out on send/recv operation',
+         'Zero Bytes were transmitted or received',
+         ## slurmctld up but its database is not, so it cannot answer either.
+         'Slurm temporarily unable to accept job',
+         'Slurmctld running but not accepting requests',
+      );
+
+      foreach ( $patterns as $pattern )
+      {
+         if ( preg_match( '#' . $pattern . '#i', (string) $stderr ) )
+         {
+            return true;
+         }
+      }
+
+      return false;
    }
 
    /** Authentication and host-key failures are configuration errors: retrying cannot help. */
@@ -538,13 +589,17 @@ class remote_exec
            . ' -o StrictHostKeyChecking=' . $this->hostKeyPolicy();
    }
 
+   ## Called from the constructor, and again where the ssh options are built: the
+   ## second call costs nothing and keeps the guarantee local to the thing it
+   ## protects, so the policy cannot be weakened by a later change to $details.
    private function hostKeyPolicy()
    {
       ## Unknown host keys are rejected unless a cluster opts in (e.g. while provisioning).
       $value = $this->details[ 'ssh_host_key_policy' ] ?? 'yes';
       if ( ! in_array( $value, [ 'yes', 'accept-new' ], true ) )
       {
-         throw new InvalidArgumentException( 'ssh_host_key_policy must be yes or accept-new' );
+         throw new InvalidArgumentException(
+            "remote_exec: cluster '{$this->cluster}' ssh_host_key_policy must be yes or accept-new" );
       }
       return $value;
    }
@@ -658,6 +713,13 @@ class remote_exec
                . "use remote_exec_overrides for a demonstrated timeout exception" );
          }
       }
+
+      ## Validated here, with the other cluster-entry checks, rather than only
+      ## where the ssh options are built: a typo used to surface as an exception
+      ## from deep inside a poll, which ended a jobmonitor mid-job. The submit
+      ## path already catches a constructor throw and reports a configuration
+      ## failure, which is what should happen to a bad cluster entry.
+      $this->hostKeyPolicy();
 
       if ( ! array_key_exists( 'remote_exec_overrides', $this->details ) )
       {

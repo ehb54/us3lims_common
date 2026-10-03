@@ -269,9 +269,10 @@ class submit_slurm extends jobsubmit
       elog2( "submit_job: slurm_job_id=$slurm_job_id confirmed after " . $submitResult[ 'attempt' ] . " attempt(s)" );
    }
 
-   ## Run sbatch once via SSH and validate its result. A failure is deliberately
-   ## not retried: the remote command may have reached Slurm even when its job
-   ## ID did not make it back across SSH.
+   ## Run sbatch via SSH and validate its result. Retried only when it provably
+   ## never started, per the condition below: once the command has begun, a lost
+   ## reply may mean Slurm accepted the job and only its ID went missing, and
+   ## retrying then would create a duplicate.
    private function attemptSubmit( $cluster, $workdir )
    {
       ## A retry is safe only when sbatch provably never started (the command's

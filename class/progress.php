@@ -1,25 +1,20 @@
-<div id=_submitprogress style="color:darkblue;background:white;font-family:monospace;font-size:20px;text-align:center"></div>
-<script>
-us_submit_prog     = {};
-us_submit_prog.msg = {};
-us_submit_prog.ele = document.getElementById("_submitprogress");
-us_submit_prog.update = function( msg ) {
-    us_submit_prog.ele.innerHTML=msg;
+<?php
+// Submission progress as plain markup, so CSP allows it; common.css shows only the newest line.
+function submit_progress( $msg )
+{
+  static $styled = false;
+
+  if ( PHP_SAPI === 'cli' )
+    return;
+
+  if ( ! $styled )
+  {
+    echo "<link rel='stylesheet' type='text/css' href='css/common.css' />\n";
+    $styled = true;
+  }
+
+  echo "<div class='submit-progress'>" . htmlspecialchars( $msg ) . "</div>\n";
+  if ( ob_get_level() > 0 )
+    ob_flush();
+  flush();
 }
-us_submit_prog.append = function( msg ) {
-    us_submit_prog.ele.innerHTML += "<br>" + msg;
-}
-us_submit_prog.show = function() {
-    us_submit_prog.ele.style.display = "block";
-}
-us_submit_prog.hide = function() {
-    us_submit_prog.ele.style.display = "none";
-}
-us_submit_prog.msg.prep = function( x ) {
-    us_submit_prog.update( `preparing datasets - ${x} remaining` );
-}
-us_submit_prog.msg.submit = function( x ) {
-    us_submit_prog.update( `submitting ${x}` );
-}
-us_submit_prog.hide();
-</script>

@@ -16,7 +16,8 @@ $admin_list = [
 ## these times are in hours *since last status update*
 ## status updates generally happen somewhat frequently
 ## if UDP messaging from the cluster isn't working, then status updates will be missed
-## set to zero to disable
+## set to zero to disable, which is the default: a job is left for its submitter
+## to cancel, since a missed status update is not evidence of a hang
 
 $global_max_queue_time_hours = 0;
 $global_max_run_time_hours   = 0;
@@ -50,23 +51,35 @@ $global_sbatch_submit_retry_wait_seconds = 5;
 $global_complete_grace_seconds = 600;
 $global_complete_max_seconds   = 21600;
 
-## sbatch is deliberately submitted once. An SSH failure can happen after
-## Slurm accepted the job but before its ID reached LIMS, so retry/backoff here
-## would risk creating a duplicate. Reconcile an uncertain submission on the
-## scheduler before asking LIMS to submit it again.
+## sbatch is retried only when it provably never started: the command's begin
+## marker never came back, as with a connect failure or an open breaker. An SSH
+## failure after that marker can mean Slurm accepted the job while its ID was
+## lost on the way back, and retrying then would create a duplicate, so those are
+## left for an operator to reconcile on the scheduler.
+## $global_sbatch_submit_retries and $global_sbatch_submit_retry_wait_seconds set
+## the budget; unset, the code uses 3 attempts 5 seconds apart.
 
 ## Remote execution budgets, retries and breaker policy are defined in
 ## class/remote_exec.php. GNU timeout is required for wall-clock limits.
 
-## Maximum age of cluster health records in seconds. Stale records are
-## treated as down. Set to a few probe intervals, or zero to disable.
-$global_cluster_status_max_age_seconds = 900;
+## Maximum age of cluster health records in seconds. Stale records are treated
+## as down, and so is a cluster with no record at all. cluster_status.php runs
+## every 12 minutes, so this wants to be at least two probe intervals or one slow
+## probe marks a healthy cluster down. Zero disables the age check. Unset, the
+## code uses 1800, which is what this matches.
+$global_cluster_status_max_age_seconds = 1800;
 
 
-## Optional shared breaker directory; defaults to ~us3/lims/etc/circuit-breaker.
-## Provision it as 2770 us3:<web group> so the web tier and the us3 daemons
-## share it. It must be owned by us3 (or root) and not be a symlink, or the
-## breaker is disabled. Not under /var/tmp: PrivateTmp splits it per service.
+## Optional breaker directory; defaults to ~us3/lims/etc/circuit-breaker.
+## Provision it as 2770 us3:<web group> so both the web tier and the us3 daemons
+## can create their own state directory inside it. It must be owned by us3 (or
+## root) and not be a symlink, or the breaker is disabled. Not under /var/tmp:
+## PrivateTmp splits it per service.
+##
+## Each account keeps its own state in a 0700 subdirectory with 0600 files, so a
+## file deciding whether a cluster is contacted is never writable by another
+## account. A breaker tripped by the web tier therefore does not back off the
+## daemons, and the other way round.
 
 ## $global_circuit_breaker_dir = '/home/us3/lims/etc/circuit-breaker';
 
@@ -74,7 +87,8 @@ $global_cluster_status_max_age_seconds = 900;
 ## (a shared LIMS host)?  governs whether the queue views scope rows to this
 ## instance's database or show every tenant's jobs to a level-4 admin.
 ## this is a property of the deployment, not of any one cluster.
-## set it explicitly. unset means multi-tenant.
+## set it explicitly: unset reads as single tenant, the narrower of the two, so a
+## shared host that never sets it hides other tenants' jobs from its admins.
 
 $single_tenant_deployment = false;
 
@@ -111,6 +125,8 @@ $single_tenant_deployment = false;
 ##   sbatch_directives    array   complete single-line "#SBATCH " directives
 ##                               mempercore supplies --mem-per-cpu if this is empty
 ##   usemaxtime           bool    use maxtime directly (0 emits 00:00:00)
+##                               local clusters use maxtime 0 with usemaxtime: no limit;
+##                               only national HPC entries request a walltime
 ##   wall_override        int     fixed walltime in minutes unless usemaxtime is set
 ##                               estimates and overrides are capped by maxtime
 ##
@@ -233,7 +249,8 @@ $cluster_details =
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'batch'
-         ,'maxtime'            => 5760
+         ,'maxtime'            => 0
+         ,'usemaxtime'         => true
          ,'ppn'                => 64
          ,'ppbj'               => 8
          ,'maxproc'            => 64
@@ -246,7 +263,8 @@ $cluster_details =
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'batch'
-         ,'maxtime'            => 5760
+         ,'maxtime'            => 0
+         ,'usemaxtime'         => true
          ,'ppn'                => 128
          ,'ppbj'               => 8
          ,'maxproc'            => 128
@@ -260,7 +278,8 @@ $cluster_details =
          ,'workdir'            => '/home/us3/lims/work/'
          ,'sshport'            => 22
          ,'queue'              => 'batch'
-         ,'maxtime'            => 5760
+         ,'maxtime'            => 0
+         ,'usemaxtime'         => true
          ,'ppn'                => 128
          ,'ppbj'               => 8
          ,'maxproc'            => 128
@@ -343,7 +362,8 @@ $cluster_details =
          ,'workdir'            => '/home/bd142854e/cluster/work/'
          ,'sshport'            => 22
          ,'queue'              => 'griz_partition'
-         ,'maxtime'            => 5760
+         ,'maxtime'            => 0
+         ,'usemaxtime'         => true
          ,'ppn'                => 72
          ,'ppbj'               => 36
          ,'maxproc'            => 144
@@ -370,6 +390,13 @@ $cluster_details =
      ]
      ## Set ppn, ppbj and maxproc to the appliance capacity at installation.
      ## ppn must match Slurm CPUTot.
+     ##
+     ## On an Ansible-built host, config-lims-mpi-runtime rewrites ppn, ppbj,
+     ## maxproc and env_script_lines for the cluster named by lims_local_cluster
+     ## (us3iab-node0 by default), picking mpich over openmpi from its candidate
+     ## list. It rewrites that one entry only, so the values below are what every
+     ## other appliance entry actually runs with, on a roles host as much as on a
+     ## hand-built one. Keep them matching the runtime the nodes have installed.
      ,'us3iab-node0' => [
          'active'              => true
          ,'name'               => 'us3iab-node0.localhost'

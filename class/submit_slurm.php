@@ -152,6 +152,12 @@ class submit_slurm extends jobsubmit
       ## Resolve wall time
       list( $walltime, $wallmins ) = $this->resolveWalltime( $cfg );
 
+      ## Advisory only, and off unless global_config.php turns it on: records a
+      ## runtime prediction for this submission and returns. It cannot change
+      ## $walltime, cannot throw, and with the switch off it reads one global and
+      ## does nothing else.
+      $this->observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins );
+
       ## Build environment setup lines from config
       $env_lines = $this->buildEnvLines( $cfg );
 
@@ -527,6 +533,70 @@ class submit_slurm extends jobsubmit
                                           $bindir = PHP_BINDIR )
    {
       return $sapi === 'cli' && $binary !== '' ? $binary : $bindir . '/php';
+   }
+
+   /**
+    * Hand the advisory path what it needs and forget about it.
+    *
+    * Separate from write_slurm_script() so the submission reads as one line,
+    * and so everything this gathers is gathered after the decision is final:
+    * the plan is resolved, the destination is fixed, and sbatch has not run.
+    *
+    * Swallows everything. An advisory failure is not a submission failure.
+    */
+   protected function observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins )
+   {
+      if ( ! class_exists( 'runtime_advisory' ) || ! runtime_advisory::enabled() )
+      {
+         return;
+      }
+
+      try {
+         global $dbusername, $dbpasswd, $dbhost, $dbname;
+         global $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname;
+
+         $job     = isset( $this->data[ 'job' ] ) ? $this->data[ 'job' ] : array();
+         $dataset = isset( $this->data[ 'dataset' ][ 0 ] ) ? $this->data[ 'dataset' ][ 0 ] : array();
+         $files   = isset( $dataset[ 'files' ] ) ? $dataset[ 'files' ] : array();
+
+         $link = @mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+         $gfac = @mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
+
+         runtime_advisory::observe( array(
+            'us3_db'      => $dbname,
+            'request_id'  => $requestID,
+            ## The entry's name, which is what the request records and what the
+            ## model's frozen mapping is keyed on.
+            'destination' => isset( $this->grid[ $cluster ][ 'name' ] )
+                             ? $this->grid[ $cluster ][ 'name' ] : $cluster,
+
+            'parameters'    => isset( $job[ 'jobParameters' ] ) ? $job[ 'jobParameters' ] : array(),
+            'speedsteps'    => isset( $dataset[ 'speedsteps' ] ) ? $dataset[ 'speedsteps' ] : array(),
+            'simpoints'     => isset( $dataset[ 'parameters' ][ 'simpoints' ] )
+                               ? $dataset[ 'parameters' ][ 'simpoints' ] : null,
+            'edit_filename' => isset( $files[ 'edit' ] ) ? $files[ 'edit' ] : null,
+
+            ## The incumbent, and what is actually being emitted, recorded apart.
+            'formula_reference_seconds' => (int) $wallmins * 60,
+            'emitted_directive'         => $walltime,
+            'requested_ranks'           => isset( $plan[ 'total_tasks' ] ) ? $plan[ 'total_tasks' ] : null,
+
+            'link'      => $link,
+            'gfac_link' => $gfac,
+         ) );
+
+         if ( $link )
+         {
+            mysqli_close( $link );
+         }
+         if ( $gfac )
+         {
+            mysqli_close( $gfac );
+         }
+      } catch ( Throwable $e ) {
+         ## Deliberately silent beyond the log: the job is what matters here.
+         elog2( 'runtime advisory: ' . $e->getMessage() );
+      }
    }
 
    ## Launch through the LIMS host when the web pool cannot spawn the monitor.

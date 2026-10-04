@@ -83,6 +83,22 @@ $global_cluster_status_max_age_seconds = 1800;
 
 ## $global_circuit_breaker_dir = '/home/us3/lims/etc/circuit-breaker';
 
+## runtime advisory: record a predicted runtime for each eligible submission.
+##
+## advisory only. it cannot change the limit a job is given, and it is off
+## unless this is true. with it off, a submission reads this one setting and
+## does nothing further: no artifact is read and no record is written.
+##
+## a submission is never failed by the advisory. where the model, the inputs or
+## the recording are unusable, the submission proceeds unchanged and the reason
+## is recorded in gfac.runtime_prediction.
+$global_runtime_advisory_enabled = false;
+
+## the frozen model artifact. a default applies and this is only set where a
+## host keeps it elsewhere. the file's content hash is recorded with every
+## recommendation, so changing the file mid-window is visible in the records.
+## $global_runtime_advisory_artifact = '/home/us3/lims/etc/runtime_advisory.json';
+
 ## does this install serve a single tenant (a USiaB appliance) or many
 ## (a shared LIMS host)?  governs whether the queue views scope rows to this
 ## instance's database or show every tenant's jobs to a level-4 admin.

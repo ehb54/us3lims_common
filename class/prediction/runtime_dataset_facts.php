@@ -120,9 +120,23 @@ class runtime_dataset_facts
    {
       $absent = array( 'edited_scans' => null, 'edited_radial_points' => null, 'issues' => array() );
 
+      ## Checked before anything else: an unusable database name is a
+      ## deployment fault, true whether or not a connection exists, and it is
+      ## interpolated into the statements below.
+      self::assert_database_name( $db );
+
       if ( $edit_filename === null || $edit_filename === '' )
       {
          $absent[ 'issues' ][] = 'the request names no edit filename';
+         return $absent;
+      }
+
+      ## An absent or dead connection is a read failure to report, not an
+      ## exception to propagate: mysqli_prepare() throws on a non-connection,
+      ## and mysqli_connect() returns false when the database is unreachable.
+      if ( ! ( $link instanceof mysqli ) )
+      {
+         $absent[ 'issues' ][] = 'no usable database connection for the edited data';
          return $absent;
       }
 
@@ -172,7 +186,7 @@ class runtime_dataset_facts
       $table = self::qualified( $db, 'editedData' );
       $sql   = "SELECT rawDataID, data FROM $table WHERE filename = ? ORDER BY lastUpdated DESC LIMIT 1";
 
-      $stmt = mysqli_prepare( $link, $sql );
+      $stmt = ( $link instanceof mysqli ) ? @mysqli_prepare( $link, $sql ) : false;
 
       if ( $stmt === false )
       {
@@ -206,7 +220,7 @@ class runtime_dataset_facts
       $bytes = self::AUC_HEADER_BYTES;
       $sql   = "SELECT SUBSTRING( data, 1, $bytes ) FROM $table WHERE rawDataID = ?";
 
-      $stmt = mysqli_prepare( $link, $sql );
+      $stmt = ( $link instanceof mysqli ) ? @mysqli_prepare( $link, $sql ) : false;
 
       if ( $stmt === false )
       {
@@ -341,11 +355,16 @@ class runtime_dataset_facts
     */
    private static function qualified( $db, $table )
    {
+      self::assert_database_name( $db );
+
+      return "`$db`.$table";
+   }
+
+   private static function assert_database_name( $db )
+   {
       if ( ! preg_match( '/^[A-Za-z0-9_]+$/', (string) $db ) )
       {
          throw new InvalidArgumentException( "runtime_dataset_facts: unusable database name '$db'" );
       }
-
-      return "`$db`.$table";
    }
 }

@@ -354,7 +354,8 @@ class jobsubmit
 
    function parse_jobParameters( &$parser, &$job )
    {
-      $parameters = array();
+      $parameters  = array();
+      $occurrences = array();
 
       while ( $parser->read() )
       {
@@ -370,6 +371,7 @@ class jobsubmit
          }
 
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
+         $occurrences[ $tag ] = isset( $occurrences[ $tag ] ) ? $occurrences[ $tag ] + 1 : 1;
 
          ## A few elements carry their meaning in further attributes rather than
          ## in 'value': GA's bucket_fixed records which axes are held fixed in
@@ -385,6 +387,22 @@ class jobsubmit
             {
                $parameters[ $tag . '_' . $attribute ] = $value;
             }
+         }
+      }
+
+      ## A repeated element carries its meaning in how many there are rather
+      ## than in any one of them: GA's buckets are written as one <bucket> each
+      ## with no count element anywhere, and only the last of them survives the
+      ## assignment above. Named "<tag>_count", which is how the historical
+      ## extraction names it, and never written over an element that already
+      ## holds that name, so a real vars_count stays the request's own value.
+      foreach ( $occurrences as $tag => $seen )
+      {
+         $key = $tag . '_count';
+
+         if ( ! array_key_exists( $key, $parameters ) )
+         {
+            $parameters[ $key ] = $seen;
          }
       }
 

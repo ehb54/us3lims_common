@@ -66,7 +66,7 @@ class runtime_advisory
          return 'disabled';
       }
 
-      $started = hrtime( true );
+      $started = self::clock();
 
       try {
          return self::run( $context, $started );
@@ -238,9 +238,27 @@ class runtime_advisory
       return $status;
    }
 
-   /** Monotonic, in microseconds: the advisory path's own cost. */
+   /**
+    * A clock reading, in nanoseconds where one is available.
+    *
+    * hrtime() is monotonic and is what this wants, but it arrived in PHP 7.3
+    * and the appliances run 7.2: calling it there is a fatal Error, thrown
+    * before the guard in observe() can catch it, inside a submission. So 7.2
+    * falls back to microtime(), which is not monotonic and so can be perturbed
+    * by a clock step. That only distorts a recorded duration; it cannot affect
+    * a submission, which is the right way round for this trade.
+    */
+   private static function clock()
+   {
+      return function_exists( 'hrtime' ) ? hrtime( true ) : (int) round( microtime( true ) * 1e9 );
+   }
+
+   /** The advisory path's own cost, in microseconds. */
    private static function elapsed_us( $started )
    {
-      return (int) round( ( hrtime( true ) - $started ) / 1000 );
+      $elapsed = (int) round( ( self::clock() - $started ) / 1000 );
+
+      ## A non-monotonic fallback can read backwards across a clock step.
+      return $elapsed < 0 ? 0 : $elapsed;
    }
 }

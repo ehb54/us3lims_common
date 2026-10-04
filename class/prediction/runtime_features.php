@@ -20,6 +20,14 @@
  *   <name>_fixedtype  an attribute of a request element, kept by
  *   <name>_xtype      parse_jobParameters() alongside the element's value
  *   <name>_ytype
+ *
+ * A few of those are words in the request and numbers in the training data:
+ * PCSA's curve_type is SL or All in a request and 4 or 6 in the training table,
+ * and GA's bucket axis types are the same. The collector translated them
+ * through its format file and the artifact publishes that table, so this codes
+ * a label exactly as the fitted rows were coded. A label the table does not
+ * define is an input_error rather than a zero, because it is a value this model
+ * has no indicator for.
  *   anything else     the request's job parameter of that name
  *
  * The request XML's element names are the model's feature names, so parameters
@@ -82,6 +90,26 @@ class runtime_features
          $source = $model->input_is_dataset_scoped( $name )
                    ? self::dataset_value( $dataset, $name )
                    : self::parameter_value( $parameters, $name );
+
+         ## Some parameters are words in the request and numbers in the training
+         ## data, and the model carries the collector's own table for them. This
+         ## runs before the empty check because the table defines the empty
+         ## label too: the collector coded an attribute that was present and
+         ## blank, and only a parameter that is not there at all is missing.
+         if ( $source !== null && $model->input_string_codes( $name ) !== null )
+         {
+            $coded = $model->input_code( $name, $source );
+
+            if ( $coded === null )
+            {
+               return self::failure( 'input_error',
+                  "'$name' is not one of the labels this model was fitted with: "
+                  . self::describe( $source ) );
+            }
+
+            $features[ $name ] = $coded;
+            continue;
+         }
 
          if ( $source === null || $source === '' )
          {

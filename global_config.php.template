@@ -94,10 +94,20 @@ $global_cluster_status_max_age_seconds = 1800;
 ## is recorded in gfac.runtime_prediction.
 $global_runtime_advisory_enabled = false;
 
-## the frozen model artifact. a default applies and this is only set where a
-## host keeps it elsewhere. the file's content hash is recorded with every
-## recommendation, so changing the file mid-window is visible in the records.
-## $global_runtime_advisory_artifact = '/home/us3/lims/etc/runtime_advisory.json';
+## the frozen model artifacts, one per method family. by default each family is
+## read from /home/us3/lims/etc/runtime_advisory_<family>.json, and a family
+## whose file is absent is simply not served. the file's content hash is
+## recorded with every recommendation, so changing a file mid-window is visible
+## in the records.
+##
+## set this only to put the files elsewhere. an array names them per family and
+## leaves out a family deliberately; a single string names one file, which is
+## still only used for the family it was fitted for.
+## $global_runtime_advisory_artifact = array(
+##    '2DSA' => '/home/us3/lims/etc/runtime_advisory_2DSA.json',
+##    'GA'   => '/home/us3/lims/etc/runtime_advisory_GA.json',
+##    'PCSA' => '/home/us3/lims/etc/runtime_advisory_PCSA.json',
+## );
 
 ## does this install serve a single tenant (a USiaB appliance) or many
 ## (a shared LIMS host)?  governs whether the queue views scope rows to this

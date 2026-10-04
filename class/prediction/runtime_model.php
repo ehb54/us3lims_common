@@ -316,6 +316,58 @@ class runtime_model
       return (float) $this->spec[ 'inputs' ][ $name ][ 'missing_in_training' ];
    }
 
+   /**
+    * The label-to-number table for one input, or null where it has none.
+    *
+    * A few request parameters are words in the XML and numbers in the training
+    * data, and the collector translated them through its format file. The
+    * artifact carries the same table for the inputs this model uses, so the
+    * adapter can code a request value the way the training rows were coded.
+    * Absent from an older artifact, which simply has no coded inputs.
+    *
+    * @return array|null label => numeric code
+    */
+   public function input_string_codes( $name )
+   {
+      if ( ! isset( $this->spec[ 'string_codes' ][ $name ] )
+           || ! is_array( $this->spec[ 'string_codes' ][ $name ] ) )
+      {
+         return null;
+      }
+
+      return $this->spec[ 'string_codes' ][ $name ];
+   }
+
+   /**
+    * One request value as the training data would have held it.
+    *
+    * Null for a label the table does not define, which the caller has to treat
+    * as an input it cannot supply rather than as a zero: an unknown label is a
+    * value this model has no indicator for.
+    */
+   public function input_code( $name, $value )
+   {
+      $codes = $this->input_string_codes( $name );
+
+      if ( $codes === null )
+      {
+         return null;
+      }
+
+      $text = trim( (string) $value );
+
+      foreach ( $codes as $label => $code )
+      {
+         ## The XML's own spelling, matched as the collector matched it.
+         if ( (string) $label === $text )
+         {
+            return (float) $code;
+         }
+      }
+
+      return null;
+   }
+
    /** Does this input describe the dataset rather than the job's parameters? */
    public function input_is_dataset_scoped( $name )
    {

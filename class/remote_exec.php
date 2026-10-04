@@ -538,13 +538,17 @@ class remote_exec
            . ' -o StrictHostKeyChecking=' . $this->hostKeyPolicy();
    }
 
+   ## Called from the constructor, and again where the ssh options are built: the
+   ## second call costs nothing and keeps the guarantee local to the thing it
+   ## protects, so the policy cannot be weakened by a later change to $details.
    private function hostKeyPolicy()
    {
       ## Unknown host keys are rejected unless a cluster opts in (e.g. while provisioning).
       $value = $this->details[ 'ssh_host_key_policy' ] ?? 'yes';
       if ( ! in_array( $value, [ 'yes', 'accept-new' ], true ) )
       {
-         throw new InvalidArgumentException( 'ssh_host_key_policy must be yes or accept-new' );
+         throw new InvalidArgumentException(
+            "remote_exec: cluster '{$this->cluster}' ssh_host_key_policy must be yes or accept-new" );
       }
       return $value;
    }
@@ -658,6 +662,13 @@ class remote_exec
                . "use remote_exec_overrides for a demonstrated timeout exception" );
          }
       }
+
+      ## Validated here, with the other cluster-entry checks, rather than only
+      ## where the ssh options are built: a typo used to surface as an exception
+      ## from deep inside a poll, which ended a jobmonitor mid-job. The submit
+      ## path already catches a constructor throw and reports a configuration
+      ## failure, which is what should happen to a bad cluster entry.
+      $this->hostKeyPolicy();
 
       if ( ! array_key_exists( 'remote_exec_overrides', $this->details ) )
       {

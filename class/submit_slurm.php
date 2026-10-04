@@ -16,6 +16,11 @@ elog2( "submit_slurm start" );
 
 class submit_slurm extends jobsubmit
 {
+   ## Where every deployment puts the monitor, and the interpreter the sudoers
+   ## rule names. Both overridable from global_config.php; see the accessors.
+   const MONITOR_SCRIPT   = '/home/us3/lims/bin/jobmonitor/jobmonitor.php';
+   const MONITOR_SUDO_PHP = '/usr/bin/php';
+
    ## Set by stage_files() when staging fails, so submit() can persist a
    ## specific reason rather than a generic "submission aborted".
    protected $stage_error = '';
@@ -488,7 +493,7 @@ class submit_slurm extends jobsubmit
          }
       } else {
          $php     = escapeshellarg( $this->monitor_php_binary() );
-         $monitor = "/home/us3/lims/bin/jobmonitor/jobmonitor.php";
+         $monitor = $this->monitor_script();
          $args    = "$dbname $slurm_id $requestID";
 
          $whoami  = function_exists( 'posix_geteuid' ) && function_exists( 'posix_getpwuid' )
@@ -502,7 +507,7 @@ class submit_slurm extends jobsubmit
          else
          {
             ## NOPASSWD rules match sudo's direct command; keep PHP there and wrap sudo with nice.
-            $cmd = "nice -15 sudo -u us3 /usr/bin/php $monitor $args 2>&1";
+            $cmd = "nice -15 sudo -u us3 " . $this->monitor_sudo_php() . " $monitor $args 2>&1";
          }
 
          exec( $cmd, $null, $exit_code );
@@ -529,6 +534,41 @@ class submit_slurm extends jobsubmit
       return $sapi === 'cli' && $binary !== '' ? $binary : $bindir . '/php';
    }
 
+   /**
+    * The monitor script, for every way of launching it.
+    *
+    * One source, because the path was written out twice: once for the local
+    * launch and once for the launch over ssh. Two literals for one fact drift,
+    * and a monitor that does not start leaves a running job unwatched, which is
+    * not visible until the job finishes and nothing collects it.
+    *
+    * Override with $global_jobmonitor_script. The default is where every
+    * deployment puts it.
+    */
+   protected function monitor_script()
+   {
+      $configured = isset( $GLOBALS[ 'global_jobmonitor_script' ] )
+                    ? trim( (string) $GLOBALS[ 'global_jobmonitor_script' ] ) : '';
+
+      return $configured !== '' ? $configured : self::MONITOR_SCRIPT;
+   }
+
+   /**
+    * The interpreter named in the sudo command, which is deliberately not
+    * monitor_php_binary(): a NOPASSWD rule matches the command exactly, so this
+    * has to be the path the rule was written for, not whichever interpreter is
+    * serving this request. Change this and the sudoers rule together.
+    *
+    * Override with $global_jobmonitor_php.
+    */
+   protected function monitor_sudo_php()
+   {
+      $configured = isset( $GLOBALS[ 'global_jobmonitor_php' ] )
+                    ? trim( (string) $GLOBALS[ 'global_jobmonitor_php' ] ) : '';
+
+      return $configured !== '' ? $configured : self::MONITOR_SUDO_PHP;
+   }
+
    ## Launch through the LIMS host when the web pool cannot spawn the monitor.
    ## The monitor must daemonize and close its streams before SSH returns.
    ## The host key must be installed during provisioning.
@@ -545,7 +585,9 @@ class submit_slurm extends jobsubmit
       $rx->set_executor( function ( $cmd, &$output, &$exit_code ) {
          $this->runExec( $cmd, $output, $exit_code );
       } );
-      $cmd = '/usr/bin/php /home/us3/lims/bin/jobmonitor/jobmonitor.php '
+      ## The remote host runs this as us3, so the interpreter is that host's,
+      ## not this request's: the same value the sudo rule names.
+      $cmd = $this->monitor_sudo_php() . ' ' . $this->monitor_script() . ' '
            . escapeshellarg( $dbname ) . ' ' . escapeshellarg( (string) $jobID )
            . ' ' . escapeshellarg( (string) $requestID );
       ## A lost response may follow a successful launch. Do not launch twice.

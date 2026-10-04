@@ -370,6 +370,22 @@ class jobsubmit
          }
 
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
+
+         ## A few elements carry their meaning in further attributes rather than
+         ## in 'value': GA's bucket_fixed records which axes are held fixed in
+         ## fixedtype, xtype and ytype. Keeping only 'value' discarded those,
+         ## so anything reading this array could not tell a fixed axis from a
+         ## free one. Named "<tag>_<attribute>", which is how the historical
+         ## extraction names them, so one spelling serves both.
+         foreach ( array( 'fixedtype', 'xtype', 'ytype' ) as $attribute )
+         {
+            $value = $parser->getAttribute( $attribute );
+
+            if ( $value !== null )
+            {
+               $parameters[ $tag . '_' . $attribute ] = $value;
+            }
+         }
       }
 
       $job[ 'jobParameters' ] = $parameters;

@@ -70,7 +70,7 @@ class runtime_model
       }
 
       foreach ( array( 'family', 'names', 'cats', 'encoding', 'imputer_statistics',
-                       'scaler_mean', 'scaler_scale', 'coef', 'intercept', 'k', 'gate' ) as $key )
+                       'scaler_mean', 'scaler_scale', 'coef', 'intercept', 'k', 'gate', 'inputs' ) as $key )
       {
          if ( ! array_key_exists( $key, $spec ) )
          {
@@ -283,6 +283,44 @@ class runtime_model
       $capped    = min( $candidate, (float) $formula_reference_seconds );
 
       return (int) max( 60.0, ceil( $capped / 60.0 ) * 60.0 );
+   }
+
+   /**
+    * Must a live request carry this input?
+    *
+    * True when the extraction never failed to determine it, which means a
+    * request that does not carry it was read wrongly rather than being a
+    * request without the value. Imputing one of those would turn a populated
+    * operand into a missing one and return a confident prediction about a job
+    * the model knows less about than it thinks.
+    *
+    * The threshold lives here rather than in the artifact because it is a
+    * policy: the exporter publishes the rate it measured and says nothing about
+    * what to do with it.
+    */
+   public function input_required( $name )
+   {
+      $rate = $this->input_missing_rate( $name );
+
+      return $rate !== null && $rate <= 0.0;
+   }
+
+   /** How often the extraction could not determine this input, or null. */
+   public function input_missing_rate( $name )
+   {
+      if ( ! isset( $this->spec[ 'inputs' ][ $name ][ 'missing_in_training' ] ) )
+      {
+         return null;
+      }
+
+      return (float) $this->spec[ 'inputs' ][ $name ][ 'missing_in_training' ];
+   }
+
+   /** Does this input describe the dataset rather than the job's parameters? */
+   public function input_is_dataset_scoped( $name )
+   {
+      return ! empty( $this->spec[ 'inputs' ][ $name ][ 'dataset_scoped' ] )
+             || strpos( $name, 'ds0.' ) === 0;
    }
 
    /**

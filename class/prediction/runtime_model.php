@@ -286,37 +286,29 @@ class runtime_model
    }
 
    /**
-    * The numeric code the model was fitted with for a destination name, or null
-    * when the artifact's mapping has no entry for it.
+    * Was this cluster code one of the training levels?
     *
-    * The mapping is the exporter's, built from the same extraction the model was
-    * fitted on, so the deployed host holds no cluster table of its own. Several
-    * names can share one code, since a renamed host keeps its identity, but no
-    * name has two codes.
-    *
-    * An artifact with no mapping returns null for every name, which reads as an
-    * unsupported destination. That is deliberate: a missing mapping must stop
-    * the recommendation rather than be worked around at the call site.
+    * The name-to-code step lives in runtime_cluster_map, but the artifact is
+    * what decides whether a code means anything: a map claiming a code this
+    * model has no indicator for is a mismatch to refuse, not something to
+    * score with every indicator at zero.
     */
-   public function cluster_code( $cluster_name )
+   public function knows_cluster_code( $code )
    {
-      if ( ! isset( $this->spec[ 'cluster_map' ] ) || ! is_array( $this->spec[ 'cluster_map' ] ) )
+      if ( $code === null || ! isset( $this->spec[ 'encoding' ][ 'vocabulary' ][ 'cluster' ] ) )
       {
-         return null;
+         return false;
       }
 
-      $wanted = strtolower( trim( (string) $cluster_name ) );
-
-      ## Case-insensitive, which is the recode rule the artifact records.
-      foreach ( $this->spec[ 'cluster_map' ] as $name => $code )
+      foreach ( $this->spec[ 'encoding' ][ 'vocabulary' ][ 'cluster' ] as $level )
       {
-         if ( strtolower( trim( (string) $name ) ) === $wanted )
+         if ( (float) $level === (float) $code )
          {
-            return (float) $code;
+            return true;
          }
       }
 
-      return null;
+      return false;
    }
 
    public function multiplier()

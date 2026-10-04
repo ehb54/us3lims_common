@@ -56,9 +56,10 @@ class runtime_features
    /**
     * Build the vector.
     *
-    * The destination is passed by name, the way the request records it, and the
-    * model resolves it against the mapping its exporter froze. Nothing here or
-    * on the deployed host holds a cluster table of its own.
+    * The destination is passed by name, the way the request records it.
+    * runtime_cluster_map turns it into a code and the model confirms it was
+    * fitted with that code, so a map and an artifact that disagree are refused
+    * rather than scored.
     *
     * @param runtime_model $model        the loaded artifact
     * @param array         $parameters   jobsubmit's $job['jobParameters']
@@ -69,12 +70,21 @@ class runtime_features
     */
    public static function build( runtime_model $model, array $parameters, array $dataset, $cluster_name )
    {
-      $cluster_code = $model->cluster_code( $cluster_name );
+      $cluster_code = runtime_cluster_map::code( $cluster_name );
 
       if ( $cluster_code === null )
       {
          return self::failure( 'unsupported',
-            "destination '" . self::describe( $cluster_name ) . "' is not in the model's cluster mapping" );
+            "destination '" . self::describe( $cluster_name ) . "' has no cluster code" );
+      }
+
+      ## Two checks, because they can disagree: the map says what the name means,
+      ## the artifact says whether this model was fitted with it.
+      if ( ! $model->knows_cluster_code( $cluster_code ) )
+      {
+         return self::failure( 'unsupported',
+            "destination '" . self::describe( $cluster_name ) . "' is code $cluster_code,"
+            . ' which this model has no indicator for' );
       }
 
       $features = array( 'cluster' => (float) $cluster_code );

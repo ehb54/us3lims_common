@@ -78,6 +78,25 @@ class runtime_advisory
       }
    }
 
+   /**
+    * Does a request's method belong to the artifact's family?
+    *
+    * A prefix match, so 2DSA-MC and 2DSA-CG count as 2DSA while GA and PCSA do
+    * not. Case-insensitive, because the method reaches here from the request.
+    */
+   public static function family_matches( $family, $method )
+   {
+      $family = strtolower( trim( (string) $family ) );
+      $method = strtolower( trim( (string) $method ) );
+
+      if ( $family === '' || $method === '' )
+      {
+         return false;
+      }
+
+      return strpos( $method, $family ) === 0;
+   }
+
    /** Is the advisory on? Absent, false or 0 all mean off. */
    public static function enabled()
    {
@@ -103,6 +122,21 @@ class runtime_advisory
       $context[ 'artifact_sha256' ] = $model->fingerprint();
       $context[ 'family' ]          = $model->family();
       $context[ 'formula_version' ] = self::FORMULA_VERSION;
+
+      ## The artifact is fitted for one family. A request from another one can
+      ## still carry enough parameters by the same names to build a vector, so
+      ## without this a GA or PCSA job would be scored by the 2DSA model and the
+      ## answer would look exactly like a good one. Narrowing further, to the
+      ## standard variant only, is the readout's population rule rather than a
+      ## runtime check: the artifact declares a family, not a method list.
+      $method = isset( $context[ 'method' ] ) ? (string) $context[ 'method' ] : '';
+
+      if ( ! self::family_matches( $model->family(), $method ) )
+      {
+         return self::note( $context, 'unsupported',
+            "method '" . substr( $method, 0, 32 ) . "' is not "
+            . $model->family() . ", which this model was fitted for", $started );
+      }
 
       $dataset = runtime_dataset_facts::build(
          isset( $context[ 'link' ] ) ? $context[ 'link' ] : null,

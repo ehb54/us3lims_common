@@ -565,6 +565,9 @@ class submit_slurm extends jobsubmit
          runtime_advisory::observe( array(
             'us3_db'      => $dbname,
             'request_id'  => $requestID,
+            ## Checked against the artifact's family: another method's request
+            ## can carry enough of the same parameter names to be scored.
+            'method'      => isset( $this->data[ 'method' ] ) ? $this->data[ 'method' ] : '',
             ## The entry's name, which is what the request records and what the
             ## model's frozen mapping is keyed on.
             'destination' => isset( $this->grid[ $cluster ][ 'name' ] )

@@ -170,8 +170,8 @@ $cluster_details =
          ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
          ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
          ,'sshport'            => 22
-         ,'queue'              => 'shared'
-         ,'maxtime'            => 5760
+         ,'queue'              => 'highmem'
+         ,'maxtime'            => 1440
          ,'ppn'                => 32
          ,'ppbj'               => 32
          ,'maxproc'            => 32
@@ -201,8 +201,8 @@ $cluster_details =
          ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
          ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
          ,'sshport'            => 22
-         ,'queue'              => 'wholenode'
-         ,'maxtime'            => 5760
+         ,'queue'              => 'highmem'
+         ,'maxtime'            => 1440
          ,'ppn'                => 64
          ,'ppbj'               => 32
          ,'maxproc'            => 2048
@@ -269,7 +269,7 @@ $cluster_details =
          ,'ppbj'               => 8
          ,'maxproc'            => 128
          ,'pmg'                => true
-         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/home/us3/cluster/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/home/us3/cluster/bin:\$PATH"
+         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
      ]
      ,'demeler9-local' => [
          'active'              => false
@@ -301,7 +301,7 @@ $cluster_details =
          ,'ppbj'               => 32
          ,'maxproc'            => 128
          ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module load ultrascan3/4.0"
+         ,'env_script_lines'   => "module purge\n## TODO: module use the project modulefile path first; SDSC provides no ultrascan module\nmodule load ultrascan3/4.0"
      ]
      ,'expanse-bigmem' => [
          'active'              => false
@@ -316,7 +316,7 @@ $cluster_details =
          ,'maxproc'            => 32
          ,'sbatch_directives'  => [ '#SBATCH --mem-per-cpu=3000' ]
          ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module load ultrascan3/4.0"
+         ,'env_script_lines'   => "module purge\n## TODO: module use the project modulefile path first; SDSC provides no ultrascan module\nmodule load ultrascan3/4.0"
      ]
      ,'expanse-gamc' => [
          'active'              => false
@@ -332,7 +332,7 @@ $cluster_details =
          ,'pmg'                => true
          ,'pmgonly'            => true
          ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module load ultrascan3/4.0"
+         ,'env_script_lines'   => "module purge\n## TODO: module use the project modulefile path first; SDSC provides no ultrascan module\nmodule load ultrascan3/4.0"
      ]
      ## Lonestar6: verify the allocation work directory and configure modules
      ## before activation. ibrun reads the task count from Slurm.
@@ -351,23 +351,6 @@ $cluster_details =
          ,'pmgonly'            => true
          ,'mpi_launcher'       => 'ibrun'
          ,'env_script_lines'   => "module purge\n## TODO: load correct Qt/UltraScan modules; ibrun does not need explicit MPI exports"
-     ]
-     ## Stampede2 is retired; do not activate.
-     ,'stampede2' => [
-         'active'              => false
-         ,'name'               => 'stampede2.tacc.xsede.org'
-         ,'login'              => 'us3@stampede2.tacc.xsede.org'
-         ,'workdir'            => '/scratch/01623/us3/work'
-         ,'sshport'            => 22
-         ,'queue'              => 'skx-normal'
-         ,'maxtime'            => 2880
-         ,'ppn'                => 96
-         ,'ppbj'               => 32
-         ,'maxproc'            => 6144
-         ,'pmg'                => true
-         ,'pmgonly'            => true
-         ,'mpi_launcher'       => 'ibrun'
-         ,'env_script_lines'   => ""  ## DECOMMISSIONED — do not activate
      ]
      ## -----------------------------------------------------------------------
      ## U Montana (Grizzly)
@@ -403,7 +386,7 @@ $cluster_details =
          ,'maxproc'            => 8
          ,'single_node'        => true
          ,'usemaxtime'         => true
-         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
+         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
      ]
      ## Set ppn, ppbj and maxproc to the appliance capacity at installation.
      ## ppn must match Slurm CPUTot.
@@ -430,7 +413,7 @@ $cluster_details =
          ,'pmg'                => true
          ,'usemaxtime'         => true
          ,'single_node'        => true
-         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
+         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
      ]
      ,'us3iab-node1' => [
          'active'              => false
@@ -447,7 +430,7 @@ $cluster_details =
          ,'pmg'                => true
          ,'usemaxtime'         => true
          ,'single_node'        => true
-         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/opt/ultrascan3-hpc/lib:/usr/lib64/openmpi/lib:\$LD_LIBRARY_PATH\nexport PATH=/usr/lib64/openmpi/bin:/opt/ultrascan3-hpc/bin:\$PATH"
+         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
      ]
 
     ];

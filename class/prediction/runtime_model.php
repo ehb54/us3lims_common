@@ -285,6 +285,40 @@ class runtime_model
       return (int) max( 60.0, ceil( $capped / 60.0 ) * 60.0 );
    }
 
+   /**
+    * The numeric code the model was fitted with for a destination name, or null
+    * when the artifact's mapping has no entry for it.
+    *
+    * The mapping is the exporter's, built from the same extraction the model was
+    * fitted on, so the deployed host holds no cluster table of its own. Several
+    * names can share one code, since a renamed host keeps its identity, but no
+    * name has two codes.
+    *
+    * An artifact with no mapping returns null for every name, which reads as an
+    * unsupported destination. That is deliberate: a missing mapping must stop
+    * the recommendation rather than be worked around at the call site.
+    */
+   public function cluster_code( $cluster_name )
+   {
+      if ( ! isset( $this->spec[ 'cluster_map' ] ) || ! is_array( $this->spec[ 'cluster_map' ] ) )
+      {
+         return null;
+      }
+
+      $wanted = strtolower( trim( (string) $cluster_name ) );
+
+      ## Case-insensitive, which is the recode rule the artifact records.
+      foreach ( $this->spec[ 'cluster_map' ] as $name => $code )
+      {
+         if ( strtolower( trim( (string) $name ) ) === $wanted )
+         {
+            return (float) $code;
+         }
+      }
+
+      return null;
+   }
+
    public function multiplier()
    {
       return (float) $this->spec[ 'k' ];

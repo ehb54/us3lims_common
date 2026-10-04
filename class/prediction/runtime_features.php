@@ -56,18 +56,25 @@ class runtime_features
    /**
     * Build the vector.
     *
-    * @param array  $parameters    jobsubmit's $job['jobParameters']
-    * @param array  $dataset       first dataset's properties, keys as in $dataset_inputs
-    * @param mixed  $cluster_code  the destination's numeric code, or null if unmapped
+    * The destination is passed by name, the way the request records it, and the
+    * model resolves it against the mapping its exporter froze. Nothing here or
+    * on the deployed host holds a cluster table of its own.
+    *
+    * @param runtime_model $model        the loaded artifact
+    * @param array         $parameters   jobsubmit's $job['jobParameters']
+    * @param array         $dataset      first dataset's properties, keys as in $dataset_inputs
+    * @param string        $cluster_name the destination, as the request names it
     *
     * @return array status, features, missing, reason
     */
-   public static function build( array $parameters, array $dataset, $cluster_code )
+   public static function build( runtime_model $model, array $parameters, array $dataset, $cluster_name )
    {
-      if ( $cluster_code === null || $cluster_code === '' )
+      $cluster_code = $model->cluster_code( $cluster_name );
+
+      if ( $cluster_code === null )
       {
          return self::failure( 'unsupported',
-            'the destination has no code in the frozen cluster mapping' );
+            "destination '" . self::describe( $cluster_name ) . "' is not in the model's cluster mapping" );
       }
 
       $features = array( 'cluster' => (float) $cluster_code );

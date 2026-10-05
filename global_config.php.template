@@ -109,6 +109,16 @@ $global_runtime_advisory_enabled = false;
 ##    'PCSA' => '/home/us3/lims/etc/runtime_advisory_PCSA.json',
 ## );
 
+## where the per-job monitor lives, and the interpreter the sudoers rule names.
+## both have working defaults and are only set where a host differs.
+##
+## the interpreter is not the one serving the request: a NOPASSWD rule matches
+## sudo's command exactly, so this value and the rule have to agree. change them
+## together or the monitor will not start, and the job runs unwatched.
+
+## $global_jobmonitor_script = '/home/us3/lims/bin/jobmonitor/jobmonitor.php';
+## $global_jobmonitor_php    = '/usr/bin/php';
+
 ## does this install serve a single tenant (a USiaB appliance) or many
 ## (a shared LIMS host)?  governs whether the queue views scope rows to this
 ## instance's database or show every tenant's jobs to a level-4 admin.

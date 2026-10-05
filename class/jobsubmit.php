@@ -463,7 +463,10 @@ class jobsubmit
             case 'edit'      :
             case 'model'     :
             case 'noise'     :
-               array_push( $files, $parser->getAttribute( 'filename' ) );
+               ## Keyed by role, not positional: a <files> block names each of
+               ## these at most once, and callers (the runtime advisory) need
+               ## the filename for a specific role, not the Nth one present.
+               $files[ $tag ] = $parser->getAttribute( 'filename' );
               break;
          }
       }
@@ -473,6 +476,7 @@ class jobsubmit
    function parse_parameters( &$parser, &$dataset )
    {
       $parameters = array();
+      $speedsteps = array();
 
       while ( $parser->read() )
       {
@@ -487,10 +491,23 @@ class jobsubmit
          { continue;
          }
 
+         ## <speedstep> repeats, one per step, and carries its own attributes
+         ## rather than a single "value" like every other parameter tag.
+         if ( $tag == 'speedstep' )
+         {
+            array_push( $speedsteps, array(
+               'rotorspeed'    => $parser->getAttribute( 'rotorspeed' ),
+               'duration_hrs'  => $parser->getAttribute( 'duration_hrs' ),
+               'duration_mins' => $parser->getAttribute( 'duration_mins' ),
+            ) );
+            continue;
+         }
+
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
       }
 
-      $dataset[ 'parameters' ] = $parameters;
+      $dataset[ 'parameters' ]  = $parameters;
+      $dataset[ 'speedsteps' ]  = $speedsteps;
    }
 
    function maxwall()

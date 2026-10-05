@@ -22,6 +22,21 @@ class remote_exec
    ## Under ~us3/lims/etc (see breaker()); /var/tmp is split by PrivateTmp and aged out.
    const BREAKER_DIR = '/home/us3/lims/etc/circuit-breaker';
 
+   ## A submission makes three separate connections to the same login (stage,
+   ## sbatch, and the ssh-launched monitor): one mkdir, one scp, one sbatch.
+   ## Each paid full TCP+auth separately, which measured at ~2.7s/job. An SSH
+   ## ControlMaster socket, left open for a short while after the first
+   ## connection, lets the rest of the submission reuse it instead. Same
+   ## PrivateTmp reasoning as the breaker directory: a service-private /tmp
+   ## would make the socket invisible to the next call if it runs as a
+   ## different unit, so this lives beside the breaker, not under /tmp.
+   ## Override with $global_ssh_control_dir when needed.
+   const CONTROL_DIR = '/home/us3/lims/etc/ssh-control';
+
+   ## Kept open long enough to cover one submission's calls, not so long that
+   ## a stale master lingers past the jobs it was opened for.
+   const CONTROL_PERSIST_SECONDS = 60;
+
    ## Result classifications. Callers branch on these, never on exit codes.
 
    ## The command ran and exited 0.
@@ -389,6 +404,36 @@ class remote_exec
       return $us3 ? $us3[ 'dir' ] . '/lims/etc/circuit-breaker' : self::BREAKER_DIR;
    }
 
+   ## Beside the breaker directory, same reasoning. Created on first use, one
+   ## account's sockets never readable by another: 0700, like the breaker's
+   ## own per-account state.
+   private static function default_control_dir()
+   {
+      $us3 = function_exists( 'posix_getpwnam' ) ? posix_getpwnam( 'us3' ) : false;
+      return $us3 ? $us3[ 'dir' ] . '/lims/etc/ssh-control' : self::CONTROL_DIR;
+   }
+
+   /**
+    * The -o ControlPath value, or '' when the directory cannot be made
+    * available: multiplexing is a speed-up, not a requirement, so a
+    * permission problem here degrades to a plain connection per call rather
+    * than failing the submission.
+    */
+   private function controlPath()
+   {
+      $dir = $GLOBALS[ 'global_ssh_control_dir' ] ?? self::default_control_dir();
+
+      if ( ! is_dir( $dir ) && ! @mkdir( $dir, 0700, true ) )
+      {
+         return '';
+      }
+
+      ## %C: OpenSSH's own hash of local host + target host + port + user,
+      ## so the socket path is always short regardless of hostname length,
+      ## and shared between the ssh and scp calls that target the same login.
+      return rtrim( $dir, '/' ) . '/cm-%C';
+   }
+
    /** Returns null when no breaker is configured or available. */
    private function breaker()
    {
@@ -572,7 +617,8 @@ class remote_exec
            . ' -o ConnectTimeout=' . (int) $connect
            . ' -o ServerAliveInterval=15'
            . ' -o ServerAliveCountMax=3'
-           . ' -o StrictHostKeyChecking=' . $this->hostKeyPolicy();
+           . ' -o StrictHostKeyChecking=' . $this->hostKeyPolicy()
+           . $this->multiplexOpts();
    }
 
    ## scp takes the same options but spells the port -P, and must not be given -x.
@@ -586,7 +632,26 @@ class remote_exec
            . ' -o ConnectTimeout=' . (int) $connect
            . ' -o ServerAliveInterval=15'
            . ' -o ServerAliveCountMax=3'
-           . ' -o StrictHostKeyChecking=' . $this->hostKeyPolicy();
+           . ' -o StrictHostKeyChecking=' . $this->hostKeyPolicy()
+           . $this->multiplexOpts();
+   }
+
+   ## Shared by sshOpts() and scpOpts(): the same ControlPath for both means
+   ## an scp that follows an ssh to the same login reuses its connection, and
+   ## the other way round. '' (no directory available) omits the options
+   ## entirely, so a host where the control directory cannot be created just
+   ## connects plainly, exactly as before this existed.
+   private function multiplexOpts()
+   {
+      $path = $this->controlPath();
+
+      if ( $path === '' )
+      {
+         return '';
+      }
+
+      return ' -o ControlMaster=auto -o ControlPath=' . $path
+           . ' -o ControlPersist=' . self::CONTROL_PERSIST_SECONDS;
    }
 
    ## Called from the constructor, and again where the ssh options are built: the

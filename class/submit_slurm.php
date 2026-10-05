@@ -25,6 +25,10 @@ class submit_slurm extends jobsubmit
    ## specific reason rather than a generic "submission aborted".
    protected $stage_error = '';
 
+   ## Captured by write_slurm_script() for observe_runtime_advisory(), which
+   ## submit() calls later, after sbatch and update_db() have both succeeded.
+   protected $advisoryPlan = null;
+
    ## Top-level: stage files then submit
    public function submit()
    {
@@ -54,6 +58,19 @@ class submit_slurm extends jobsubmit
             ## Report success only after recording the job and launching its monitor.
             if ( $this->update_db() )
             {
+               ## Only now: the job is submitted and recorded. Advisory only,
+               ## off unless global_config.php turns it on, cannot throw, and
+               ## cannot change what was already submitted above.
+               if ( $this->advisoryPlan !== null )
+               {
+                  $this->observe_runtime_advisory(
+                     $this->advisoryPlan[ 'cluster' ],
+                     $this->advisoryPlan[ 'requestID' ],
+                     $this->advisoryPlan[ 'plan' ],
+                     $this->advisoryPlan[ 'walltime' ],
+                     $this->advisoryPlan[ 'wallmins' ]
+                  );
+               }
                $this->message[] = "submit complete";
             }
          } else {
@@ -157,11 +174,18 @@ class submit_slurm extends jobsubmit
       ## Resolve wall time
       list( $walltime, $wallmins ) = $this->resolveWalltime( $cfg );
 
-      ## Advisory only, and off unless global_config.php turns it on: records a
-      ## runtime prediction for this submission and returns. It cannot change
-      ## $walltime, cannot throw, and with the switch off it reads one global and
-      ## does nothing else.
-      $this->observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins );
+      ## Captured for observe_runtime_advisory(), called from submit() only
+      ## after sbatch and update_db() have both succeeded: not here, where a
+      ## fatal downstream of this point (an unread artifact, an oversized
+      ## edit file) would abort a submission the advisory had no business
+      ## being able to touch.
+      $this->advisoryPlan = array(
+         'cluster'    => $cluster,
+         'requestID'  => $requestID,
+         'plan'       => $plan,
+         'walltime'   => $walltime,
+         'wallmins'   => $wallmins,
+      );
 
       ## Build environment setup lines from config
       $env_lines = $this->buildEnvLines( $cfg );
@@ -551,9 +575,19 @@ class submit_slurm extends jobsubmit
     */
    protected function observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins )
    {
-      if ( ! class_exists( 'runtime_advisory' ) || ! runtime_advisory::enabled() )
+      ## Checked directly, not through the class, so the switch stays a single
+      ## global lookup and nothing is required when it is off: that promise is
+      ## stated in class/prediction/README.md and belongs to this call site,
+      ## not to the class, which cannot load itself.
+      if ( empty( $GLOBALS[ 'global_runtime_advisory_enabled' ] ) )
       {
          return;
+      }
+
+      if ( ! class_exists( 'runtime_advisory' ) )
+      {
+         global $class_dir;
+         require_once $class_dir . 'prediction/runtime_advisory.php';
       }
 
       try {
@@ -567,7 +601,7 @@ class submit_slurm extends jobsubmit
          $link = @mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
          $gfac = @mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
 
-         runtime_advisory::observe( array(
+         $status = runtime_advisory::observe( array(
             'us3_db'      => $dbname,
             'request_id'  => $requestID,
             ## Checked against the artifact's family: another method's request
@@ -600,6 +634,14 @@ class submit_slurm extends jobsubmit
          if ( $gfac )
          {
             mysqli_close( $gfac );
+         }
+
+         ## A row was still written for every one of these; this is the one
+         ## place that notices when it was not 'ok', so a run of artifact or
+         ## input trouble is visible without querying gfac.runtime_prediction.
+         if ( $status !== 'ok' )
+         {
+            elog2( "runtime advisory: request $requestID status $status" );
          }
       } catch ( Throwable $e ) {
          ## Deliberately silent beyond the log: the job is what matters here.

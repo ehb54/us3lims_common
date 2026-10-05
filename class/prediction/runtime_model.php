@@ -28,6 +28,12 @@ class runtime_model
    ## The gate's acceptance band, in standard deviations.
    const GATE_SIGMA = 3.0;
 
+   ## A frozen artifact is coefficients, vocabulary and a handful of scalars:
+   ## kilobytes, not megabytes. Refusing anything larger turns a misconfigured
+   ## or corrupted artifact path into a caught RuntimeException here rather
+   ## than an uncapped read that can exhaust memory_limit mid-submission.
+   const MAX_ARTIFACT_BYTES = 4194304;
+
    private $spec;
    private $categorical;   ## name => true
    private $fingerprint;
@@ -53,6 +59,14 @@ class runtime_model
       if ( ! is_readable( $path ) )
       {
          throw new RuntimeException( "runtime_model: artifact is not readable: $path" );
+      }
+
+      $size = filesize( $path );
+
+      if ( $size === false || $size > self::MAX_ARTIFACT_BYTES )
+      {
+         throw new RuntimeException( "runtime_model: artifact exceeds "
+            . self::MAX_ARTIFACT_BYTES . " bytes: $path" );
       }
 
       $raw = file_get_contents( $path );

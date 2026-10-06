@@ -137,15 +137,22 @@ class remote_exec
          $opts, 'command_timeout_seconds', 'command_timeout_seconds' );
 
       $nonce = $this->frameNonce();
+      $multiplex = ! empty( $opts[ 'multiplex' ] );
 
       ## The command has to survive one extra round of shell parsing on the
       ## login node, so it is passed as a single quoted argument.
-      $cmd = '/usr/bin/ssh ' . $this->sshOpts( ! empty( $opts[ 'multiplex' ] ) ) . ' '
+      $cmd = '/usr/bin/ssh ' . $this->sshOpts( $multiplex ) . ' '
              . escapeshellarg( $this->login() )
              . ' ' . escapeshellarg( $this->frame( $remote_cmd, $nonce ) );
 
+      $fallback_cmd = $multiplex
+         ? '/usr/bin/ssh ' . $this->sshOpts( false ) . ' '
+           . escapeshellarg( $this->login() )
+           . ' ' . escapeshellarg( $this->frame( $remote_cmd, $nonce ) )
+         : null;
+
       $result = $this->unframe(
-         $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'run' ),
+         $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'run', $fallback_cmd ),
          $nonce
       );
 
@@ -247,11 +254,20 @@ class remote_exec
       $timeout = $this->operationTimeout(
          $opts, 'copy_timeout_seconds', 'copy_timeout_seconds' );
 
-      $cmd = '/usr/bin/scp ' . $this->scpOpts( ! empty( $opts[ 'multiplex' ] ) )
+      $multiplex = ! empty( $opts[ 'multiplex' ] );
+
+      $cmd = '/usr/bin/scp ' . $this->scpOpts( $multiplex )
              . ' ' . escapeshellarg( $this->login() . ':' . $remote_path )
              . ' ' . escapeshellarg( $local_dest );
 
-      return $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'copy_from' );
+      $fallback_cmd = $multiplex
+         ? '/usr/bin/scp ' . $this->scpOpts( false )
+           . ' ' . escapeshellarg( $this->login() . ':' . $remote_path )
+           . ' ' . escapeshellarg( $local_dest )
+         : null;
+
+      return $this->attempt( $cmd, $timeout, $opts,
+         isset( $opts['label'] ) ? $opts['label'] : 'copy_from', $fallback_cmd );
    }
 
    /**
@@ -265,11 +281,18 @@ class remote_exec
 
       $paths = is_array( $local_paths ) ? $local_paths : array( $local_paths );
       $srcs  = implode( ' ', array_map( 'escapeshellarg', $paths ) );
+      $multiplex = ! empty( $opts[ 'multiplex' ] );
 
-      $cmd = '/usr/bin/scp ' . $this->scpOpts( ! empty( $opts[ 'multiplex' ] ) ) . ' ' . $srcs
+      $cmd = '/usr/bin/scp ' . $this->scpOpts( $multiplex ) . ' ' . $srcs
              . ' ' . escapeshellarg( $this->login() . ':' . $remote_dest );
 
-      return $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'copy_to' );
+      $fallback_cmd = $multiplex
+         ? '/usr/bin/scp ' . $this->scpOpts( false ) . ' ' . $srcs
+           . ' ' . escapeshellarg( $this->login() . ':' . $remote_dest )
+         : null;
+
+      return $this->attempt( $cmd, $timeout, $opts,
+         isset( $opts['label'] ) ? $opts['label'] : 'copy_to', $fallback_cmd );
    }
 
    /** Probe without retries or breaker gating. Feeds an infra fault back into
@@ -307,8 +330,17 @@ class remote_exec
 
    ## ---------------------------------------------------------------- internals
 
-   /** Retry transport faults with backoff, subject to the shared circuit breaker. */
-   private function attempt( $cmd, $timeout, $opts, $label )
+   /**
+    * Retry transport faults with backoff, subject to the shared circuit
+    * breaker. $fallback_cmd, when given, is the same command built without
+    * multiplexing: a ControlPath failure (socket path too long, cannot
+    * bind, an SELinux denial the PHP-side checks in controlPath() cannot
+    * see) is deterministic, so retrying $cmd unchanged would just fail the
+    * same way every time. That failure happens at the ssh/scp level before
+    * the remote command ever runs, so switching command for the rest of
+    * this same retry budget is always safe, including for sbatch.
+    */
+   private function attempt( $cmd, $timeout, $opts, $label, $fallback_cmd = null )
    {
       $retries = array_key_exists( 'retries', $opts )
                ? $opts[ 'retries' ] : $this->policy[ 'retries' ];
@@ -352,6 +384,7 @@ class remote_exec
       $attempt = 0;
       $secwait = $retry_wait;
       $result  = null;
+      $switchedToFallback = false;
 
       do
       {
@@ -362,6 +395,17 @@ class remote_exec
               || $attempt > $retries || $this->is_permanent_failure( $result[ 'stderr' ] ) )
          {
             break;
+         }
+
+         if ( ! $switchedToFallback && $fallback_cmd !== null
+            && $this->multiplexSocketFailed( $result ) )
+         {
+            $this->logf( "$label: control socket unusable ({$result['stderr']});"
+                       . " switching to a plain connection for the rest of this retry budget" );
+            $cmd     = $fallback_cmd;
+            $wrapped = $this->withTimeout( $cmd, $timeout );
+            $switchedToFallback = true;
+            continue;
          }
 
          $this->logf( "$label: {$result['class']} on attempt $attempt, retrying in {$secwait}s" );
@@ -464,6 +508,15 @@ class remote_exec
          return '';
       }
 
+      ## ssh splits ControlPath= on whitespace and expands any '%' sequence
+      ## it does not itself recognise; a directory containing either exits
+      ## 255 on every call. Refuse it up front and connect plainly instead
+      ## of discovering that per attempt.
+      if ( preg_match( '/[\s%]/', $dir ) )
+      {
+         return '';
+      }
+
       ## Per-account subdirectory, 0700, exactly like the breaker's own state
       ## directory. OpenSSH's %C hashes local host + remote host + port +
       ## remote user, but not the local user, so two accounts logging in as
@@ -485,14 +538,17 @@ class remote_exec
       ## other users. Checked here too, not just left to ssh to enforce,
       ## because a mux client does not itself verify the master before
       ## trusting it: another account planting a socket ahead of us3's own
-      ## would otherwise be used silently.
+      ## would otherwise be used silently. A root-owned directory is only
+      ## trusted when this account can actually use it (e.g. an ACL); plain
+      ## 0700-owned-by-root is not writable by us3 and would just exit 255,
+      ## so is_writable() -- not a bare $owner === 0 exception -- decides it.
       $euid = function_exists( 'posix_geteuid' ) ? posix_geteuid() : null;
       $owner = @fileowner( $mine );
       $perms = @fileperms( $mine );
 
       if ( is_link( $mine )
-         || ( $euid !== null && $owner !== $euid && $owner !== 0 )
-         || $perms === false || ( $perms & 0077 ) !== 0 )
+         || $perms === false || ( $perms & 0077 ) !== 0
+         || ( $euid !== null && $owner !== $euid && ! @is_writable( $mine ) ) )
       {
          return '';
       }
@@ -503,10 +559,15 @@ class remote_exec
       $path = rtrim( $mine, '/' ) . '/cm-%C';
 
       ## Unix domain socket paths are limited to a little over 100 bytes
-      ## depending on platform; %C itself expands to a fixed-length hash, so
-      ## only the directory portion varies. Stay with clear headroom rather
-      ## than find the exact limit from a failed bind.
-      if ( strlen( $path ) > 80 )
+      ## depending on platform. %C itself expands to a fixed 40-character
+      ## hash, and ssh appends a further 17-character suffix when it binds
+      ## the socket, so the directory portion ($mine) has to leave headroom
+      ## for both, not just for the 2 literal characters "%C" takes up in
+      ## $path above -- checking strlen($path) against a much larger number
+      ## let a 42-character $mine through, which is fine for us3 but exits
+      ## 255 ("ControlPath too long") for every apache call once apache's
+      ## own home directory pushes $mine past this real ceiling.
+      if ( strlen( $mine ) > 46 )
       {
          return '';
       }
@@ -543,6 +604,21 @@ class remote_exec
       );
 
       return $this->breaker;
+   }
+
+   /**
+    * True for a multiplexed call's control socket failing on its own
+    * terms (path too long, cannot bind, a denial), as opposed to the host
+    * or scheduler itself being unreachable -- the distinction attempt()
+    * needs to decide whether switching to a plain connection can help.
+    */
+   private function multiplexSocketFailed( $result )
+   {
+      return $result[ 'class' ] === self::UNREACHABLE
+         && preg_match(
+            '/unix_listener|ControlPath too long|Bad configuration option.*ControlPath/i',
+            (string) $result[ 'stderr' ]
+         );
    }
 
    ## Capture stderr separately so callers can parse stdout.
@@ -798,8 +874,9 @@ class remote_exec
    ## caller like gridctl's probes, results fetch and queue viewer connects
    ## plainly, so a 60s ControlPersist on one of those does not keep a
    ## cluster's master open for as long as any job against it is running.
-   ## Only submit_slurm::remote() -- the caller actually staging, submitting
-   ## and polling once per submission -- asks for it. '' (no directory
+   ## Only submit_slurm's own ssh()/scp()/sbatchOnce()/confirmSlurmJob() --
+   ## the calls actually staging, submitting and polling once per submission
+   ## -- ask for it. '' (no directory
    ## available) omits the options entirely, so a host where the control
    ## directory cannot be created just connects plainly, exactly as before
    ## this existed.

@@ -34,9 +34,13 @@ $global_max_run_time_hours   = 0;
 ## cluster_probe_outage_verdict() in gridctl explains the policy.
 $global_cluster_abandon_hours = 72;
 
-## sbatch retries, only when ssh never ran the command (connect failure or an
-## open breaker); an sbatch that started is never repeated. Per-cluster
-## 'submit_retries' / 'submit_retry_wait' override these.
+## sbatch retries, when ssh never ran the command (connect failure or an open
+## breaker) or sbatch ran and the controller definitely rejected the job
+## outright, so nothing was created either way. An sbatch whose outcome is
+## merely unknown -- it started, and the connection was then lost or timed
+## out before its answer came back -- is never repeated, since the job may
+## already exist. Per-cluster 'submit_retries' / 'submit_retry_wait' override
+## these.
 $global_sbatch_submit_retries            = 3;
 $global_sbatch_submit_retry_wait_seconds = 5;
 
@@ -51,11 +55,14 @@ $global_sbatch_submit_retry_wait_seconds = 5;
 $global_complete_grace_seconds = 600;
 $global_complete_max_seconds   = 21600;
 
-## sbatch is retried only when it provably never started: the command's begin
-## marker never came back, as with a connect failure or an open breaker. An SSH
-## failure after that marker can mean Slurm accepted the job while its ID was
-## lost on the way back, and retrying then would create a duplicate, so those are
-## left for an operator to reconcile on the scheduler.
+## sbatch is retried when it provably never started (the command's begin
+## marker never came back, as with a connect failure or an open breaker) or
+## when sbatch's own final verdict line says the controller definitely
+## rejected the job outright. An SSH failure or dropped connection after that
+## marker, with no definite verdict line to go on, can mean Slurm accepted
+## the job while its ID was lost on the way back, and retrying then would
+## risk a duplicate, so those are left for an operator to reconcile on the
+## scheduler.
 ## $global_sbatch_submit_retries and $global_sbatch_submit_retry_wait_seconds set
 ## the budget; unset, the code uses 3 attempts 5 seconds apart.
 
@@ -85,7 +92,9 @@ $global_cluster_status_max_age_seconds = 1800;
 
 ## Where submit_slurm's reused ssh/scp connections keep their control socket
 ## for a submission's staging and sbatch calls. Same per-account subdirectory
-## reasoning as the breaker directory above.
+## reasoning as the breaker directory above. Set to '' to turn multiplexing
+## off outright and have every call connect plainly, same as when the
+## directory cannot be created or fails its checks.
 
 ## $global_ssh_control_dir = '/home/us3/lims/etc/ssh-control';
 

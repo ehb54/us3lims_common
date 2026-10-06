@@ -304,14 +304,14 @@ class submit_slurm extends jobsubmit
       elog2( "submit_job: slurm_job_id=$slurm_job_id confirmed after " . $submitResult[ 'attempt' ] . " attempt(s)" );
    }
 
-   ## Run sbatch via SSH and validate its result. Retried only when it provably
-   ## never started, per the condition below: once the command has begun, a lost
-   ## reply may mean Slurm accepted the job and only its ID went missing, and
-   ## retrying then would create a duplicate.
+   ## Run sbatch via SSH and validate its result. Retried when it provably
+   ## never started (the begin marker never came back) or when it started and
+   ## the controller definitely rejected it (no job created either way). Once
+   ## it has begun and the controller's answer was merely lost, a retry could
+   ## create a duplicate of a job Slurm already accepted, so that case is left
+   ## to fail with an "outcome unknown" message instead.
    private function attemptSubmit( $cluster, $workdir )
    {
-      ## A retry is safe only when sbatch provably never started (the command's
-      ## begin marker never came back, e.g. a connect failure or an open breaker).
       $retries = (int) ( $this->grid[ $cluster ][ 'submit_retries' ]
                          ?? $GLOBALS[ 'global_sbatch_submit_retries' ] ?? 3 );
       $wait    = (int) ( $this->grid[ $cluster ][ 'submit_retry_wait' ]
@@ -325,9 +325,12 @@ class submit_slurm extends jobsubmit
             return array( 'submit_ok' => true, 'job_id' => $result[ 'job_id' ], 'error' => '', 'attempt' => $attempt );
          }
 
-         ## Unreachable with no begin marker: ssh never ran the command.
-         $never_started = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE && empty( $result[ 'began' ] );
-         if ( ! $never_started || $attempt > $retries ) {
+         $unreachable   = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE;
+         $never_started = $unreachable && empty( $result[ 'began' ] );
+         $rejected      = $unreachable && ! empty( $result[ 'began' ] ) && ! empty( $result[ 'rejected' ] );
+         $retryable     = $never_started || $rejected;
+
+         if ( ! $retryable || $attempt > $retries ) {
             break;
          }
 
@@ -337,8 +340,10 @@ class submit_slurm extends jobsubmit
 
       $error = $never_started
              ? $result[ 'error' ] . "; sbatch never started, so nothing was submitted"
-             : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
-               . " outcome is unknown: reconcile on the cluster before resubmitting";
+             : ( $rejected
+               ? $result[ 'error' ] . "; the controller rejected the job outright, so nothing was submitted"
+               : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
+                 . " outcome is unknown: reconcile on the cluster before resubmitting" );
 
       return array( 'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt );
    }
@@ -355,12 +360,14 @@ class submit_slurm extends jobsubmit
    private function sbatchOnce( $cluster, $workdir, $attempt )
    {
       $sbatch_cmd = "sbatch --parsable --get-user-env $workdir/us3.slurm";
+      $rx         = $this->remote( $cluster );
 
       ## retries => 0 deliberately. Neither remote_exec nor submit_slurm may
       ## repeat this non-idempotent operation without first reconciling it.
-      $res = $this->remote( $cluster )->run( $sbatch_cmd, [
-         'retries' => 0,
-         'label'   => "sbatch attempt $attempt",
+      $res = $rx->run( $sbatch_cmd, [
+         'retries'   => 0,
+         'label'     => "sbatch attempt $attempt",
+         'multiplex' => true,
       ] );
 
       $stdout_lines = $res[ 'stdout' ];
@@ -387,7 +394,8 @@ class submit_slurm extends jobsubmit
                  : "sbatch exited $exit_code: $detail";
 
          return array( 'ok' => false, 'job_id' => '', 'error' => $error, 'class' => $res[ 'class' ],
-                       'began' => ! empty( $res[ 'began' ] ) );
+                       'began' => ! empty( $res[ 'began' ] ),
+                       'rejected' => $rx->is_scheduler_rejection( $stderr_text ) );
       }
 
       ## Parse --parsable output: "12345" or "12345;clustername"
@@ -747,9 +755,14 @@ class submit_slurm extends jobsubmit
    }
 
    ## Run a command on the cluster. Returns remote_exec's classified result.
+   ## multiplex: true unless the caller overrides it, since this and scp()
+   ## below are the staging+sbatch calls a submission makes to the same
+   ## login one after another -- the one case the shared ssh connection is
+   ## actually meant for. Other callers (gridctl's probes, results fetch,
+   ## queue viewer) go through remote_exec directly and so never set it.
    private function ssh( $cluster, $remote_cmd, $opts = [] )
    {
-      $res = $this->remote( $cluster )->run( $remote_cmd, $opts );
+      $res = $this->remote( $cluster )->run( $remote_cmd, $opts + [ 'multiplex' => true ] );
       $this->recordRemote( 'exec', $res );
       return $res;
    }
@@ -757,7 +770,7 @@ class submit_slurm extends jobsubmit
    ## Copy staged files to the cluster over SCP.
    private function scp( $cluster, $files, $dest, $opts = [] )
    {
-      $res = $this->remote( $cluster )->copy_to( $files, $dest, $opts );
+      $res = $this->remote( $cluster )->copy_to( $files, $dest, $opts + [ 'multiplex' => true ] );
       $this->recordRemote( 'copy', $res );
       return $res;
    }
@@ -817,8 +830,9 @@ class submit_slurm extends jobsubmit
    {
       ## Skip retries for this optional check to avoid delaying submission.
       $res = $this->remote( $cluster )->run( "scontrol show job $slurm_job_id", [
-         'retries' => 0,
-         'label'   => 'scontrol confirm',
+         'retries'   => 0,
+         'label'     => 'scontrol confirm',
+         'multiplex' => true,
       ] );
 
       if ( $res[ 'ok' ] ) {

@@ -207,8 +207,13 @@ class circuit_breaker
       ## change what this one believes about a cluster.
       $mine = $this->state_dir();
 
-      if ( ! is_dir( $mine ) && ! @mkdir( $mine, 0700, true ) )
+      if ( ! is_dir( $mine ) && ! @mkdir( $mine, 0700, true ) && ! is_dir( $mine ) )
       {
+         ## The second is_dir() catches two processes racing the first use:
+         ## the loser's mkdir() fails with EEXIST once the winner's mkdir()
+         ## has already landed, which is success, not the permission problem
+         ## this message describes.
+         ##
          ## Distinct from the symlink/ownership check below: this account
          ## could not even create its own subdirectory, almost always
          ## because $this->dir's group does not include it. The generic

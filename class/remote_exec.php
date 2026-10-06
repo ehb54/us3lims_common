@@ -412,17 +412,79 @@ class remote_exec
       return $us3 ? $us3[ 'dir' ] . '/lims/etc/ssh-control' : self::CONTROL_DIR;
    }
 
+   ## The account this process runs as, for the per-account control
+   ## subdirectory below. The login name when it can be read, else the uid:
+   ## both are stable and filename-safe. Mirrors circuit_breaker::account().
+   private function account()
+   {
+      $uid = function_exists( 'posix_geteuid' ) ? posix_geteuid() : null;
+
+      if ( $uid !== null && function_exists( 'posix_getpwuid' ) )
+      {
+         $pw = @posix_getpwuid( $uid );
+         if ( is_array( $pw ) && isset( $pw[ 'name' ] ) && $pw[ 'name' ] !== '' )
+         {
+            return preg_replace( '/[^A-Za-z0-9._-]/', '_', $pw[ 'name' ] );
+         }
+      }
+
+      return $uid === null ? 'unknown' : (string) $uid;
+   }
+
    /**
-    * The -o ControlPath value, or '' when the directory cannot be made
-    * available: multiplexing is a speed-up, not a requirement, so a
-    * permission problem here degrades to a plain connection per call rather
-    * than failing the submission.
+    * The -o ControlPath value, or '' when a safe one is not available:
+    * multiplexing is a speed-up, not a requirement, so any check below
+    * failing degrades to a plain connection per call rather than failing
+    * the submission.
     */
    private function controlPath()
    {
       $dir = $GLOBALS[ 'global_ssh_control_dir' ] ?? self::default_control_dir();
 
-      if ( ! is_dir( $dir ) && ! @mkdir( $dir, 0700, true ) )
+      if ( $dir === '' )
+      {
+         return '';
+      }
+
+      ## Shared top-level directory, group-writable so every local account
+      ## that needs it can create its own subdirectory below -- unlike that
+      ## subdirectory itself, this one is not where the socket lives.
+      if ( ! is_dir( $dir ) )
+      {
+         @mkdir( $dir, 0770, true );
+      }
+
+      if ( ! is_dir( $dir ) || is_link( $dir ) )
+      {
+         return '';
+      }
+
+      ## Per-account subdirectory, 0700, exactly like the breaker's own state
+      ## directory. OpenSSH's %C hashes local host + remote host + port +
+      ## remote user, but not the local user, so two accounts logging in as
+      ## the same remote user would otherwise compute the identical socket
+      ## path and lock each other out of it: whichever creates it first owns
+      ## it, and the other account's ssh fails to bind with "Permission
+      ## denied" before it ever runs the command.
+      $mine = rtrim( $dir, '/' ) . '/' . $this->account();
+
+      if ( ! is_dir( $mine ) && ! @mkdir( $mine, 0700, true ) )
+      {
+         return '';
+      }
+
+      ## ssh_config(5) requires the ControlPath directory not be writable by
+      ## other users. Checked here too, not just left to ssh to enforce,
+      ## because a mux client does not itself verify the master before
+      ## trusting it: another account planting a socket ahead of us3's own
+      ## would otherwise be used silently.
+      $euid = function_exists( 'posix_geteuid' ) ? posix_geteuid() : null;
+      $owner = @fileowner( $mine );
+      $perms = @fileperms( $mine );
+
+      if ( is_link( $mine )
+         || ( $euid !== null && $owner !== $euid && $owner !== 0 )
+         || $perms === false || ( $perms & 0077 ) !== 0 )
       {
          return '';
       }
@@ -430,7 +492,18 @@ class remote_exec
       ## %C: OpenSSH's own hash of local host + target host + port + user,
       ## so the socket path is always short regardless of hostname length,
       ## and shared between the ssh and scp calls that target the same login.
-      return rtrim( $dir, '/' ) . '/cm-%C';
+      $path = rtrim( $mine, '/' ) . '/cm-%C';
+
+      ## Unix domain socket paths are limited to a little over 100 bytes
+      ## depending on platform; %C itself expands to a fixed-length hash, so
+      ## only the directory portion varies. Stay with clear headroom rather
+      ## than find the exact limit from a failed bind.
+      if ( strlen( $path ) > 80 )
+      {
+         return '';
+      }
+
+      return $path;
    }
 
    /** Returns null when no breaker is configured or available. */

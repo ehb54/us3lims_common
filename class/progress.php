@@ -14,7 +14,12 @@ function submit_progress( $msg )
   }
 
   echo "<div class='submit-progress'>" . htmlspecialchars( $msg ) . "</div>\n";
-  if ( ob_get_level() > 0 )
+
+  // A buffer not started with PHP_OUTPUT_HANDLER_FLUSHABLE (e.g. gridctl
+  // submitone.php's) raises a notice on ob_flush(); ob_get_level() alone
+  // doesn't tell flushable apart from that.
+  $status = ob_get_status();
+  if ( ! empty( $status ) && ( $status[ 'flags' ] & PHP_OUTPUT_HANDLER_FLUSHABLE ) )
     ob_flush();
   flush();
 }

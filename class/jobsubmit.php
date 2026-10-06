@@ -354,7 +354,8 @@ class jobsubmit
 
    function parse_jobParameters( &$parser, &$job )
    {
-      $parameters = array();
+      $parameters  = array();
+      $occurrences = array();
 
       while ( $parser->read() )
       {
@@ -370,6 +371,39 @@ class jobsubmit
          }
 
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
+         $occurrences[ $tag ] = isset( $occurrences[ $tag ] ) ? $occurrences[ $tag ] + 1 : 1;
+
+         ## A few elements carry their meaning in further attributes rather than
+         ## in 'value': GA's bucket_fixed records which axes are held fixed in
+         ## fixedtype, xtype and ytype. Keeping only 'value' discarded those,
+         ## so anything reading this array could not tell a fixed axis from a
+         ## free one. Named "<tag>_<attribute>", which is how the historical
+         ## extraction names them, so one spelling serves both.
+         foreach ( array( 'fixedtype', 'xtype', 'ytype' ) as $attribute )
+         {
+            $value = $parser->getAttribute( $attribute );
+
+            if ( $value !== null )
+            {
+               $parameters[ $tag . '_' . $attribute ] = $value;
+            }
+         }
+      }
+
+      ## A repeated element carries its meaning in how many there are rather
+      ## than in any one of them: GA's buckets are written as one <bucket> each
+      ## with no count element anywhere, and only the last of them survives the
+      ## assignment above. Named "<tag>_count", which is how the historical
+      ## extraction names it, and never written over an element that already
+      ## holds that name, so a real vars_count stays the request's own value.
+      foreach ( $occurrences as $tag => $seen )
+      {
+         $key = $tag . '_count';
+
+         if ( ! array_key_exists( $key, $parameters ) )
+         {
+            $parameters[ $key ] = $seen;
+         }
       }
 
       $job[ 'jobParameters' ] = $parameters;
@@ -428,8 +462,20 @@ class jobsubmit
             case 'auc'       :
             case 'edit'      :
             case 'model'     :
+               ## Keyed by role, not positional: a <files> block names each of
+               ## these at most once, and callers (the runtime advisory) need
+               ## the filename for a specific role, not the Nth one present.
+               $files[ $tag ] = $parser->getAttribute( 'filename' );
+              break;
+
             case 'noise'     :
-               array_push( $files, $parser->getAttribute( 'filename' ) );
+               ## Unlike the roles above, dbinst writes one <noise> per noise
+               ## file (ri and ti noise can both be in use), so this is a list.
+               if ( ! isset( $files[ 'noise' ] ) )
+               {
+                  $files[ 'noise' ] = array();
+               }
+               $files[ 'noise' ][] = $parser->getAttribute( 'filename' );
               break;
          }
       }
@@ -439,6 +485,7 @@ class jobsubmit
    function parse_parameters( &$parser, &$dataset )
    {
       $parameters = array();
+      $speedsteps = array();
 
       while ( $parser->read() )
       {
@@ -453,10 +500,23 @@ class jobsubmit
          { continue;
          }
 
+         ## <speedstep> repeats, one per step, and carries its own attributes
+         ## rather than a single "value" like every other parameter tag.
+         if ( $tag == 'speedstep' )
+         {
+            array_push( $speedsteps, array(
+               'rotorspeed'    => $parser->getAttribute( 'rotorspeed' ),
+               'duration_hrs'  => $parser->getAttribute( 'duration_hrs' ),
+               'duration_mins' => $parser->getAttribute( 'duration_mins' ),
+            ) );
+            continue;
+         }
+
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
       }
 
-      $dataset[ 'parameters' ] = $parameters;
+      $dataset[ 'parameters' ]  = $parameters;
+      $dataset[ 'speedsteps' ]  = $speedsteps;
    }
 
    function maxwall()

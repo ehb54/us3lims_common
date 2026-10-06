@@ -98,6 +98,32 @@ $global_cluster_status_max_age_seconds = 1800;
 
 ## $global_ssh_control_dir = '/home/us3/lims/etc/ssh-control';
 
+## runtime advisory: record a predicted runtime for each eligible submission.
+##
+## advisory only. it cannot change the limit a job is given, and it is off
+## unless this is true. with it off, a submission reads this one setting and
+## does nothing further: no artifact is read and no record is written.
+##
+## a submission is never failed by the advisory. where the model, the inputs or
+## the recording are unusable, the submission proceeds unchanged and the reason
+## is recorded in gfac.runtime_prediction.
+$global_runtime_advisory_enabled = false;
+
+## the frozen model artifacts, one per method family. by default each family is
+## read from /home/us3/lims/etc/runtime_advisory_<family>.json, and a family
+## whose file is absent is simply not served. the file's content hash is
+## recorded with every recommendation, so changing a file mid-window is visible
+## in the records.
+##
+## set this only to put the files elsewhere. an array names them per family and
+## leaves out a family deliberately; a single string names one file, which is
+## still only used for the family it was fitted for.
+## $global_runtime_advisory_artifact = array(
+##    '2DSA' => '/home/us3/lims/etc/runtime_advisory_2DSA.json',
+##    'GA'   => '/home/us3/lims/etc/runtime_advisory_GA.json',
+##    'PCSA' => '/home/us3/lims/etc/runtime_advisory_PCSA.json',
+## );
+
 ## where the per-job monitor lives, and the interpreter the sudoers rule names.
 ## both have working defaults and are only set where a host differs.
 ##

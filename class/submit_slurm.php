@@ -25,6 +25,10 @@ class submit_slurm extends jobsubmit
    ## specific reason rather than a generic "submission aborted".
    protected $stage_error = '';
 
+   ## Captured by write_slurm_script() for observe_runtime_advisory(), which
+   ## submit() calls later, after sbatch and update_db() have both succeeded.
+   protected $advisoryPlan = null;
+
    ## Top-level: stage files then submit
    public function submit()
    {
@@ -54,6 +58,19 @@ class submit_slurm extends jobsubmit
             ## Report success only after recording the job and launching its monitor.
             if ( $this->update_db() )
             {
+               ## Only now: the job is submitted and recorded. Advisory only,
+               ## off unless global_config.php turns it on, cannot throw, and
+               ## cannot change what was already submitted above.
+               if ( $this->advisoryPlan !== null )
+               {
+                  $this->observe_runtime_advisory(
+                     $this->advisoryPlan[ 'cluster' ],
+                     $this->advisoryPlan[ 'requestID' ],
+                     $this->advisoryPlan[ 'plan' ],
+                     $this->advisoryPlan[ 'walltime' ],
+                     $this->advisoryPlan[ 'wallmins' ]
+                  );
+               }
                $this->message[] = "submit complete";
             }
          } else {
@@ -156,6 +173,19 @@ class submit_slurm extends jobsubmit
 
       ## Resolve wall time
       list( $walltime, $wallmins ) = $this->resolveWalltime( $cfg );
+
+      ## Captured for observe_runtime_advisory(), called from submit() only
+      ## after sbatch and update_db() have both succeeded: not here, where a
+      ## fatal downstream of this point (an unread artifact, an oversized
+      ## edit file) would abort a submission the advisory had no business
+      ## being able to touch.
+      $this->advisoryPlan = array(
+         'cluster'    => $cluster,
+         'requestID'  => $requestID,
+         'plan'       => $plan,
+         'walltime'   => $walltime,
+         'wallmins'   => $wallmins,
+      );
 
       ## Build environment setup lines from config
       $env_lines = $this->buildEnvLines( $cfg );
@@ -544,6 +574,108 @@ class submit_slurm extends jobsubmit
                                           $bindir = PHP_BINDIR )
    {
       return $sapi === 'cli' && $binary !== '' ? $binary : $bindir . '/php';
+   }
+
+   /**
+    * Hand the advisory path what it needs and forget about it.
+    *
+    * Called from submit(), not write_slurm_script(): the job id now exists,
+    * and this only fires once update_db() has returned true, i.e. after
+    * sbatch has already run and the submission is otherwise committed. Kept
+    * off the critical path that way on purpose -- see the README for why.
+    *
+    * Swallows everything. An advisory failure is not a submission failure.
+    */
+   protected function observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins )
+   {
+      ## Checked directly, not through the class, so the switch stays a single
+      ## global lookup and nothing is required when it is off: that promise is
+      ## stated in class/prediction/README.md and belongs to this call site,
+      ## not to the class, which cannot load itself.
+      if ( empty( $GLOBALS[ 'global_runtime_advisory_enabled' ] ) )
+      {
+         return;
+      }
+
+      try {
+         ## include_once, not require_once: a missing file here is the same
+         ## "advisory unusable" case this whole call swallows, not a reason
+         ## to take the submission down with a compile error after the job
+         ## is already recorded.
+         if ( ! class_exists( 'runtime_advisory' ) )
+         {
+            global $class_dir;
+            include_once $class_dir . 'prediction/runtime_advisory.php';
+         }
+
+         if ( ! class_exists( 'runtime_advisory' ) )
+         {
+            ## Otherwise this is silent apart from PHP's own include warning,
+            ## which goes to the PHP error log, not where an admin looking
+            ## into the advisory would think to check. Covers both this file
+            ## being missing and one of its own siblings being missing or
+            ## broken (runtime_advisory.php degrades the same way for that).
+            elog2( "runtime advisory: request $requestID: class not available"
+                 . " after loading prediction/runtime_advisory.php; advisory skipped" );
+            return;
+         }
+
+         global $dbusername, $dbpasswd, $dbhost, $dbname;
+         global $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname;
+
+         $job     = isset( $this->data[ 'job' ] ) ? $this->data[ 'job' ] : array();
+         $dataset = isset( $this->data[ 'dataset' ][ 0 ] ) ? $this->data[ 'dataset' ][ 0 ] : array();
+         $files   = isset( $dataset[ 'files' ] ) ? $dataset[ 'files' ] : array();
+
+         $link = @mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+         $gfac = @mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
+
+         $status = runtime_advisory::observe( array(
+            'us3_db'      => $dbname,
+            'request_id'  => $requestID,
+            ## Checked against the artifact's family: another method's request
+            ## can carry enough of the same parameter names to be scored.
+            'method'      => isset( $this->data[ 'method' ] ) ? $this->data[ 'method' ] : '',
+            ## The entry's name, which is what the request records and what the
+            ## model's frozen mapping is keyed on.
+            'destination' => isset( $this->grid[ $cluster ][ 'name' ] )
+                             ? $this->grid[ $cluster ][ 'name' ] : $cluster,
+
+            'parameters'    => isset( $job[ 'jobParameters' ] ) ? $job[ 'jobParameters' ] : array(),
+            'speedsteps'    => isset( $dataset[ 'speedsteps' ] ) ? $dataset[ 'speedsteps' ] : array(),
+            'simpoints'     => isset( $dataset[ 'parameters' ][ 'simpoints' ] )
+                               ? $dataset[ 'parameters' ][ 'simpoints' ] : null,
+            'edit_filename' => isset( $files[ 'edit' ] ) ? $files[ 'edit' ] : null,
+
+            ## The incumbent, and what is actually being emitted, recorded apart.
+            'formula_reference_seconds' => (int) $wallmins * 60,
+            'emitted_directive'         => $walltime,
+            'requested_ranks'           => isset( $plan[ 'total_tasks' ] ) ? $plan[ 'total_tasks' ] : null,
+
+            'link'      => $link,
+            'gfac_link' => $gfac,
+         ) );
+
+         if ( $link )
+         {
+            mysqli_close( $link );
+         }
+         if ( $gfac )
+         {
+            mysqli_close( $gfac );
+         }
+
+         ## A row was still written for every one of these; this is the one
+         ## place that notices when it was not 'ok', so a run of artifact or
+         ## input trouble is visible without querying gfac.runtime_prediction.
+         if ( $status !== 'ok' )
+         {
+            elog2( "runtime advisory: request $requestID status $status" );
+         }
+      } catch ( Throwable $e ) {
+         ## Deliberately silent beyond the log: the job is what matters here.
+         elog2( 'runtime advisory: ' . $e->getMessage() );
+      }
    }
 
    /**

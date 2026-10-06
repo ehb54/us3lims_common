@@ -104,7 +104,16 @@ class runtime_advisory
       } catch ( Throwable $e ) {
          ## Including an error in the recording of an error. The submission is
          ## already past this point and must not learn about any of it.
-         self::note( $context, 'advisory_error', $e->getMessage(), $started );
+         ##
+         ## note() itself needs runtime_record, so if that is the sibling
+         ## that is missing (the include_once above left it unloaded),
+         ## calling it here throws a second, uncaught Error -- this catch
+         ## only wraps run(), not its own body. Guarded directly rather than
+         ## adding a second try/catch around one call.
+         if ( class_exists( 'runtime_record' ) )
+         {
+            self::note( $context, 'advisory_error', $e->getMessage(), $started );
+         }
          return 'advisory_error';
       }
    }

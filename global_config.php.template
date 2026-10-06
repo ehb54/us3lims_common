@@ -98,6 +98,14 @@ $global_cluster_status_max_age_seconds = 1800;
 
 ## $global_ssh_control_dir = '/home/us3/lims/etc/ssh-control';
 
+## Where dbinst's elog.php keeps elog.txt and its HMAC key. Defaults to
+## ~us3/lims/etc. On a split web/us3 account host, provision both files
+## 0660/0640 us3:<web group> so either account can write/read them; elog.php
+## degrades to logging "could not open"/using a fresh in-memory key, rather
+## than failing, when it cannot.
+
+## $global_elog_dir = '/home/us3/lims/etc';
+
 ## where the per-job monitor lives, and the interpreter the sudoers rule names.
 ## both have working defaults and are only set where a host differs.
 ##

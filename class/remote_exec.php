@@ -638,28 +638,64 @@ class remote_exec
    }
 
    /**
-    * A subset of is_scheduler_unreachable(): the controller definitely
-    * answered and definitely did not accept the job, as opposed to a
-    * contact failure, timeout or dropped connection where whether a job was
-    * created is genuinely unknown. Safe for a caller to retry outright,
-    * unlike the ambiguous cases, which need reconciling against the
-    * scheduler (e.g. a job-name lookup) before resubmitting.
+    * A subset of is_scheduler_unreachable(): the whole sbatch invocation
+    * definitely ended without creating a job, as opposed to a dropped or
+    * timed-out connection where whether a job was created is genuinely
+    * unknown. Safe for a caller to retry outright, unlike the ambiguous
+    * cases, which need reconciling against the scheduler (e.g. a job-name
+    * lookup) before resubmitting.
+    *
+    * sbatch answers EAGAIN by printing "Slurm temporarily unable to accept
+    * job, sleeping and retrying" and then retrying internally on its own,
+    * up to ~120s/15 more attempts -- that notice can appear in stderr from
+    * an attempt sbatch went on to succeed at, so matching it anywhere in
+    * stderr (the previous implementation) misclassifies a pending outcome
+    * as a definite one. The only trustworthy verdict is sbatch's own final
+    * "Batch job submission failed: <reason>" line, so only that line's
+    * reason is checked.
+    *
+    * A dropped-connection phrase (lost mid-dialogue, so the controller's
+    * actual answer to that attempt is unknown) overrides any final line:
+    * even if sbatch went on to report failure afterward, an earlier attempt
+    * within the same invocation may already have been accepted.
     */
    public function is_scheduler_rejection( $stderr )
    {
-      if ( (string) $stderr === '' )
+      $stderr = (string) $stderr;
+
+      if ( $stderr === '' )
       {
          return false;
       }
 
-      $patterns = array(
-         'Slurm temporarily unable to accept job',
-         'Slurmctld running but not accepting requests',
+      $ambiguous = array(
+         'Socket timed out on send/recv operation',
+         'Zero Bytes were transmitted or received',
       );
 
-      foreach ( $patterns as $pattern )
+      foreach ( $ambiguous as $pattern )
       {
-         if ( preg_match( '#' . $pattern . '#i', (string) $stderr ) )
+         if ( preg_match( '#' . $pattern . '#i', $stderr ) )
+         {
+            return false;
+         }
+      }
+
+      if ( ! preg_match( '/Batch job submission failed:\s*(.*)/i', $stderr, $m ) )
+      {
+         return false;
+      }
+
+      $reason = $m[ 1 ];
+
+      $definite = array(
+         'Resource temporarily unavailable',
+         'Unable to contact slurm controller \(connect failure\)',
+      );
+
+      foreach ( $definite as $pattern )
+      {
+         if ( preg_match( '#' . $pattern . '#i', $reason ) )
          {
             return true;
          }

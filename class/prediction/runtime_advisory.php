@@ -33,12 +33,22 @@
  * is unsupported, which is how a family is left out of the window.
  */
 
+## include_once, not require_once: a missing sibling here must not fatal.
+## require_once on a missing file is an uncatchable fatal on PHP 7.2, and
+## this loads mid-batch, after the current job was already recorded --
+## taking the rest of the submission batch down with it. A class that ends
+## up missing because of this is still only discovered when observe()
+## actually calls it, inside its own try/catch(Throwable): PHP throws a
+## catchable Error for "class not found" (confirmed), which lands in the
+## same advisory_error path a model-loading failure already takes. (A
+## genuine syntax error in a sibling is a parse-time fatal either way, the
+## same as one in this file itself; nothing at the PHP level degrades that.)
 if ( ! class_exists( 'runtime_model' ) )
 {
-   require_once __DIR__ . '/runtime_model.php';
-   require_once __DIR__ . '/runtime_features.php';
-   require_once __DIR__ . '/runtime_dataset_facts.php';
-   require_once __DIR__ . '/runtime_record.php';
+   include_once __DIR__ . '/runtime_model.php';
+   include_once __DIR__ . '/runtime_features.php';
+   include_once __DIR__ . '/runtime_dataset_facts.php';
+   include_once __DIR__ . '/runtime_record.php';
 }
 
 class runtime_advisory

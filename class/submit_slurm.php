@@ -610,6 +610,13 @@ class submit_slurm extends jobsubmit
 
          if ( ! class_exists( 'runtime_advisory' ) )
          {
+            ## Otherwise this is silent apart from PHP's own include warning,
+            ## which goes to the PHP error log, not where an admin looking
+            ## into the advisory would think to check. Covers both this file
+            ## being missing and one of its own siblings being missing or
+            ## broken (runtime_advisory.php degrades the same way for that).
+            elog2( "runtime advisory: request $requestID: class not available"
+                 . " after loading prediction/runtime_advisory.php; advisory skipped" );
             return;
          }
 

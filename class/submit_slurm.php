@@ -523,8 +523,9 @@ class submit_slurm extends jobsubmit
          }
       } else {
          $php     = escapeshellarg( $this->monitor_php_binary() );
-         $monitor = $this->monitor_script();
-         $args    = "$dbname $slurm_id $requestID";
+         $monitor = escapeshellarg( $this->monitor_script() );
+         $args    = escapeshellarg( (string) $dbname ) . ' ' . escapeshellarg( (string) $slurm_id )
+                  . ' ' . escapeshellarg( (string) $requestID );
 
          $whoami  = function_exists( 'posix_geteuid' ) && function_exists( 'posix_getpwuid' )
                     ? ( posix_getpwuid( posix_geteuid() )[ 'name' ] ?? '' )
@@ -537,7 +538,10 @@ class submit_slurm extends jobsubmit
          else
          {
             ## NOPASSWD rules match sudo's direct command; keep PHP there and wrap sudo with nice.
-            $cmd = "nice -15 sudo -u us3 " . $this->monitor_sudo_php() . " $monitor $args 2>&1";
+            ## Both are admin-set via $global_jobmonitor_php/_script, same as $monitor above: quoted
+            ## for hygiene, not because a hole was found, but a value typed into global_config.php is
+            ## still a value this command line has to carry safely.
+            $cmd = "nice -15 sudo -u us3 " . escapeshellarg( $this->monitor_sudo_php() ) . " $monitor $args 2>&1";
          }
 
          exec( $cmd, $null, $exit_code );
@@ -701,8 +705,10 @@ class submit_slurm extends jobsubmit
          $this->runExec( $cmd, $output, $exit_code );
       } );
       ## The remote host runs this as us3, so the interpreter is that host's,
-      ## not this request's: the same value the sudo rule names.
-      $cmd = $this->monitor_sudo_php() . ' ' . $this->monitor_script() . ' '
+      ## not this request's: the same value the sudo rule names. Quoted like
+      ## the arguments below: both come from $global_jobmonitor_php/_script,
+      ## admin-set values this command line still has to carry safely.
+      $cmd = escapeshellarg( $this->monitor_sudo_php() ) . ' ' . escapeshellarg( $this->monitor_script() ) . ' '
            . escapeshellarg( $dbname ) . ' ' . escapeshellarg( (string) $jobID )
            . ' ' . escapeshellarg( (string) $requestID );
       ## A lost response may follow a successful launch. Do not launch twice.

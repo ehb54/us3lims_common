@@ -362,7 +362,19 @@ class remote_exec
       $use_breaker = ! isset( $opts[ 'breaker' ] ) || $opts[ 'breaker' ] !== false;
       $breaker     = $use_breaker ? $this->breaker() : null;
 
-      if ( $breaker !== null && $breaker->is_open( $this->cluster ) )
+      ## 'breaker_gate' => false: use the breaker for its bookkeeping (a
+      ## real failure here still counts against the cluster) but skip the
+      ## open-breaker check that would otherwise refuse the call outright.
+      ## For a caller that already has fresher evidence than the breaker
+      ## does -- a ping that just confirmed the cluster is reachable right
+      ## now -- refusing locally on an unrelated earlier failure would be
+      ## stale information overriding a live one. Plain 'breaker' => false
+      ## skips both the gate and the bookkeeping together, for callers (like
+      ## health probes) that want neither.
+      $skip_gate = $breaker !== null && array_key_exists( 'breaker_gate', $opts )
+                 && $opts[ 'breaker_gate' ] === false;
+
+      if ( $breaker !== null && ! $skip_gate && $breaker->is_open( $this->cluster ) )
       {
          $wait = $breaker->seconds_remaining( $this->cluster );
          $this->logf( "$label: skipped, breaker open for {$wait}s more" );

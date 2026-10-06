@@ -78,3 +78,224 @@ function toggleDisplay( whichDiv, anchorID, anchorContent )
   }
 }
 
+const main_debug = 0;
+
+main_debug && console.log( 'main.js loaded v17' );
+
+document.addEventListener('change', function(event) {
+    main_debug && console.log( 'change event' );
+    if ( event.target ) {
+        main_debug && console.dir( event.target );
+        if ( event.target.classList.contains( 'onchange-form-submit') ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-form-submit' );
+            event.target.form.submit();
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-generate-oligomer-string' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-generate-oligomer-string' );
+            generate_oligomer_string();
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-showhide-value-3-4' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-showhide-value-3-4' );
+            show_hide( event.target.value,3,4 );
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-get-person' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-get-person' );
+            get_person( event.target );
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-get-project' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-get-project' );
+            get_project( event.target );
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-get-lab' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-get-lab' );
+            get_lab( event.target );
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-get-solute-count' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-get-solute_count' );
+            get_solute_count( event.target );
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-set-edit-mode' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-set-edit-mode' );
+            set_edit_mode( event.target );
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-select-project' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-select-project' );
+            select_project( event.target );
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-select-document' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-select-document' );
+            select_document();
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-browse-document' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-browse-document' );
+            browse_document( event.target );
+            return false;
+        } else if ( event.target.classList.contains( 'onchange-select-class' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'change event target has class onchange-select-class' );
+            select_class( event.target );
+            return false;
+        } else {
+            main_debug && console.error( 'unknown or unsupported change event received, returning true' );
+            main_debug && console.dir( event.target );
+            return true;
+        }
+    }
+});
+
+document.addEventListener('click', function(event) {
+    main_debug && console.log( 'click event' );
+    if ( event.target ) {
+        main_debug && console.dir( event.target );
+        if ( event.target.classList.contains( 'onclick-print-version') ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-print-version' );
+            print_version();
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-reset-message' ) ) {
+            // Radio/checkbox target: preventDefault would revert the click.
+            main_debug && console.log( 'click event target has class onclick-reset-message' );
+            reset_message();
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-export-file' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-export-file' );
+            export_file();
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-construction' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-construction' );
+            construction();
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-window-close' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-window-close' );
+            window.close();
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-form-submit' ) ) {
+            // no preventDefault() here: these are radio inputs, they must
+            // still become checked before the form is submitted
+            main_debug && console.log( 'click event target has class onclick-form-submit' );
+            event.target.form.submit();
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-selectAllCells' ) ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-selectAllCells' );
+            selectAllCells();
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-return-toggle-advanced') ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-return-toggle-advanced' );
+            event.preventDefault();
+            return toggle('advanced');
+        } else if ( event.target.classList.contains( 'onclick-show-report-detail-arg') ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-show-report-detail-arg' );
+            if ( !event.target.dataset.arg ) {
+                console.error( "click event onclick-show-report-detail-arg has no dataset.arg" );
+                return false;
+            }
+            main_debug && console.dir( event.target.dataset.arg );
+            show_report_detail( event.target.dataset.arg );
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-show-solution-detail-args') ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-show-solution-detail-args' );
+            if ( !event.target.dataset.args ) {
+                console.error( "click event onclick-show-solution-detail-arg has no dataset.args" );
+                return false;
+            }
+            main_debug && console.dir( event.target.dataset.args );
+            try {
+                const args = JSON.parse( event.target.dataset.args );
+                show_solution_detail( ...args );
+                return false;
+            } catch( error ) {
+                if ( error instanceof SyntaxError ) {
+                    console.error( 'click event onclick-show-solution-detail-args parsing dataset.args encountered invalid JSON:', error.message );
+                } else {
+                    console.error( 'click event onclick-show-solution-args parsing dataset.args encountered an error', error );
+                }
+                return false;
+            }
+        } else if ( event.target.classList.contains( 'onclick-alert-arg') ) {
+            event.preventDefault();
+            if ( event.target.dataset.arg ) {
+                alert( event.target.dataset.arg );
+            }
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-window-location-arg') ) {
+            event.preventDefault();
+            main_debug && console.log( 'click event target has class onclick-window-location-arg' );
+            if ( !event.target.dataset.arg ) {
+                console.error( "click event onclick-window-location-arg has no dataset.arg" );
+                return false;
+            }
+            main_debug && console.dir( event.target.dataset.arg );
+            window.location=event.target.dataset.arg;
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-hide-arg') ) {
+            // Radio/checkbox target: preventDefault would revert the click.
+            main_debug && console.log( 'click event target has class onclick-hide-arg' );
+            if ( !event.target.dataset.arg ) {
+                console.error( "click event onclick-hide-arg has no dataset.arg" );
+                return false;
+            }
+            main_debug && console.dir( event.target.dataset.arg );
+            hide( event.target.dataset.arg );
+            return false;
+        } else if ( event.target.classList.contains( 'onclick-show-ctl-arg') ) {
+            // Radio/checkbox target: preventDefault would revert the click.
+            main_debug && console.log( 'click event target has class onclick-show-ctl-arg' );
+            if ( !event.target.dataset.arg ) {
+                console.error( "click event onclick-show-ctl-arg has no dataset.arg" );
+                return false;
+            }
+            main_debug && console.dir( event.target.dataset.arg );
+            show_ctl( event.target.dataset.arg );
+            return false;
+        } else {
+            main_debug && console.error( 'unknown or unsupported click event received, returning true' );
+            main_debug && console.dir( event.target );
+            return true;
+        }
+    }
+});
+
+document.addEventListener('submit', function(event) {
+    const form = event.target;
+    if ( !form ) return;
+    const simple = form.classList.contains( 'onsubmit-return-validate-this' );
+    const withArgs = form.classList.contains( 'onsubmit-return-validate-this-args' );
+    const solutes = form.classList.contains( 'onsubmit-return-validate-solutes-args' );
+    if ( !simple && !withArgs && !solutes ) return;
+
+    try {
+        const args = simple ? [] : JSON.parse( form.dataset.args );
+        if ( !Array.isArray( args ) ) throw new Error( 'validation arguments must be an array' );
+        const valid = solutes ? validate_solutes( ...args ) : validate( form, ...args );
+        // addEventListener ignores a returned boolean. Preserve native submit
+        // (including its clicked button) on success and cancel only on failure.
+        if ( valid === false ) event.preventDefault();
+    } catch ( error ) {
+        event.preventDefault();
+        console.error( 'submit validation failed:', error );
+        // The message goes in the alert too. Without it the only way to find out
+        // what went wrong is the browser console, which is not somewhere a
+        // scientist reporting a failed submission will look.
+        const detail = error && error.message ? '\n\n' + error.message : '';
+        alert( 'This form could not be checked, so it was not submitted. '
+             + 'Please review the values and try again.' + detail );
+    }
+});

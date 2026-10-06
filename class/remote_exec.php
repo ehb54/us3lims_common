@@ -282,20 +282,19 @@ class remote_exec
          'label'   => 'ping',
       ) );
 
-      ## Feed the verdict back in by hand, since the bypass skipped the
-      ## bookkeeping in attempt().
+      ## Feed a failure back in by hand, since the bypass skipped the
+      ## bookkeeping in attempt(). Not a success, even though this is also
+      ## the probe outage_timeout_verdict() reads to decide whether a stall
+      ## is the cluster's fault: /bin/true over ssh answering says the
+      ## transport is up, not that the controller is -- a sbatch/squeue
+      ## failing against a down controller is a real failure the breaker
+      ## tracks through attempt(), and a ping that never asked the
+      ## controller anything is not grounds to erase it.
       $breaker = $this->breaker();
 
-      if ( $breaker !== null )
+      if ( $breaker !== null && remote_exec_infra_fault( $res ) )
       {
-         if ( remote_exec_infra_fault( $res ) )
-         {
-            $breaker->record_failure( $this->cluster );
-         }
-         else
-         {
-            $breaker->record_success( $this->cluster );
-         }
+         $breaker->record_failure( $this->cluster );
       }
 
       return $res;

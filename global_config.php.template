@@ -83,6 +83,12 @@ $global_cluster_status_max_age_seconds = 1800;
 
 ## $global_circuit_breaker_dir = '/home/us3/lims/etc/circuit-breaker';
 
+## Where submit_slurm's reused ssh/scp connections keep their control socket
+## for a submission's staging and sbatch calls. Same per-account subdirectory
+## reasoning as the breaker directory above.
+
+## $global_ssh_control_dir = '/home/us3/lims/etc/ssh-control';
+
 ## where the per-job monitor lives, and the interpreter the sudoers rule names.
 ## both have working defaults and are only set where a host differs.
 ##

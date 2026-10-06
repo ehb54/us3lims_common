@@ -22,9 +22,11 @@ class remote_exec
    ## Under ~us3/lims/etc (see breaker()); /var/tmp is split by PrivateTmp and aged out.
    const BREAKER_DIR = '/home/us3/lims/etc/circuit-breaker';
 
-   ## A submission makes three separate connections to the same login (stage,
-   ## sbatch, and the ssh-launched monitor): one mkdir, one scp, one sbatch.
-   ## Each paid full TCP+auth separately, which measured at ~2.7s/job. An SSH
+   ## A submission makes three separate connections to the cluster login
+   ## (one mkdir, one scp, one sbatch); the ssh-launched monitor is a fourth
+   ## ssh call but to the LIMS host, not the cluster, so it never shares this
+   ## socket. Each of the three paid full TCP+auth separately, measured at
+   ## ~2.7s/job. An SSH
    ## ControlMaster socket, left open for a short while after the first
    ## connection, lets the rest of the submission reuse it instead. Same
    ## PrivateTmp reasoning as the breaker directory: a service-private /tmp
@@ -138,7 +140,8 @@ class remote_exec
 
       ## The command has to survive one extra round of shell parsing on the
       ## login node, so it is passed as a single quoted argument.
-      $cmd = '/usr/bin/ssh ' . $this->sshOpts() . ' ' . escapeshellarg( $this->login() )
+      $cmd = '/usr/bin/ssh ' . $this->sshOpts( ! empty( $opts[ 'multiplex' ] ) ) . ' '
+             . escapeshellarg( $this->login() )
              . ' ' . escapeshellarg( $this->frame( $remote_cmd, $nonce ) );
 
       $result = $this->unframe(
@@ -244,7 +247,7 @@ class remote_exec
       $timeout = $this->operationTimeout(
          $opts, 'copy_timeout_seconds', 'copy_timeout_seconds' );
 
-      $cmd = '/usr/bin/scp ' . $this->scpOpts()
+      $cmd = '/usr/bin/scp ' . $this->scpOpts( ! empty( $opts[ 'multiplex' ] ) )
              . ' ' . escapeshellarg( $this->login() . ':' . $remote_path )
              . ' ' . escapeshellarg( $local_dest );
 
@@ -263,13 +266,15 @@ class remote_exec
       $paths = is_array( $local_paths ) ? $local_paths : array( $local_paths );
       $srcs  = implode( ' ', array_map( 'escapeshellarg', $paths ) );
 
-      $cmd = '/usr/bin/scp ' . $this->scpOpts() . ' ' . $srcs
+      $cmd = '/usr/bin/scp ' . $this->scpOpts( ! empty( $opts[ 'multiplex' ] ) ) . ' ' . $srcs
              . ' ' . escapeshellarg( $this->login() . ':' . $remote_dest );
 
       return $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'copy_to' );
    }
 
-   /** Probe without retries or breaker gating; update the breaker with the result. */
+   /** Probe without retries or breaker gating. Feeds an infra fault back into
+    *  the breaker as a failure; never records a success, since bare ssh
+    *  reachability says nothing about the controller behind it. */
    public function ping( $opts = array() )
    {
       $timeout = $this->operationTimeout(
@@ -468,7 +473,10 @@ class remote_exec
       ## denied" before it ever runs the command.
       $mine = rtrim( $dir, '/' ) . '/' . $this->account();
 
-      if ( ! is_dir( $mine ) && ! @mkdir( $mine, 0700, true ) )
+      ## The second is_dir() catches two processes racing the first use: the
+      ## loser's mkdir() fails with EEXIST once the winner's has landed,
+      ## which is success, not a reason to give up multiplexing.
+      if ( ! is_dir( $mine ) && ! @mkdir( $mine, 0700, true ) && ! is_dir( $mine ) )
       {
          return '';
       }
@@ -629,6 +637,37 @@ class remote_exec
       return false;
    }
 
+   /**
+    * A subset of is_scheduler_unreachable(): the controller definitely
+    * answered and definitely did not accept the job, as opposed to a
+    * contact failure, timeout or dropped connection where whether a job was
+    * created is genuinely unknown. Safe for a caller to retry outright,
+    * unlike the ambiguous cases, which need reconciling against the
+    * scheduler (e.g. a job-name lookup) before resubmitting.
+    */
+   public function is_scheduler_rejection( $stderr )
+   {
+      if ( (string) $stderr === '' )
+      {
+         return false;
+      }
+
+      $patterns = array(
+         'Slurm temporarily unable to accept job',
+         'Slurmctld running but not accepting requests',
+      );
+
+      foreach ( $patterns as $pattern )
+      {
+         if ( preg_match( '#' . $pattern . '#i', (string) $stderr ) )
+         {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
    /** Authentication and host-key failures are configuration errors: retrying cannot help. */
    public function is_permanent_failure( $stderr )
    {
@@ -665,6 +704,15 @@ class remote_exec
          'Broken pipe',
          'Timeout, server .* not responding',
          'banner exchange',
+         ## The multiplexed master died or could not be reached mid-call:
+         ## scp then exits 1 with only one of these on stderr, which used to
+         ## read as a remote command failure rather than a transport fault.
+         ## Deliberately not matching mux_client_request_session or
+         ## "ControlSocket ... already exists", which are fallback notices
+         ## on calls that still succeed.
+         'lost connection',
+         'unix_listener',
+         'ControlPath too long',
       );
 
       foreach ( $patterns as $p )
@@ -679,7 +727,7 @@ class remote_exec
    }
 
    /** Non-interactive SSH with connection/keepalive limits and host-key checking. */
-   private function sshOpts()
+   private function sshOpts( $multiplex = false )
    {
       $connect = $this->operationTimeout(
          array(), 'connect_timeout_seconds', 'connect_timeout_seconds' );
@@ -690,11 +738,11 @@ class remote_exec
            . ' -o ServerAliveInterval=15'
            . ' -o ServerAliveCountMax=3'
            . ' -o StrictHostKeyChecking=' . $this->hostKeyPolicy()
-           . $this->multiplexOpts();
+           . $this->multiplexOpts( $multiplex );
    }
 
    ## scp takes the same options but spells the port -P, and must not be given -x.
-   private function scpOpts()
+   private function scpOpts( $multiplex = false )
    {
       $connect = $this->operationTimeout(
          array(), 'connect_timeout_seconds', 'connect_timeout_seconds' );
@@ -705,16 +753,27 @@ class remote_exec
            . ' -o ServerAliveInterval=15'
            . ' -o ServerAliveCountMax=3'
            . ' -o StrictHostKeyChecking=' . $this->hostKeyPolicy()
-           . $this->multiplexOpts();
+           . $this->multiplexOpts( $multiplex );
    }
 
    ## Shared by sshOpts() and scpOpts(): the same ControlPath for both means
    ## an scp that follows an ssh to the same login reuses its connection, and
-   ## the other way round. '' (no directory available) omits the options
-   ## entirely, so a host where the control directory cannot be created just
-   ## connects plainly, exactly as before this existed.
-   private function multiplexOpts()
+   ## the other way round. Opt-in, not the default: without $multiplex, a
+   ## caller like gridctl's probes, results fetch and queue viewer connects
+   ## plainly, so a 60s ControlPersist on one of those does not keep a
+   ## cluster's master open for as long as any job against it is running.
+   ## Only submit_slurm::remote() -- the caller actually staging, submitting
+   ## and polling once per submission -- asks for it. '' (no directory
+   ## available) omits the options entirely, so a host where the control
+   ## directory cannot be created just connects plainly, exactly as before
+   ## this existed.
+   private function multiplexOpts( $multiplex )
    {
+      if ( ! $multiplex )
+      {
+         return '';
+      }
+
       $path = $this->controlPath();
 
       if ( $path === '' )
@@ -722,7 +781,7 @@ class remote_exec
          return '';
       }
 
-      return ' -o ControlMaster=auto -o ControlPath=' . $path
+      return ' -o ControlMaster=auto -o ' . escapeshellarg( 'ControlPath=' . $path )
            . ' -o ControlPersist=' . self::CONTROL_PERSIST_SECONDS;
    }
 

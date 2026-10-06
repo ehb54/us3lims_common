@@ -11,7 +11,7 @@ It exists for one evaluation window and is meant to be removed afterwards.
 | Item | Where |
 | --- | --- |
 | The code | this directory, inside `web/common` |
-| The call site | one statement in `submit_slurm::write_slurm_script()`, after `resolveWalltime()` |
+| The call site | one statement in `submit_slurm::submit()`, after sbatch has run and `update_db()` has returned true |
 | The models | one JSON artifact per method family, by default `/home/us3/lims/etc/runtime_advisory_<family>.json` |
 | The records | `gfac.runtime_prediction`, created from `runtime_pilot_table.sql` |
 | The switch | `$global_runtime_advisory_enabled` in `global_config.php` |

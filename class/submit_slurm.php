@@ -579,9 +579,10 @@ class submit_slurm extends jobsubmit
    /**
     * Hand the advisory path what it needs and forget about it.
     *
-    * Separate from write_slurm_script() so the submission reads as one line,
-    * and so everything this gathers is gathered after the decision is final:
-    * the plan is resolved, the destination is fixed, and sbatch has not run.
+    * Called from submit(), not write_slurm_script(): the job id now exists,
+    * and this only fires once update_db() has returned true, i.e. after
+    * sbatch has already run and the submission is otherwise committed. Kept
+    * off the critical path that way on purpose -- see the README for why.
     *
     * Swallows everything. An advisory failure is not a submission failure.
     */
@@ -596,13 +597,22 @@ class submit_slurm extends jobsubmit
          return;
       }
 
-      if ( ! class_exists( 'runtime_advisory' ) )
-      {
-         global $class_dir;
-         require_once $class_dir . 'prediction/runtime_advisory.php';
-      }
-
       try {
+         ## include_once, not require_once: a missing file here is the same
+         ## "advisory unusable" case this whole call swallows, not a reason
+         ## to take the submission down with a compile error after the job
+         ## is already recorded.
+         if ( ! class_exists( 'runtime_advisory' ) )
+         {
+            global $class_dir;
+            include_once $class_dir . 'prediction/runtime_advisory.php';
+         }
+
+         if ( ! class_exists( 'runtime_advisory' ) )
+         {
+            return;
+         }
+
          global $dbusername, $dbpasswd, $dbhost, $dbname;
          global $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname;
 

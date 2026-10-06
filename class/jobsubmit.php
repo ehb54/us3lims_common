@@ -462,11 +462,20 @@ class jobsubmit
             case 'auc'       :
             case 'edit'      :
             case 'model'     :
-            case 'noise'     :
                ## Keyed by role, not positional: a <files> block names each of
                ## these at most once, and callers (the runtime advisory) need
                ## the filename for a specific role, not the Nth one present.
                $files[ $tag ] = $parser->getAttribute( 'filename' );
+              break;
+
+            case 'noise'     :
+               ## Unlike the roles above, dbinst writes one <noise> per noise
+               ## file (ri and ti noise can both be in use), so this is a list.
+               if ( ! isset( $files[ 'noise' ] ) )
+               {
+                  $files[ 'noise' ] = array();
+               }
+               $files[ 'noise' ][] = $parser->getAttribute( 'filename' );
               break;
          }
       }

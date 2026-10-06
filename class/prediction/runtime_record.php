@@ -58,7 +58,8 @@ class runtime_record
 
          'us3_db'      => self::text( isset( $context[ 'us3_db' ] ) ? $context[ 'us3_db' ] : '', 64 ),
          'request_id'  => self::integer( isset( $context[ 'request_id' ] ) ? $context[ 'request_id' ] : null ),
-         ## Null at insert: the record is written before sbatch, so no job id exists yet.
+         ## Null unless the caller passes one: observe_runtime_advisory() does not
+         ## look the Slurm job id up, so a later pass fills this in by (us3_db, request_id).
          'gfac_id'     => isset( $context[ 'gfac_id' ] ) && $context[ 'gfac_id' ] !== ''
                           ? self::text( $context[ 'gfac_id' ], 80 ) : null,
          'decided_at'  => isset( $context[ 'decided_at' ] )

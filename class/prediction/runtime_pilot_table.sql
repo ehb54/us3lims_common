@@ -14,9 +14,9 @@
 -- prediction was actually made from, and it holds numbers and category codes
 -- only.
 --
--- A NOTE ON THE JOIN KEY. The record is written before sbatch runs, so the
--- scheduler's job id does not exist yet and gfac_id is null at insert. The
--- durable key is (us3_db, request_id); gfac_id is here so a later pass can
+-- A NOTE ON THE JOIN KEY. The caller does not pass the scheduler's job id,
+-- so gfac_id is null at insert even though sbatch has already run by then.
+-- The durable key is (us3_db, request_id); gfac_id is here so a later pass can
 -- fill it in, and so a row with it set can be joined directly.
 
 CREATE TABLE IF NOT EXISTS `runtime_prediction` (

@@ -71,17 +71,21 @@ class remote_exec
    private $overrides;
    private $log;
 
-   ## Per-process, keyed by cluster: once a multiplexed call has actually
-   ## failed on its control socket, every later call in this same process
-   ## skips straight to a plain connection instead of paying one wasted
-   ## connect attempt first -- the failure (a too-long path, SELinux, EL9's
-   ## quoting) is a property of this host/account/cluster for the life of
-   ## the process, not of any one call.
-   private static $muxUnusableClusters = array();
+   ## Once a multiplexed call on this instance has actually failed on its
+   ## control socket, every later call through it skips straight to a
+   ## plain connection instead of paying one wasted connect attempt first
+   ## -- the failure (a too-long path, SELinux, EL9's quoting) is a
+   ## property of this host/account/cluster for as long as this instance
+   ## is used, not of any one call. submit_slurm keeps one instance per
+   ## cluster per submission (remote($cluster)), which is the scope this
+   ## is meant to cover; it is an instance property, not a static, so nothing
+   ## leaks between separate remote_exec objects in the same process (tests
+   ## construct a fresh one per case).
+   private $muxUnusable = false;
 
-   ## Per-process, keyed by cluster: logs controlPath() refusing a usable
-   ## directory exactly once, instead of once per call.
-   private static $muxDirectoryWarned = array();
+   ## Logs controlPath() refusing a usable directory once per instance,
+   ## instead of once per call.
+   private $muxDirectoryWarned = false;
 
    ## Resolved lazily by timeout_bin(); '' means "not available on this host".
    protected $timeout_bin = null;
@@ -454,7 +458,7 @@ class remote_exec
                        . str_replace( "\n", ' / ', (string) $result[ 'stderr' ] ) . ");"
                        . " switching to a plain connection for the rest of this retry budget"
                        . " and for the rest of this process" );
-            self::$muxUnusableClusters[ $this->cluster ] = true;
+            $this->muxUnusable = true;
             $cmd     = $fallback_cmd;
             $wrapped = $this->withTimeout( $cmd, $timeout );
             $switchedToFallback = true;
@@ -1008,7 +1012,7 @@ class remote_exec
    ## this existed.
    private function multiplexOpts( $multiplex )
    {
-      if ( ! $multiplex || ! empty( self::$muxUnusableClusters[ $this->cluster ] ) )
+      if ( ! $multiplex || $this->muxUnusable )
       {
          return '';
       }
@@ -1017,9 +1021,9 @@ class remote_exec
 
       if ( $path === '' )
       {
-         if ( empty( self::$muxDirectoryWarned[ $this->cluster ] ) )
+         if ( ! $this->muxDirectoryWarned )
          {
-            self::$muxDirectoryWarned[ $this->cluster ] = true;
+            $this->muxDirectoryWarned = true;
             $this->logf( "multiplexing disabled for {$this->cluster}: no usable ssh control directory" );
          }
 

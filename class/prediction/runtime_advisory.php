@@ -43,19 +43,18 @@
 ## same advisory_error path a model-loading failure already takes. (A
 ## genuine syntax error in a sibling is a parse-time fatal either way, the
 ## same as one in this file itself; nothing at the PHP level degrades that.)
-if ( ! class_exists( 'runtime_model' ) )
-{
-   include_once __DIR__ . '/runtime_model.php';
-   include_once __DIR__ . '/runtime_features.php';
-   include_once __DIR__ . '/runtime_dataset_facts.php';
-   include_once __DIR__ . '/runtime_record.php';
-   ## runtime_features::code() calls runtime_cluster_map::code(); nothing else
-   ## in the stack loaded this one, so an enabled advisory never predicted --
-   ## every job recorded advisory_error, "Class 'runtime_cluster_map' not
-   ## found" (round-6 should-fix). Only our own test bootstrap preloading
-   ## prediction classes masked this.
-   include_once __DIR__ . '/runtime_cluster_map.php';
-}
+##
+## No class_exists() guard around these: include_once is already idempotent
+## per file, so the guard bought nothing but a shared point of failure --
+## keyed on runtime_model alone, loading that one file first and nothing
+## else would skip the other four, including runtime_cluster_map.php,
+## without a single file having actually been missing.
+include_once __DIR__ . '/runtime_model.php';
+include_once __DIR__ . '/runtime_features.php';
+include_once __DIR__ . '/runtime_dataset_facts.php';
+include_once __DIR__ . '/runtime_record.php';
+## runtime_features::code() calls runtime_cluster_map::code().
+include_once __DIR__ . '/runtime_cluster_map.php';
 
 class runtime_advisory
 {

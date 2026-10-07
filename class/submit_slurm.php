@@ -615,8 +615,19 @@ class submit_slurm extends jobsubmit
             ## into the advisory would think to check. Covers both this file
             ## being missing and one of its own siblings being missing or
             ## broken (runtime_advisory.php degrades the same way for that).
-            elog2( "runtime advisory: request $requestID: class not available"
-                 . " after loading prediction/runtime_advisory.php; advisory skipped" );
+            ##
+            ## Once per process, not once per job: a missing/broken install
+            ## stays missing/broken for the life of the process, so logging
+            ## this on every submission just repeats the same line once per
+            ## job, forever, until someone fixes the install.
+            static $warned = false;
+            if ( ! $warned )
+            {
+               $warned = true;
+               elog2( "runtime advisory: request $requestID: class not available"
+                    . " after loading prediction/runtime_advisory.php; advisory skipped"
+                    . " for the rest of this process" );
+            }
             return;
          }
 

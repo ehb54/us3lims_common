@@ -403,12 +403,18 @@ class remote_exec
          $attempt++;
          $result = $this->once( $wrapped, $cmd, $label, $attempt );
 
-         if ( $result[ 'class' ] === self::OK || $result[ 'class' ] === self::REMOTE_FAIL
-              || $attempt > $retries || $this->is_permanent_failure( $result[ 'stderr' ] ) )
+         if ( $result[ 'class' ] === self::OK || $result[ 'class' ] === self::REMOTE_FAIL )
          {
             break;
          }
 
+         ## Tested before the retry-budget break below (round-6 should-fix):
+         ## sbatch and the scontrol confirm both pass retries => 0, so with
+         ## this check after the break instead, it was never reached for
+         ## either of them -- despite the docblock on this method claiming
+         ## it covered sbatch too. The fallback only ever re-runs a command
+         ## that provably never started (a control-socket-specific failure,
+         ## not a transport fault), so it needs no budget of its own.
          if ( ! $switchedToFallback && $fallback_cmd !== null
             && $this->multiplexSocketFailed( $result ) )
          {
@@ -418,6 +424,11 @@ class remote_exec
             $wrapped = $this->withTimeout( $cmd, $timeout );
             $switchedToFallback = true;
             continue;
+         }
+
+         if ( $attempt > $retries || $this->is_permanent_failure( $result[ 'stderr' ] ) )
+         {
+            break;
          }
 
          $this->logf( "$label: {$result['class']} on attempt $attempt, retrying in {$secwait}s" );
@@ -628,7 +639,13 @@ class remote_exec
    {
       return $result[ 'class' ] === self::UNREACHABLE
          && preg_match(
-            '/unix_listener|ControlPath too long|Bad configuration option.*ControlPath/i',
+            ## muxserver_listen|link mux listener: OpenSSH 8.0+ binds a temporary
+            ## control socket, then link()s it into place (mux.c) -- a denied
+            ## link() (e.g. an SELinux policy that allows create/unlink/write on
+            ## the socket type but not link) exits 255 the same way a denied
+            ## bind() does, round-6 should-fix on common#24.
+            '/unix_listener|ControlPath too long|Bad configuration option.*ControlPath'
+            . '|muxserver_listen.*link mux listener/i',
             (string) $result[ 'stderr' ]
          );
    }

@@ -297,7 +297,14 @@ class submit_slurm extends jobsubmit
 
          $unreachable   = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE;
          $never_started = $unreachable && empty( $result[ 'began' ] );
-         $rejected      = $unreachable && ! empty( $result[ 'began' ] ) && ! empty( $result[ 'rejected' ] );
+         ## Not gated on $unreachable (round-6 nit): sbatchOnce() already
+         ## computes 'rejected' via is_scheduler_rejection() for every
+         ## failure, REMOTE_FAIL included -- sbatch itself ran and returned a
+         ## real, definite rejection (e.g. "Invalid partition specified"),
+         ## never ambiguous the way an UNREACHABLE result can be, so it must
+         ## not fall through to the "outcome unknown" message below for lack
+         ## of its own check here.
+         $rejected      = ! empty( $result[ 'rejected' ] );
          $retryable     = $never_started || $rejected;
 
          if ( ! $retryable || $attempt > $retries ) {

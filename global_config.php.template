@@ -64,7 +64,9 @@ $global_complete_max_seconds   = 21600;
 ## risk a duplicate, so those are left for an operator to reconcile on the
 ## scheduler.
 ## $global_sbatch_submit_retries and $global_sbatch_submit_retry_wait_seconds set
-## the budget; unset, the code uses 3 attempts 5 seconds apart.
+## the budget; unset, the code uses 4 attempts total (the default retries, 3,
+## plus the first), waiting 5s/10s/20s between them -- the wait doubles each
+## time, it is not a constant interval.
 
 ## Remote execution budgets, retries and breaker policy are defined in
 ## class/remote_exec.php. GNU timeout is required for wall-clock limits.
@@ -92,9 +94,12 @@ $global_cluster_status_max_age_seconds = 1800;
 
 ## Where submit_slurm's reused ssh/scp connections keep their control socket
 ## for a submission's staging and sbatch calls. Same per-account subdirectory
-## reasoning as the breaker directory above. Set to '' to turn multiplexing
-## off outright and have every call connect plainly, same as when the
-## directory cannot be created or fails its checks.
+## reasoning as the breaker directory above. dbutils#45 step 5 provisions this
+## directory 3770 us3:<web group> (the sticky bit so an account's own
+## subdirectory, once created, cannot be renamed or removed by the other
+## account). Set to '' to turn multiplexing off outright and have every call
+## connect plainly, same as when the directory cannot be created or fails its
+## checks.
 
 ## $global_ssh_control_dir = '/home/us3/lims/etc/ssh-control';
 

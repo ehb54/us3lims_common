@@ -152,7 +152,7 @@ class remote_exec
          : null;
 
       $result = $this->unframe(
-         $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'run', $fallback_cmd ),
+         $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'run', $fallback_cmd, $nonce ),
          $nonce
       );
 
@@ -340,7 +340,7 @@ class remote_exec
     * the remote command ever runs, so switching command for the rest of
     * this same retry budget is always safe, including for sbatch.
     */
-   private function attempt( $cmd, $timeout, $opts, $label, $fallback_cmd = null )
+   private function attempt( $cmd, $timeout, $opts, $label, $fallback_cmd = null, $nonce = null )
    {
       $retries = array_key_exists( 'retries', $opts )
                ? $opts[ 'retries' ] : $this->policy[ 'retries' ];
@@ -401,7 +401,7 @@ class remote_exec
       do
       {
          $attempt++;
-         $result = $this->once( $wrapped, $cmd, $label, $attempt );
+         $result = $this->once( $wrapped, $cmd, $label, $attempt, $nonce );
 
          if ( $result[ 'class' ] === self::OK || $result[ 'class' ] === self::REMOTE_FAIL )
          {
@@ -418,7 +418,12 @@ class remote_exec
          if ( ! $switchedToFallback && $fallback_cmd !== null
             && $this->multiplexSocketFailed( $result ) )
          {
-            $this->logf( "$label: control socket unusable ({$result['stderr']});"
+            ## Single-line (round-6 nit): $result['stderr'] can be multi-line
+            ## (ssh's own banner/warning lines ahead of the real error), which
+            ## otherwise breaks one log entry across several lines in the log
+            ## file.
+            $this->logf( "$label: control socket unusable ("
+                       . str_replace( "\n", ' / ', (string) $result[ 'stderr' ] ) . ");"
                        . " switching to a plain connection for the rest of this retry budget" );
             $cmd     = $fallback_cmd;
             $wrapped = $this->withTimeout( $cmd, $timeout );
@@ -518,6 +523,18 @@ class remote_exec
          return '';
       }
 
+      ## ssh splits the -o ControlPath=value option on whitespace and '=',
+      ## expands any '%' sequence it does not itself recognise, and ends an
+      ## unquoted value early at a literal '"' -- a directory containing any
+      ## of these exits 255 on every call (round-6 nit: '=' and '"' were
+      ## missing). Checked before the mkdir below, not after: a value this
+      ## check is about to refuse should not get a directory created for it
+      ## on disk first.
+      if ( preg_match( '/[\s%="]/', $dir ) )
+      {
+         return '';
+      }
+
       ## Shared top-level directory, group-writable so every local account
       ## that needs it can create its own subdirectory below -- unlike that
       ## subdirectory itself, this one is not where the socket lives.
@@ -527,15 +544,6 @@ class remote_exec
       }
 
       if ( ! is_dir( $dir ) || is_link( $dir ) )
-      {
-         return '';
-      }
-
-      ## ssh splits ControlPath= on whitespace and expands any '%' sequence
-      ## it does not itself recognise; a directory containing either exits
-      ## 255 on every call. Refuse it up front and connect plainly instead
-      ## of discovering that per attempt.
-      if ( preg_match( '/[\s%]/', $dir ) )
       {
          return '';
       }
@@ -651,7 +659,7 @@ class remote_exec
    }
 
    ## Capture stderr separately so callers can parse stdout.
-   private function once( $wrapped, $cmd, $label, $attempt )
+   private function once( $wrapped, $cmd, $label, $attempt, $nonce = null )
    {
       $stderr_tmp = tempnam( sys_get_temp_dir(), 'us3rx_' );
       $stdout     = array();
@@ -662,7 +670,17 @@ class remote_exec
       $stderr = is_readable( $stderr_tmp ) ? trim( file_get_contents( $stderr_tmp ) ) : '';
       @unlink( $stderr_tmp );
 
-      $class = $this->classify( $exit_code, $stderr, strpos( $cmd, '/usr/bin/scp' ) === 0 );
+      ## Did the framed command's own end marker come back? Only meaningful
+      ## for a framed (non-scp) command. Round-6 nit: real Slurm 20.11.9's
+      ## sbatch itself exits 255 for a bad #SBATCH directive (invalid --time,
+      ## an unknown option, --mem-per-cpu or -N) -- the same value ssh uses
+      ## for its own transport failures. With the end marker present, the
+      ## remote side ran to completion and reported that 255 itself, so it is
+      ## the command's own status, not evidence the transport failed.
+      $ended = $nonce !== null
+             && strpos( implode( "\n", $stdout ), self::FRAME_END . $nonce ) !== false;
+
+      $class = $this->classify( $exit_code, $stderr, strpos( $cmd, '/usr/bin/scp' ) === 0, $ended );
 
       $this->logf( "$label attempt $attempt: exit=$exit_code class=$class cmd=$cmd"
                    . ( $stderr !== '' ? " stderr=$stderr" : '' ) );
@@ -671,7 +689,7 @@ class remote_exec
    }
 
    /** Classify timeout codes, success, transport errors, then command failures. */
-   public function classify( $exit_code, $stderr, $is_scp = false )
+   public function classify( $exit_code, $stderr, $is_scp = false, $ended = false )
    {
       if ( $exit_code === self::EXIT_TIMEOUT || $exit_code === self::EXIT_KILLED )
       {
@@ -686,7 +704,15 @@ class remote_exec
       ## ssh reports its own failures as exit 255; a remote command's stderr (for
       ## example munge's "Connection refused") must not read as a transport fault.
       ## scp reports transport failures as exit 1, so only scp needs the patterns.
-      $transportFailed = $exit_code === self::EXIT_SSH_ERROR
+      ##
+      ## !$ended (round-6 nit): real Slurm 20.11.9's sbatch itself exits 255
+      ## for a bad #SBATCH directive -- the same value ssh uses for its own
+      ## transport failures. $ended means the framed command's own end marker
+      ## came back, so the remote side ran to completion and reported that
+      ## 255 itself; only an unterminated 255 (no end marker) is still read
+      ## as the transport having failed. Irrelevant for scp, which is never
+      ## framed and already has its own pattern-based check below.
+      $transportFailed = ( ! $is_scp && $exit_code === self::EXIT_SSH_ERROR && ! $ended )
                          || ( $is_scp && $this->is_transport_error( $stderr ) );
 
       if ( $transportFailed )

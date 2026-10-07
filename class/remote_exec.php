@@ -579,7 +579,7 @@ class remote_exec
 
       if ( is_link( $mine )
          || $perms === false || ( $perms & 0077 ) !== 0
-         || ( $euid !== null && $owner !== $euid && ! @is_writable( $mine ) ) )
+         || $this->controlDirOwnedByAnotherUnwritableAccount( $mine, $euid, $owner ) )
       {
          return '';
       }
@@ -604,6 +604,18 @@ class remote_exec
       }
 
       return $path;
+   }
+
+   ## Overridable test seam (test-coverage audit, round 6): a root-owned,
+   ## not-writable-by-us3 directory is the one controlPath() branch no
+   ## single test process can fake honestly -- is_writable() bypasses the
+   ## permission check for root, and this account's own euid can't be
+   ## something other than itself. Everything controlPath() does with the
+   ## result is exercised already; only the real privilege boundary behind
+   ## this one decision was previously untested.
+   protected function controlDirOwnedByAnotherUnwritableAccount( $mine, $euid, $owner )
+   {
+      return $euid !== null && $owner !== $euid && ! @is_writable( $mine );
    }
 
    /** Returns null when no breaker is configured or available. */

@@ -106,8 +106,8 @@ $global_cluster_status_max_age_seconds = 1800;
 ## No $global_elog_dir setting: dbinst's elog.php is always ~us3/lims/etc.
 ## elog()'s own callers call it before global_config.php is loaded, so a
 ## setting here could provision one directory while elog() itself, at
-## actual runtime, always logs to the hardcoded default regardless (round-6
-## finding on dbinst#75) -- a worse outcome than not offering it at all. On
+## actual runtime, always logs to the hardcoded default regardless -- a
+## worse outcome than not offering it at all. On
 ## a split web/us3 account host, both files are provisioned 0660/0640
 ## us3:<web group> so either account can write/read them.
 

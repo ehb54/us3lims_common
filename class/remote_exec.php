@@ -71,6 +71,18 @@ class remote_exec
    private $overrides;
    private $log;
 
+   ## Per-process, keyed by cluster: once a multiplexed call has actually
+   ## failed on its control socket, every later call in this same process
+   ## skips straight to a plain connection instead of paying one wasted
+   ## connect attempt first -- the failure (a too-long path, SELinux, EL9's
+   ## quoting) is a property of this host/account/cluster for the life of
+   ## the process, not of any one call.
+   private static $muxUnusableClusters = array();
+
+   ## Per-process, keyed by cluster: logs controlPath() refusing a usable
+   ## directory exactly once, instead of once per call.
+   private static $muxDirectoryWarned = array();
+
    ## Resolved lazily by timeout_bin(); '' means "not available on this host".
    protected $timeout_bin = null;
 
@@ -170,10 +182,17 @@ class remote_exec
    private function frame( $remote_cmd, $nonce )
    {
       ## The braces are there so a multi-command payload still yields one status.
+      ## The end marker carries the remote command's own exit status
+      ## ($__us3_rx_rc), not just its presence: ssh can still exit 255 if
+      ## the connection drops between the remote side printing this line
+      ## and ssh relaying its own exit code, which otherwise reads as a
+      ## transport failure for a command that already finished and told us
+      ## how. once() trusts this embedded status over ssh's own exit code
+      ## whenever it can be read back.
       return 'echo ' . self::FRAME_BEGIN . $nonce . "\n"
              . '{ ' . $remote_cmd . "\n" . '}' . "\n"
              . '__us3_rx_rc=$?' . "\n"
-             . 'echo ' . self::FRAME_END . $nonce . "\n"
+             . 'echo ' . self::FRAME_END . $nonce . ':$__us3_rx_rc' . "\n"
              . 'exit $__us3_rx_rc' . "\n";
    }
 
@@ -408,23 +427,34 @@ class remote_exec
             break;
          }
 
-         ## Tested before the retry-budget break below (round-6 should-fix):
-         ## sbatch and the scontrol confirm both pass retries => 0, so with
-         ## this check after the break instead, it was never reached for
-         ## either of them -- despite the docblock on this method claiming
-         ## it covered sbatch too. The fallback only ever re-runs a command
-         ## that provably never started (a control-socket-specific failure,
-         ## not a transport fault), so it needs no budget of its own.
+         ## Tested before the retry-budget break below: sbatch and the
+         ## scontrol confirm both pass retries => 0, so with this check
+         ## after the break instead, it was never reached for either of
+         ## them -- despite the docblock on this method claiming it covered
+         ## sbatch too. The fallback only ever re-runs a command that
+         ## provably never started (a control-socket-specific failure, not
+         ## a transport fault), so it needs no budget of its own.
+         ##
+         ## !$result['began']: a control-socket pattern in stderr is not
+         ## proof the command never ran -- it can also be a line from the
+         ## remote side's own banner/wrapper that happens to contain one of
+         ## these strings, in which case the begin marker already came
+         ## back and re-running on a plain connection would submit a
+         ## second job for the same request. multiplexSocketFailed() is
+         ## checked first since it is cheap and $began is only meaningful
+         ## for a framed call in the first place.
          if ( ! $switchedToFallback && $fallback_cmd !== null
-            && $this->multiplexSocketFailed( $result ) )
+            && $this->multiplexSocketFailed( $result ) && empty( $result[ 'began' ] ) )
          {
-            ## Single-line (round-6 nit): $result['stderr'] can be multi-line
-            ## (ssh's own banner/warning lines ahead of the real error), which
-            ## otherwise breaks one log entry across several lines in the log
-            ## file.
+            ## Single-line: $result['stderr'] can be multi-line (ssh's own
+            ## banner/warning lines ahead of the real error), which
+            ## otherwise breaks one log entry across several lines in the
+            ## log file.
             $this->logf( "$label: control socket unusable ("
                        . str_replace( "\n", ' / ', (string) $result[ 'stderr' ] ) . ");"
-                       . " switching to a plain connection for the rest of this retry budget" );
+                       . " switching to a plain connection for the rest of this retry budget"
+                       . " and for the rest of this process" );
+            self::$muxUnusableClusters[ $this->cluster ] = true;
             $cmd     = $fallback_cmd;
             $wrapped = $this->withTimeout( $cmd, $timeout );
             $switchedToFallback = true;
@@ -523,14 +553,17 @@ class remote_exec
          return '';
       }
 
-      ## ssh splits the -o ControlPath=value option on whitespace and '=',
-      ## expands any '%' sequence it does not itself recognise, and ends an
-      ## unquoted value early at a literal '"' -- a directory containing any
-      ## of these exits 255 on every call (round-6 nit: '=' and '"' were
-      ## missing). Checked before the mkdir below, not after: a value this
+      ## Whitelist, not a blacklist: ssh splits the -o ControlPath=value
+      ## option on whitespace and '=', expands any '%' sequence it does not
+      ## itself recognise, ends an unquoted value early at a literal '"',
+      ## and (OpenSSH 8.7+, EL9) rejects a "'" with "invalid quotes" that is
+      ## not one of the fallback patterns -- each discovered as one more
+      ## character to add to a blacklist. Only the characters a Unix path
+      ## actually needs are let through instead, closing the whole class at
+      ## once. Checked before the mkdir below, not after: a value this
       ## check is about to refuse should not get a directory created for it
       ## on disk first.
-      if ( preg_match( '/[\s%="]/', $dir ) )
+      if ( ! preg_match( '#^/[A-Za-z0-9._/-]+$#', $dir ) )
       {
          return '';
       }
@@ -606,8 +639,8 @@ class remote_exec
       return $path;
    }
 
-   ## Overridable test seam (test-coverage audit, round 6): a root-owned,
-   ## not-writable-by-us3 directory is the one controlPath() branch no
+   ## Overridable test seam: a root-owned, not-writable-by-us3 directory
+   ## is the one controlPath() branch no
    ## single test process can fake honestly -- is_writable() bypasses the
    ## permission check for root, and this account's own euid can't be
    ## something other than itself. Everything controlPath() does with the
@@ -663,7 +696,7 @@ class remote_exec
             ## control socket, then link()s it into place (mux.c) -- a denied
             ## link() (e.g. an SELinux policy that allows create/unlink/write on
             ## the socket type but not link) exits 255 the same way a denied
-            ## bind() does, round-6 should-fix on common#24.
+            ## bind() does.
             '/unix_listener|ControlPath too long|Bad configuration option.*ControlPath'
             . '|muxserver_listen.*link mux listener/i',
             (string) $result[ 'stderr' ]
@@ -682,30 +715,71 @@ class remote_exec
       $stderr = is_readable( $stderr_tmp ) ? trim( file_get_contents( $stderr_tmp ) ) : '';
       @unlink( $stderr_tmp );
 
-      ## Did the framed command's own end marker come back? Only meaningful
-      ## for a framed (non-scp) command. Round-6 nit: real Slurm 20.11.9's
-      ## sbatch itself exits 255 for a bad #SBATCH directive (invalid --time,
-      ## an unknown option, --mem-per-cpu or -N) -- the same value ssh uses
-      ## for its own transport failures. With the end marker present, the
-      ## remote side ran to completion and reported that 255 itself, so it is
-      ## the command's own status, not evidence the transport failed.
-      $ended = $nonce !== null
-             && strpos( implode( "\n", $stdout ), self::FRAME_END . $nonce ) !== false;
+      $joined = implode( "\n", $stdout );
 
-      $class = $this->classify( $exit_code, $stderr, strpos( $cmd, '/usr/bin/scp' ) === 0, $ended );
+      ## Did the framed command actually start on the remote side? Only
+      ## meaningful for a framed (non-scp) command. Without this, attempt()'s
+      ## plain-connection fallback could re-run a command from the start on
+      ## nothing more than a coincidental stderr pattern, even though the
+      ## remote side already began -- and for sbatch, already submitted.
+      $began = $nonce !== null && strpos( $joined, self::FRAME_BEGIN . $nonce ) !== false;
 
-      $this->logf( "$label attempt $attempt: exit=$exit_code class=$class cmd=$cmd"
-                   . ( $stderr !== '' ? " stderr=$stderr" : '' ) );
+      ## Did the framed command's own end marker come back, and if so, what
+      ## exit status did it carry? Real Slurm 20.11.9's sbatch itself exits
+      ## 255 for a bad #SBATCH directive (invalid --time, an unknown option,
+      ## --mem-per-cpu or -N) -- the same value ssh uses for its own
+      ## transport failures -- so the marker's own embedded status, not
+      ## merely its presence, is what classify() needs to trust the remote
+      ## side's answer over ssh's: a connection that drops between the
+      ## remote side printing this line and ssh relaying its own exit code
+      ## still leaves the marker (and the status in it) intact in stdout.
+      $ended      = false;
+      $remoteExit = null;
 
-      return $this->result( $class, $exit_code, $stdout, $stderr, $cmd );
+      if ( $nonce !== null
+         && preg_match( '/' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':(\d+)/', $joined, $m ) )
+      {
+         $ended      = true;
+         $remoteExit = (int) $m[1];
+      }
+
+      $class = $this->classify( $exit_code, $stderr, strpos( $cmd, '/usr/bin/scp' ) === 0, $ended, $remoteExit );
+
+      ## Single-line: $cmd is the framed, multi-line wrapped command, and
+      ## $stderr can hold several lines of its own (ssh banners, the
+      ## remote wrapper's output) -- either one otherwise breaks this one
+      ## log entry across several lines in the log file.
+      $this->logf( "$label attempt $attempt: exit=$exit_code class=$class cmd="
+                   . str_replace( "\n", ' / ', $cmd )
+                   . ( $stderr !== '' ? " stderr=" . str_replace( "\n", ' / ', $stderr ) : '' ) );
+
+      $result = $this->result( $class, $exit_code, $stdout, $stderr, $cmd );
+      $result[ 'began' ] = $began;
+
+      return $result;
    }
 
-   /** Classify timeout codes, success, transport errors, then command failures. */
-   public function classify( $exit_code, $stderr, $is_scp = false, $ended = false )
+   /**
+    * Classify timeout codes, success, transport errors, then command
+    * failures. $ended/$remoteExit come from the framed command's own end
+    * marker (see once()): when present, $remoteExit is the remote
+    * command's own exit status, trusted over $exit_code, which is ssh's --
+    * ssh can still exit 255 if the connection drops after the remote side
+    * already printed the marker and its status but before ssh relays its
+    * own exit code.
+    */
+   public function classify( $exit_code, $stderr, $is_scp = false, $ended = false, $remoteExit = null )
    {
       if ( $exit_code === self::EXIT_TIMEOUT || $exit_code === self::EXIT_KILLED )
       {
          return self::TIMED_OUT;
+      }
+
+      $remoteExitKnown = $ended && $remoteExit !== null;
+
+      if ( $remoteExitKnown )
+      {
+         $exit_code = $remoteExit;
       }
 
       if ( $exit_code === 0 )
@@ -715,17 +789,12 @@ class remote_exec
 
       ## ssh reports its own failures as exit 255; a remote command's stderr (for
       ## example munge's "Connection refused") must not read as a transport fault.
-      ## scp reports transport failures as exit 1, so only scp needs the patterns.
-      ##
-      ## !$ended (round-6 nit): real Slurm 20.11.9's sbatch itself exits 255
-      ## for a bad #SBATCH directive -- the same value ssh uses for its own
-      ## transport failures. $ended means the framed command's own end marker
-      ## came back, so the remote side ran to completion and reported that
-      ## 255 itself; only an unterminated 255 (no end marker) is still read
-      ## as the transport having failed. Irrelevant for scp, which is never
-      ## framed and already has its own pattern-based check below.
-      $transportFailed = ( ! $is_scp && $exit_code === self::EXIT_SSH_ERROR && ! $ended )
-                         || ( $is_scp && $this->is_transport_error( $stderr ) );
+      ## scp has no framing to confirm completion, so its own 255 (e.g. a local
+      ## fork() failure under EAGAIN) is always transport-level, same as the
+      ## exit-1 cases its own stderr patterns below catch.
+      $transportFailed = $is_scp
+                        ? ( $exit_code === self::EXIT_SSH_ERROR || $this->is_transport_error( $stderr ) )
+                        : ( $exit_code === self::EXIT_SSH_ERROR && ! $remoteExitKnown );
 
       if ( $transportFailed )
       {
@@ -766,7 +835,6 @@ class remote_exec
          'Zero Bytes were transmitted or received',
          ## slurmctld up but its database is not, so it cannot answer either.
          'Slurm temporarily unable to accept job',
-         'Slurmctld running but not accepting requests',
       );
 
       foreach ( $patterns as $pattern )
@@ -801,6 +869,17 @@ class remote_exec
     * actual answer to that attempt is unknown) overrides any final line:
     * even if sbatch went on to report failure afterward, an earlier attempt
     * within the same invocation may already have been accepted.
+    *
+    * Any "Batch job submission failed: <reason>" line is trusted as a
+    * definite rejection, whatever the reason -- an invalid partition, a
+    * full queue, a bad --time, EAGAIN, a connect failure, or anything else
+    * sbatch's own last line names. A narrower whitelist of specific
+    * reasons here previously meant real rejections (invalid partition, a
+    * full queue, a bad --time) fell through to "outcome unknown: reconcile"
+    * instead, even though sbatch had already given a final, definite
+    * answer. The two dropped-connection phrases are excluded first because
+    * they are genuinely ambiguous regardless of what line they appear on;
+    * every other final line from sbatch itself is not.
     */
    public function is_scheduler_rejection( $stderr )
    {
@@ -824,27 +903,7 @@ class remote_exec
          }
       }
 
-      if ( ! preg_match( '/Batch job submission failed:\s*(.*)/i', $stderr, $m ) )
-      {
-         return false;
-      }
-
-      $reason = $m[ 1 ];
-
-      $definite = array(
-         'Resource temporarily unavailable',
-         'Unable to contact slurm controller \(connect failure\)',
-      );
-
-      foreach ( $definite as $pattern )
-      {
-         if ( preg_match( '#' . $pattern . '#i', $reason ) )
-         {
-            return true;
-         }
-      }
-
-      return false;
+      return (bool) preg_match( '/Batch job submission failed:\s*\S/i', $stderr );
    }
 
    /** Authentication and host-key failures are configuration errors: retrying cannot help. */
@@ -949,7 +1008,7 @@ class remote_exec
    ## this existed.
    private function multiplexOpts( $multiplex )
    {
-      if ( ! $multiplex )
+      if ( ! $multiplex || ! empty( self::$muxUnusableClusters[ $this->cluster ] ) )
       {
          return '';
       }
@@ -958,6 +1017,12 @@ class remote_exec
 
       if ( $path === '' )
       {
+         if ( empty( self::$muxDirectoryWarned[ $this->cluster ] ) )
+         {
+            self::$muxDirectoryWarned[ $this->cluster ] = true;
+            $this->logf( "multiplexing disabled for {$this->cluster}: no usable ssh control directory" );
+         }
+
          return '';
       }
 

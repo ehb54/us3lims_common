@@ -297,12 +297,12 @@ class submit_slurm extends jobsubmit
 
          $unreachable   = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE;
          $never_started = $unreachable && empty( $result[ 'began' ] );
-         ## Not gated on $unreachable (round-6 nit): sbatchOnce() already
-         ## computes 'rejected' via is_scheduler_rejection() for every
-         ## failure, REMOTE_FAIL included -- sbatch itself ran and returned a
-         ## real, definite rejection (e.g. "Invalid partition specified"),
-         ## never ambiguous the way an UNREACHABLE result can be, so it must
-         ## not fall through to the "outcome unknown" message below for lack
+         ## Not gated on $unreachable: sbatchOnce() already computes
+         ## 'rejected' via is_scheduler_rejection() for every failure,
+         ## REMOTE_FAIL included -- sbatch itself ran and returned a real,
+         ## definite rejection (e.g. "Invalid partition specified"), never
+         ## ambiguous the way an UNREACHABLE result can be, so it must not
+         ## fall through to the "outcome unknown" message below for lack
          ## of its own check here.
          $rejected      = ! empty( $result[ 'rejected' ] );
          $retryable     = $never_started || $rejected;
@@ -341,10 +341,17 @@ class submit_slurm extends jobsubmit
 
       ## retries => 0 deliberately. Neither remote_exec nor submit_slurm may
       ## repeat this non-idempotent operation without first reconciling it.
+      ##
+      ## No 'multiplex' here, unlike staging and the scontrol confirm: an
+      ## OpenSSH mux master that dies after sending the exec request but
+      ## before replying to this client re-runs the command over a fresh
+      ## connection (mux.c's own fallback, not remote_exec's) -- for a read
+      ## like a confirm that is harmless, but for sbatch it means two jobs
+      ## from one call. A plain connection per attempt costs one extra
+      ## connection per job and removes the window entirely.
       $res = $rx->run( $sbatch_cmd, [
          'retries'   => 0,
          'label'     => "sbatch attempt $attempt",
-         'multiplex' => true,
       ] );
 
       $stdout_lines = $res[ 'stdout' ];
@@ -361,7 +368,12 @@ class submit_slurm extends jobsubmit
          $this->message[] = "sbatchOnce (attempt $attempt): stderr=$stderr_text";
       }
 
-      elog2( "sbatchOnce (attempt $attempt): exit=$exit_code class={$res['class']} stdout=$stdout_text stderr=$stderr_text" );
+      ## Single-line: $stdout_text/$stderr_text can each hold several lines
+      ## of real output, which otherwise breaks this one log entry across
+      ## several lines in the log file.
+      elog2( "sbatchOnce (attempt $attempt): exit=$exit_code class={$res['class']}"
+           . " stdout=" . str_replace( "\n", ' / ', $stdout_text )
+           . " stderr=" . str_replace( "\n", ' / ', $stderr_text ) );
 
       ## Require a successful command before trusting its job ID.
       if ( ! $res[ 'ok' ] ) {

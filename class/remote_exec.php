@@ -25,14 +25,18 @@ class remote_exec
    ## A submission makes three separate connections to the cluster login
    ## (one mkdir, one scp, one sbatch); the ssh-launched monitor is a fourth
    ## ssh call but to the LIMS host, not the cluster, so it never shares this
-   ## socket. Each of the three paid full TCP+auth separately, measured at
-   ## ~2.7s/job. An SSH
-   ## ControlMaster socket, left open for a short while after the first
-   ## connection, lets the rest of the submission reuse it instead. Same
-   ## PrivateTmp reasoning as the breaker directory: a service-private /tmp
-   ## would make the socket invisible to the next call if it runs as a
-   ## different unit, so this lives beside the breaker, not under /tmp.
-   ## Override with $global_ssh_control_dir when needed.
+   ## socket either. Each of the three paid full TCP+auth separately,
+   ## measured at ~2.7s/job. An SSH ControlMaster socket, left open for a
+   ## short while after the first connection, lets mkdir and scp reuse it.
+   ## sbatch itself (submit_slurm::sbatchOnce()) deliberately does not: an
+   ## OpenSSH mux master that dies after sending the exec request but
+   ## before relaying the reply makes its own client fall back to a fresh
+   ## connection and re-run the command (mux.c, not this class), which for
+   ## a read like mkdir or scp is harmless but for sbatch means two jobs
+   ## from one call. Same PrivateTmp reasoning as the breaker directory: a
+   ## service-private /tmp would make the socket invisible to the next call
+   ## if it runs as a different unit, so this lives beside the breaker, not
+   ## under /tmp. Override with $global_ssh_control_dir when needed.
    const CONTROL_DIR = '/home/us3/lims/etc/ssh-control';
 
    ## Kept open long enough to cover one submission's calls, not so long that
@@ -138,6 +142,13 @@ class remote_exec
       return isset( $this->details[ 'sshport' ] ) ? $this->details[ 'sshport' ] : 22;
    }
 
+   ## The appliance's own node: the scheduler and LIMS run on the same host,
+   ## so run() below bypasses ssh for this cluster entirely (round 8).
+   public function is_local()
+   {
+      return ! empty( $this->details[ 'localhost' ] );
+   }
+
    /**
     * Run a command on the cluster.
     *
@@ -153,6 +164,32 @@ class remote_exec
          $opts, 'command_timeout_seconds', 'command_timeout_seconds' );
 
       $nonce = $this->frameNonce();
+
+      ## A cluster entry marked 'localhost' (the appliance's own node, where
+      ## LIMS and the scheduler run on the same host) is run directly, with
+      ## no ssh at all (round 8 blocking fix): an ssh login per poll scales
+      ## far worse than a local command does, and a per-job monitor polls
+      ## every job on its cluster this way every ~30s. On a loaded host that
+      ## is thousands of logins a minute, and sshd's own default
+      ## MaxStartups starts dropping them well before a local exec() would
+      ## ever be rate-limited at all. frame()'s begin/end markers still wrap
+      ## the command exactly as for a remote one -- exec() runs this
+      ## through a shell the same way ssh hands a remote shell its own
+      ## single argument, so began/ended/exit-status detection is unchanged.
+      if ( $this->is_local() )
+      {
+         $cmd = $this->frame( $remote_cmd, $nonce );
+
+         $result = $this->unframe(
+            $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'run', null, $nonce ),
+            $nonce
+         );
+
+         $this->last = $result;
+
+         return $result;
+      }
+
       $multiplex = ! empty( $opts[ 'multiplex' ] );
 
       ## The command has to survive one extra round of shell parsing on the
@@ -216,7 +253,6 @@ class remote_exec
       }
 
       $begin = self::FRAME_BEGIN . $nonce;
-      $end   = self::FRAME_END . $nonce;
       $lines = array_values( $result[ 'stdout' ] );
       $first = null;
 
@@ -235,26 +271,46 @@ class remote_exec
       }
 
       $result[ 'began' ] = true;
-      $kept = array();
 
-      for ( $i = $first + 1; $i < count( $lines ); $i++ )
+      ## Anchored at the end of the line, and the LAST such line, not the
+      ## first match found scanning forward (round 8 nit): our own real
+      ## marker is always the last line frame() can produce, so taking the
+      ## last match is never wrong, while the first-match-anywhere approach
+      ## could in principle be fooled by a remote command that happens to
+      ## echo something resembling the marker earlier in its own output (no
+      ## LIMS command does today). Anchoring at end-of-line, rather than
+      ## matching the marker text anywhere in the line, also stops a
+      ## marker-looking substring followed by real trailing output on the
+      ## same line from truncating that output.
+      $endPattern = '/^(.*)' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':\d+$/D';
+      $last = null;
+
+      for ( $i = count( $lines ) - 1; $i > $first; $i-- )
       {
-         $at = strpos( $lines[ $i ], $end );
-
-         if ( $at === false )
+         if ( preg_match( $endPattern, $lines[ $i ] ) )
          {
-            $kept[] = $lines[ $i ];
-            continue;
+            $last = $i;
+            break;
          }
+      }
 
-         ## Whatever precedes the end fence on its line is the unterminated
-         ## last line of the answer, not noise.
-         if ( $at > 0 )
-         {
-            $kept[] = substr( $lines[ $i ], 0, $at );
-         }
+      if ( $last === null )
+      {
+         ## No end marker at all: keep everything after begin, as partial output.
+         $kept = array_slice( $lines, $first + 1 );
+         $result[ 'stdout' ] = $kept;
+         $result[ 'text' ]   = trim( implode( "\n", $kept ) );
+         return $result;
+      }
 
-         break;
+      $kept = array_slice( $lines, $first + 1, $last - $first - 1 );
+
+      ## Whatever precedes the end fence on its own line is the unterminated
+      ## last line of the answer, not noise.
+      preg_match( $endPattern, $lines[ $last ], $m );
+      if ( $m[ 1 ] !== '' )
+      {
+         $kept[] = $m[ 1 ];
       }
 
       $result[ 'stdout' ] = $kept;
@@ -361,7 +417,10 @@ class remote_exec
     * see) is deterministic, so retrying $cmd unchanged would just fail the
     * same way every time. That failure happens at the ssh/scp level before
     * the remote command ever runs, so switching command for the rest of
-    * this same retry budget is always safe, including for sbatch.
+    * this same retry budget is always safe -- for every caller that
+    * multiplexes at all. sbatch itself (submit_slurm::sbatchOnce()) never
+    * sets 'multiplex', so $fallback_cmd is always null for it and this
+    * whole fallback path is simply never reached there.
     */
    private function attempt( $cmd, $timeout, $opts, $label, $fallback_cmd = null, $nonce = null )
    {
@@ -431,13 +490,11 @@ class remote_exec
             break;
          }
 
-         ## Tested before the retry-budget break below: sbatch and the
-         ## scontrol confirm both pass retries => 0, so with this check
-         ## after the break instead, it was never reached for either of
-         ## them -- despite the docblock on this method claiming it covered
-         ## sbatch too. The fallback only ever re-runs a command that
-         ## provably never started (a control-socket-specific failure, not
-         ## a transport fault), so it needs no budget of its own.
+         ## Tested before the retry-budget break below: the scontrol confirm
+         ## passes retries => 0, so with this check after the break instead,
+         ## it was never reached there. The fallback only ever re-runs a
+         ## command that provably never started (a control-socket-specific
+         ## failure, not a transport fault), so it needs no budget of its own.
          ##
          ## !$result['began']: a control-socket pattern in stderr is not
          ## proof the command never ran -- it can also be a line from the
@@ -457,7 +514,7 @@ class remote_exec
             $this->logf( "$label: control socket unusable ("
                        . str_replace( "\n", ' / ', (string) $result[ 'stderr' ] ) . ");"
                        . " switching to a plain connection for the rest of this retry budget"
-                       . " and for the rest of this process" );
+                       . " and for the rest of this instance's life" );
             $this->muxUnusable = true;
             $cmd     = $fallback_cmd;
             $wrapped = $this->withTimeout( $cmd, $timeout );
@@ -567,7 +624,14 @@ class remote_exec
       ## once. Checked before the mkdir below, not after: a value this
       ## check is about to refuse should not get a directory created for it
       ## on disk first.
-      if ( ! preg_match( '#^/[A-Za-z0-9._/-]+$#', $dir ) )
+      ## 'D' modifier (round 8): without it, PCRE's '$' matches before a
+      ## trailing "\n" too, not only at the true end of the string, so a
+      ## configured value with a trailing newline passed this check, got a
+      ## directory created for it, and then every multiplexed call exited
+      ## 255 with "garbage at end of line" (ssh parsing -o ControlPath's
+      ## value literally, newline included). 'D' forces '$' to mean the
+      ## actual end.
+      if ( ! preg_match( '#^/[A-Za-z0-9._/-]+$#D', $dir ) )
       {
          return '';
       }
@@ -740,24 +804,38 @@ class remote_exec
       $ended      = false;
       $remoteExit = null;
 
+      ## Anchored at the end of each line ('m'), and the LAST match, not the
+      ## first (round 8 nit): matches unframe()'s own marker test, for the
+      ## same reason -- our real marker is always the last one frame() can
+      ## produce, and anchoring at end-of-line stops a marker-looking
+      ## substring followed by real trailing text from being mistaken for it.
       if ( $nonce !== null
-         && preg_match( '/' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':(\d+)/', $joined, $m ) )
+         && preg_match_all( '/^.*' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':(\d+)$/m', $joined, $m ) )
       {
          $ended      = true;
-         $remoteExit = (int) $m[1];
+         $remoteExit = (int) end( $m[1] );
       }
 
       $class = $this->classify( $exit_code, $stderr, strpos( $cmd, '/usr/bin/scp' ) === 0, $ended, $remoteExit );
+
+      ## Report the marker's own status when it is known (round 8 nit):
+      ## otherwise a caller reading 'exit_code' still sees ssh's wrapper
+      ## code, which can read "exit=255 class=OK" (connection dropped after
+      ## a successful command printed its marker) or "sbatch exited 255:
+      ## ... Invalid partition" when sbatch itself actually exited 1 --
+      ## both true but confusing side by side, since classify() already
+      ## decided to trust the marker over ssh's own code.
+      $reported_exit_code = ( $ended && $remoteExit !== null ) ? $remoteExit : $exit_code;
 
       ## Single-line: $cmd is the framed, multi-line wrapped command, and
       ## $stderr can hold several lines of its own (ssh banners, the
       ## remote wrapper's output) -- either one otherwise breaks this one
       ## log entry across several lines in the log file.
-      $this->logf( "$label attempt $attempt: exit=$exit_code class=$class cmd="
+      $this->logf( "$label attempt $attempt: exit=$reported_exit_code class=$class cmd="
                    . str_replace( "\n", ' / ', $cmd )
                    . ( $stderr !== '' ? " stderr=" . str_replace( "\n", ' / ', $stderr ) : '' ) );
 
-      $result = $this->result( $class, $exit_code, $stdout, $stderr, $cmd );
+      $result = $this->result( $class, $reported_exit_code, $stdout, $stderr, $cmd );
       $result[ 'began' ] = $began;
 
       return $result;
@@ -852,48 +930,12 @@ class remote_exec
       return false;
    }
 
-   /**
-    * A subset of is_scheduler_unreachable(): the whole sbatch invocation
-    * definitely ended without creating a job, as opposed to a dropped or
-    * timed-out connection where whether a job was created is genuinely
-    * unknown. Safe for a caller to retry outright, unlike the ambiguous
-    * cases, which need reconciling against the scheduler (e.g. a job-name
-    * lookup) before resubmitting.
-    *
-    * sbatch answers EAGAIN by printing "Slurm temporarily unable to accept
-    * job, sleeping and retrying" and then retrying internally on its own,
-    * up to ~120s/15 more attempts -- that notice can appear in stderr from
-    * an attempt sbatch went on to succeed at, so matching it anywhere in
-    * stderr (the previous implementation) misclassifies a pending outcome
-    * as a definite one. The only trustworthy verdict is sbatch's own final
-    * "Batch job submission failed: <reason>" line, so only that line's
-    * reason is checked.
-    *
-    * A dropped-connection phrase (lost mid-dialogue, so the controller's
-    * actual answer to that attempt is unknown) overrides any final line:
-    * even if sbatch went on to report failure afterward, an earlier attempt
-    * within the same invocation may already have been accepted.
-    *
-    * Any "Batch job submission failed: <reason>" line is trusted as a
-    * definite rejection, whatever the reason -- an invalid partition, a
-    * full queue, a bad --time, EAGAIN, a connect failure, or anything else
-    * sbatch's own last line names. A narrower whitelist of specific
-    * reasons here previously meant real rejections (invalid partition, a
-    * full queue, a bad --time) fell through to "outcome unknown: reconcile"
-    * instead, even though sbatch had already given a final, definite
-    * answer. The two dropped-connection phrases are excluded first because
-    * they are genuinely ambiguous regardless of what line they appear on;
-    * every other final line from sbatch itself is not.
-    */
-   public function is_scheduler_rejection( $stderr )
+   /** Lines sbatch can print mid-dialogue where the controller's actual answer
+    *  to that attempt is unknown, regardless of what line follows -- an
+    *  earlier attempt within the same invocation may already have been
+    *  accepted even though the attempt that printed last was dropped. */
+   private function is_scheduler_ambiguous( $stderr )
    {
-      $stderr = (string) $stderr;
-
-      if ( $stderr === '' )
-      {
-         return false;
-      }
-
       $ambiguous = array(
          'Socket timed out on send/recv operation',
          'Zero Bytes were transmitted or received',
@@ -903,11 +945,110 @@ class remote_exec
       {
          if ( preg_match( '#' . $pattern . '#i', $stderr ) )
          {
-            return false;
+            return true;
          }
       }
 
-      return (bool) preg_match( '/Batch job submission failed:\s*\S/i', $stderr );
+      return false;
+   }
+
+   /**
+    * A subset of is_scheduler_unreachable(): sbatch's own final line says it
+    * never reached the controller at all, so definitely nothing was
+    * submitted. Safe for a caller to retry outright -- unlike every other
+    * "Batch job submission failed" verdict, where the controller did see
+    * the request (round 8: retrying those risks a duplicate when the
+    * actual answer to an accepted request was lost, and adds pointless
+    * delay even when it wasn't).
+    *
+    * Deliberately narrow (round 8, reverting round 7's "any reason is a
+    * definite rejection" broadening): "Batch job submission failed:" on its
+    * own does not distinguish a pre-send connect failure from every other
+    * final verdict sbatch can print, and retrying those other verdicts is
+    * either dangerous (the controller may have lost its own reply after
+    * creating the job, which reads the same as a reply it never sent) or
+    * useless (a verdict like an invalid partition will not change on
+    * retry). Only the specific pre-send text below is known never to have
+    * reached the controller.
+    */
+   public function is_scheduler_rejection( $stderr )
+   {
+      $stderr = (string) $stderr;
+
+      if ( $stderr === '' || $this->is_scheduler_ambiguous( $stderr ) )
+      {
+         return false;
+      }
+
+      return (bool) preg_match(
+         '/Batch job submission failed:\s*Unable to contact slurm controller \(connect failure\)/i',
+         $stderr );
+   }
+
+   /**
+    * sbatch's own final line named one of the controller's definite refusal
+    * verdicts: the controller saw the request and said no, so no job was
+    * created -- but unlike is_scheduler_rejection()'s connect failure, this
+    * is not retried (round 8): the request already reached the controller,
+    * and these verdicts do not change on retry. Message wording only; does
+    * not feed the retry decision.
+    */
+   public function is_scheduler_definite_rejection( $stderr )
+   {
+      $stderr = (string) $stderr;
+
+      if ( $stderr === '' || $this->is_scheduler_ambiguous( $stderr ) )
+      {
+         return false;
+      }
+
+      if ( ! preg_match( '/Batch job submission failed:\s*\S/i', $stderr ) )
+      {
+         return false;
+      }
+
+      $verdicts = array(
+         'Invalid partition',
+         'partition is currently not available',
+         'partition configuration (?:is )?not available',
+         'Invalid account',
+         'Invalid time limit',
+         'Requested node configuration is not available',
+         'Invalid qos',
+         'accounting[/ ]QOS policy',
+      );
+
+      foreach ( $verdicts as $pattern )
+      {
+         if ( preg_match( '#' . $pattern . '#i', $stderr ) )
+         {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   /**
+    * sbatch exhausted its own ~120s internal EAGAIN retry loop and gave up:
+    * the cluster or queue is busy, not misconfigured and not unreachable.
+    * Message wording only, like is_scheduler_definite_rejection() -- round 8
+    * should-fix: sbatch has already spent its own retry budget by the time
+    * this prints, so submit_slurm must not retry on top of it (see
+    * submit_slurm::attemptSubmit()) and should give it enough of its own
+    * timeout to finish that internal loop and reach this line.
+    */
+   public function is_scheduler_busy( $stderr )
+   {
+      $stderr = (string) $stderr;
+
+      if ( $stderr === '' || $this->is_scheduler_ambiguous( $stderr ) )
+      {
+         return false;
+      }
+
+      return (bool) preg_match(
+         '/Batch job submission failed:\s*Resource temporarily unavailable/i', $stderr );
    }
 
    /** Authentication and host-key failures are configuration errors: retrying cannot help. */
@@ -1004,12 +1145,13 @@ class remote_exec
    ## caller like gridctl's probes, results fetch and queue viewer connects
    ## plainly, so a 60s ControlPersist on one of those does not keep a
    ## cluster's master open for as long as any job against it is running.
-   ## Only submit_slurm's own ssh()/scp()/sbatchOnce()/confirmSlurmJob() --
-   ## the calls actually staging, submitting and polling once per submission
-   ## -- ask for it. '' (no directory
-   ## available) omits the options entirely, so a host where the control
-   ## directory cannot be created just connects plainly, exactly as before
-   ## this existed.
+   ## Only submit_slurm's own ssh()/scp()/confirmSlurmJob() -- the calls
+   ## staging and polling, which are safe to re-run -- ask for it.
+   ## sbatchOnce() deliberately does not (see CONTROL_DIR's own comment:
+   ## sbatch is not safe to re-run if a mux master dies mid-call). ''
+   ## (no directory available) omits the options entirely, so a host
+   ## where the control directory cannot be created just connects
+   ## plainly, exactly as before this existed.
    private function multiplexOpts( $multiplex )
    {
       if ( ! $multiplex || $this->muxUnusable )

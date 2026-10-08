@@ -34,15 +34,31 @@ $global_max_run_time_hours   = 0;
 ## cluster_probe_outage_verdict() in gridctl explains the policy.
 $global_cluster_abandon_hours = 72;
 
-## sbatch retries, when ssh never ran the command (connect failure or an open
-## breaker) or sbatch ran and the controller definitely rejected the job
-## outright, so nothing was created either way. An sbatch whose outcome is
-## merely unknown -- it started, and the connection was then lost or timed
-## out before its answer came back -- is never repeated, since the job may
+## sbatch retries (round 8: narrowed back from "any definite verdict"), when
+## ssh never ran the command at all (connect failure or an open breaker) or
+## sbatch's own final line says it never reached the controller (a pre-send
+## connect failure, distinct from ssh's own). Every other definite verdict --
+## a real rejection reason (invalid partition, account/partition, time
+## limit, node configuration, QOS/accounting policy) or sbatch's own
+## busy/EAGAIN give-up after its internal retry budget -- is reported
+## without a retry of ours: a rejection reason will not change on retry, and
+## sbatch has already spent up to ~120s retrying the busy case internally
+## before printing that verdict. An sbatch whose outcome is merely unknown --
+## it started, and the connection was then lost or timed out before its
+## answer came back -- is never repeated either way, since the job may
 ## already exist. Per-cluster 'submit_retries' / 'submit_retry_wait' override
 ## these.
 $global_sbatch_submit_retries            = 3;
 $global_sbatch_submit_retry_wait_seconds = 5;
+
+## sbatch's own command timeout, longer than remote_exec's 120s default
+## (round 8): sbatch answers EAGAIN by retrying internally for up to
+## ~120s/15 attempts before printing its own busy verdict (measured at
+## ~121.4s), so the 120s default could kill it a fraction of a second
+## before that verdict printed, reading as "cluster unreachable (TIMED_OUT)
+## ... outcome unknown" for a call that was about to give a clean, definite
+## answer instead. Per-cluster 'sbatch_timeout_seconds' overrides this.
+$global_sbatch_timeout_seconds = 150;
 
 ## after a job reports COMPLETE, jobmonitor waits for the cluster's (UDP)
 ## "Finished" message before finalizing.  Because UDP is unreliable, it will
@@ -57,12 +73,14 @@ $global_complete_max_seconds   = 21600;
 
 ## sbatch is retried when it provably never started (the command's begin
 ## marker never came back, as with a connect failure or an open breaker) or
-## when sbatch's own final verdict line says the controller definitely
-## rejected the job outright. An SSH failure or dropped connection after that
-## marker, with no definite verdict line to go on, can mean Slurm accepted
-## the job while its ID was lost on the way back, and retrying then would
-## risk a duplicate, so those are left for an operator to reconcile on the
-## scheduler.
+## when sbatch's own final line says it never reached the controller at all.
+## Every other definite verdict sbatch can print -- a real rejection reason,
+## or its own busy/EAGAIN give-up -- is reported without a retry of ours
+## (round 8; see $global_sbatch_submit_retries above for why). An SSH
+## failure or dropped connection after the begin marker, with no definite
+## verdict line to go on, can mean Slurm accepted the job while its ID was
+## lost on the way back, and retrying then would risk a duplicate, so that
+## case is left for an operator to reconcile on the scheduler.
 ## $global_sbatch_submit_retries and $global_sbatch_submit_retry_wait_seconds set
 ## the budget; unset, the code uses 4 attempts total (the default retries, 3,
 ## plus the first), waiting 5s/10s/20s between them -- the wait doubles each
@@ -93,13 +111,20 @@ $global_cluster_status_max_age_seconds = 1800;
 ## $global_circuit_breaker_dir = '/home/us3/lims/etc/circuit-breaker';
 
 ## Where submit_slurm's reused ssh/scp connections keep their control socket
-## for a submission's staging and sbatch calls. Same per-account subdirectory
-## reasoning as the breaker directory above. dbutils#45 step 5 provisions this
-## directory 3770 us3:<web group> (the sticky bit so an account's own
-## subdirectory, once created, cannot be renamed or removed by the other
-## account). Set to '' to turn multiplexing off outright and have every call
-## connect plainly, same as when the directory cannot be created or fails its
-## checks.
+## for a submission's staging calls (the mkdir and the scp -- not sbatch
+## itself; see class/remote_exec.php's CONTROL_DIR comment for why sbatch is
+## never multiplexed). Same per-account subdirectory reasoning as the
+## breaker directory above. dbutils#45 step 5 provisions this directory
+## 3770 us3:<web group> (the sticky bit so an account's own subdirectory,
+## once created, cannot be renamed or removed by the other account). Set to
+## '' to turn multiplexing off outright and have every call connect plainly,
+## same as when the directory cannot be created or fails its checks.
+##
+## Only characters an absolute Unix path actually needs are accepted:
+## letters, digits, '.', '_', '-' and '/'. Anything else (including a
+## trailing newline) is refused the same as an unset directory, rather than
+## being passed through to ssh's -o ControlPath, which splits on whitespace
+## and '=', expands '%' sequences, and (OpenSSH 8.7+, EL9) rejects a "'".
 
 ## $global_ssh_control_dir = '/home/us3/lims/etc/ssh-control';
 

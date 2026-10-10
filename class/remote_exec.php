@@ -149,16 +149,21 @@ class remote_exec
    ## The appliance's own node: the scheduler and LIMS run on the same host,
    ## so run() below bypasses ssh for this cluster entirely (round 8).
    ##
-   ## Also true for the cluster named by $default_local_cluster:
-   ## that variable is global_config.php's own answer to "which cluster is
-   ## this host", already set by uslims_upgrade.php and used by
+   ## Also true for the cluster named by $default_local_cluster, PROVIDED
+   ## its own login host actually matches this machine (runsOnThisHost(),
+   ## round 10): that variable is global_config.php's own answer to "which
+   ## cluster is this host", already set by uslims_upgrade.php and used by
    ## submitone.php/submitctl.php to resolve the literal cluster name
    ## "localhost" -- the per-entry 'localhost' flag is a second, easy-to-
    ## forget place to say the same thing, and a fresh install's template
    ## set only this one, not that flag, which left every fresh appliance
    ## polling over ssh (round 8's scale failure, never actually fixed for
-   ## new installs). An explicit 'localhost' => true on the entry itself
-   ## still works and still wins regardless of this variable.
+   ## new installs). But the name match alone is just "this is what CLI
+   ## 'localhost' resolves to", not a claim about where the entry actually
+   ## is -- pointed at a genuinely remote cluster, it was taken as local
+   ## regardless. An explicit 'localhost' => true on the entry itself is a
+   ## direct assertion instead, trusted without this extra check, and still
+   ## wins regardless of this variable.
    ##
    ## Marked local is not enough by itself: mkdir/scp still address
    ## us3@<self>, and the monitor it hands jobs to always runs as us3
@@ -173,14 +178,58 @@ class remote_exec
    ## correctness.
    public function is_local()
    {
-      if ( empty( $this->details[ 'localhost' ] )
-         && ( ! isset( $GLOBALS[ 'default_local_cluster' ] )
-            || $GLOBALS[ 'default_local_cluster' ] !== $this->cluster ) )
+      ## An explicit 'localhost' => true is the admin directly asserting
+      ## this entry is co-located -- trusted as-is, no further host check,
+      ## same as before this round's fix.
+      if ( ! empty( $this->details[ 'localhost' ] ) )
       {
-         return false;
+         return $this->runsAsLoginUser();
       }
 
-      return $this->runsAsLoginUser();
+      ## $default_local_cluster matching $this->cluster is a weaker signal:
+      ## it only says "this is the name CLI 'localhost' submissions resolve
+      ## to", not that the entry is actually on this machine. Pointed at a
+      ## remote cluster whose login happens to use the same account name as
+      ## this host runs as (e.g. 'us3'), runsAsLoginUser() alone could not
+      ## tell the difference -- mkdir/sbatch ran locally against a cluster
+      ## with no Slurm installed, and the job was held forever (round 10
+      ## should-fix). runsOnThisHost() closes that: the shortcut is now
+      ## only taken when the entry's own login host actually matches this
+      ## machine's hostname, not just its account name.
+      if ( isset( $GLOBALS[ 'default_local_cluster' ] )
+         && $GLOBALS[ 'default_local_cluster' ] === $this->cluster
+         && $this->runsOnThisHost() )
+      {
+         return $this->runsAsLoginUser();
+      }
+
+      return false;
+   }
+
+   /** Whether this entry's login host is actually this machine, not just a same-named account elsewhere. */
+   private function runsOnThisHost()
+   {
+      $login = $this->login();
+      $at = strpos( $login, '@' );
+      $loginHost = $at !== false ? substr( $login, $at + 1 ) : '';
+
+      $here = $this->currentHostName();
+
+      return $loginHost !== '' && $here !== '' && strcasecmp( $loginHost, $here ) === 0;
+   }
+
+   ## Seam: the test double scripts this instead of reading the real host
+   ## identity, the same way currentAccountName() is overridden.
+   protected function currentHostName()
+   {
+      if ( ! function_exists( 'gethostname' ) )
+      {
+         return '';
+      }
+
+      $name = gethostname();
+
+      return is_string( $name ) ? $name : '';
    }
 
    /** Whether this process's own account is the one the local exec() would run as. */

@@ -577,6 +577,47 @@ class submit_slurm extends jobsubmit
    }
 
    /**
+    * Which cluster identity the model's frozen mapping should be asked
+    * about, kept separate from where the job actually went.
+    *
+    * WHY SEPARATE. The destination is whatever this install calls the
+    * cluster it submits to -- 'us3iab-node0' for a co-located appliance
+    * cluster, say. The model was fitted against the historical identities
+    * runtime_cluster_map.php knows (real site hostnames), which a local or
+    * renamed entry will almost never match. Without a way to tell the
+    * advisory "score this as if it went to X", every submission from an
+    * install whose cluster names don't happen to match one of those reads
+    * 'unsupported' forever, regardless of whether the model could otherwise
+    * have scored it.
+    *
+    * One shared resolution for every family: this runs once per submission,
+    * before the family is even known, and feeds the same identity into
+    * whichever family's model ends up being asked.
+    *
+    * @return array{identity: string, source: string} source is 'configured'
+    *         when the entry sets prediction_cluster_name, 'fallback_name'
+    *         when it falls back to the entry's own name (this call's
+    *         previous and only behavior), or 'fallback_alias' when even
+    *         that is missing and the cluster's short name is used as-is.
+    */
+   protected function resolvePredictionClusterIdentity( $cluster )
+   {
+      $details = isset( $this->grid[ $cluster ] ) ? $this->grid[ $cluster ] : array();
+
+      if ( isset( $details[ 'prediction_cluster_name' ] ) && $details[ 'prediction_cluster_name' ] !== '' )
+      {
+         return array( 'identity' => (string) $details[ 'prediction_cluster_name' ], 'source' => 'configured' );
+      }
+
+      if ( isset( $details[ 'name' ] ) && $details[ 'name' ] !== '' )
+      {
+         return array( 'identity' => (string) $details[ 'name' ], 'source' => 'fallback_name' );
+      }
+
+      return array( 'identity' => (string) $cluster, 'source' => 'fallback_alias' );
+   }
+
+   /**
     * Hand the advisory path what it needs and forget about it.
     *
     * Called from submit(), not write_slurm_script(): the job id now exists,
@@ -641,16 +682,22 @@ class submit_slurm extends jobsubmit
          $link = @mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
          $gfac = @mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
 
+         $predictionIdentity = $this->resolvePredictionClusterIdentity( $cluster );
+
          $status = runtime_advisory::observe( array(
             'us3_db'      => $dbname,
             'request_id'  => $requestID,
             ## Checked against the artifact's family: another method's request
             ## can carry enough of the same parameter names to be scored.
             'method'      => isset( $this->data[ 'method' ] ) ? $this->data[ 'method' ] : '',
-            ## The entry's name, which is what the request records and what the
-            ## model's frozen mapping is keyed on.
+            ## The entry's name, which is what the request actually went to.
             'destination' => isset( $this->grid[ $cluster ][ 'name' ] )
                              ? $this->grid[ $cluster ][ 'name' ] : $cluster,
+            ## The identity the model's frozen mapping is keyed on -- not
+            ## always the same as the destination above (see
+            ## resolvePredictionClusterIdentity()).
+            'prediction_cluster'        => $predictionIdentity[ 'identity' ],
+            'prediction_cluster_source' => $predictionIdentity[ 'source' ],
 
             'parameters'    => isset( $job[ 'jobParameters' ] ) ? $job[ 'jobParameters' ] : array(),
             'speedsteps'    => isset( $dataset[ 'speedsteps' ] ) ? $dataset[ 'speedsteps' ] : array(),

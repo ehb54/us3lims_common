@@ -37,6 +37,14 @@ CREATE TABLE IF NOT EXISTS `runtime_prediction` (
   `family`                    varchar(16)  NOT NULL,
   `destination`               varchar(80)  NOT NULL,
 
+  -- The identity actually scored against the cluster map, which a local or
+  -- renamed destination routinely does not match, and why: 'configured'
+  -- (prediction_cluster_name), 'fallback_name' or 'fallback_alias' (the
+  -- destination itself, this table's only behavior before this existed), or
+  -- null for a caller that never set it.
+  `prediction_cluster`        varchar(80)  DEFAULT NULL,
+  `prediction_cluster_source` varchar(16)  DEFAULT NULL,
+
   -- The inputs the prediction was made from, as JSON: numbers, category codes
   -- and explicit nulls for a value the fitted imputer handled.
   `features`                  longtext     DEFAULT NULL,
@@ -67,6 +75,12 @@ CREATE TABLE IF NOT EXISTS `runtime_prediction` (
   KEY `ndx_runtime_prediction_decided` (`decided_at`),
   KEY `ndx_runtime_prediction_status`  (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
+
+-- A table already created before prediction_cluster existed needs
+-- runtime_pilot_table_add_prediction_cluster.sql, in this same directory,
+-- instead of a re-run of this file: this one statement is also what
+-- RuntimePredictionRecordTest reads to create its own throwaway copy, so it
+-- stays exactly one statement.
 
 -- Removal, after the window and after the records have been collected:
 --

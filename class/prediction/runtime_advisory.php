@@ -186,6 +186,18 @@ class runtime_advisory
    {
       $context[ 'formula_version' ] = self::FORMULA_VERSION;
 
+      ## The identity scored against the cluster map and the model, kept
+      ## apart from 'destination' (see submit_slurm::resolvePredictionClusterIdentity()).
+      ## A caller that never set prediction_cluster -- every test fixture
+      ## written before this existed, and any caller still on the old
+      ## contract -- keeps exactly its previous behavior: destination itself
+      ## is what gets scored.
+      if ( ! array_key_exists( 'prediction_cluster', $context ) || $context[ 'prediction_cluster' ] === '' )
+      {
+         $context[ 'prediction_cluster' ] = isset( $context[ 'destination' ] )
+                                             ? $context[ 'destination' ] : '';
+      }
+
       ## Narrowing further, to the standard variant only, is the readout's
       ## population rule rather than a runtime check: an artifact declares a
       ## family, not a method list.
@@ -248,7 +260,7 @@ class runtime_advisory
          isset( $context[ 'parameters' ] ) && is_array( $context[ 'parameters' ] )
             ? $context[ 'parameters' ] : array(),
          $dataset,
-         isset( $context[ 'destination' ] ) ? $context[ 'destination' ] : ''
+         $context[ 'prediction_cluster' ]
       );
 
       ## An operand that should have been readable and was not is the adapter's

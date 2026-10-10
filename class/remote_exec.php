@@ -92,7 +92,7 @@ class remote_exec
    private $muxDirectoryWarned = false;
 
    ## Set by the controlPath() call just made; read immediately after by
-   ## multiplexOpts() to choose the right log wording (round 9 nit).
+   ## multiplexOpts() to choose the right log wording.
    private $controlDirExplicitlyDisabled = false;
 
    ## Resolved lazily by timeout_bin(); '' means "not available on this host".
@@ -149,7 +149,7 @@ class remote_exec
    ## The appliance's own node: the scheduler and LIMS run on the same host,
    ## so run() below bypasses ssh for this cluster entirely (round 8).
    ##
-   ## Also true for the cluster named by $default_local_cluster (round 9):
+   ## Also true for the cluster named by $default_local_cluster:
    ## that variable is global_config.php's own answer to "which cluster is
    ## this host", already set by uslims_upgrade.php and used by
    ## submitone.php/submitctl.php to resolve the literal cluster name
@@ -250,7 +250,7 @@ class remote_exec
          ## the script's own final "exit", where it has no effect. Passed
          ## through ssh this is already one argument to the remote shell;
          ## here it has to be made one argument to the local shell the
-         ## same way (round 9 blocking fix).
+         ## same way.
          $cmd = '/bin/sh -c ' . escapeshellarg( $this->frame( $remote_cmd, $nonce ) );
 
          $result = $this->unframe(
@@ -355,7 +355,7 @@ class remote_exec
       ## matching the marker text anywhere in the line, also stops a
       ## marker-looking substring followed by real trailing output on the
       ## same line from truncating that output.
-      ## \s*$ (round 9 nit, regressed from round 8): a trailing \r (CRLF
+      ## \s*$: a trailing \r (CRLF
       ## output), trailing blanks, or both after the digits must still match.
       $endPattern = '/^(.*)' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':\d+\s*$/D';
       $last = null;
@@ -454,7 +454,7 @@ class remote_exec
     * the breaker as a failure; never records a success, since bare ssh
     * reachability says nothing about the controller behind it.
     *
-    * For a local cluster (round 9 nit, not yet resolved): '/bin/true' run
+    * For a local cluster (not yet resolved): '/bin/true' run
     * directly has no network hop to fail at all, so outage_timeout_verdict()
     * (job_state_machine.php), which reads this to decide whether a stall is
     * the cluster's own fault, always sees "reachable" and never defers --
@@ -698,7 +698,7 @@ class remote_exec
       $explicitOverride = array_key_exists( 'global_ssh_control_dir', $GLOBALS );
       $dir = $explicitOverride ? $GLOBALS[ 'global_ssh_control_dir' ] : self::default_control_dir();
 
-      ## Remembered for multiplexOpts()'s log line (round 9 nit): an admin
+      ## Remembered for multiplexOpts()'s log line: an admin
       ## who sets $global_ssh_control_dir = '' to turn multiplexing off on
       ## purpose was logged the same "no usable ssh control directory" text
       ## as a real failure to find or create one.
@@ -904,7 +904,7 @@ class remote_exec
       ## same reason -- our real marker is always the last one frame() can
       ## produce, and anchoring at end-of-line stops a marker-looking
       ## substring followed by real trailing text from being mistaken for it.
-      ## \s*$ (round 9 nit, regressed from round 8): a trailing \r (CRLF
+      ## \s*$: a trailing \r (CRLF
       ## output), trailing blanks, or both after the digits must still match.
       if ( $nonce !== null
          && preg_match_all( '/^.*' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':(\d+)\s*$/m', $joined, $m ) )
@@ -923,7 +923,7 @@ class remote_exec
       ## both true but confusing side by side, since classify() already
       ## decided to trust the marker over ssh's own code.
       ##
-      ## Not when classify() called it TIMED_OUT, though (round 9 nit): that
+      ## Not when classify() called it TIMED_OUT, though: that
       ## always comes from timeout(1)'s own 124/137, which classify() trusts
       ## over the marker unconditionally (the end marker can arrive and the
       ## wrapper can still be killed, e.g. something downstream of the
@@ -1110,7 +1110,7 @@ class remote_exec
       }
 
       ## Only the LAST "Batch job submission failed:" line is sbatch's actual
-      ## final verdict (round 9 nit): matching these patterns anywhere in
+      ## final verdict: matching these patterns anywhere in
       ## $stderr let a stray phrase ahead of an unrelated lost-reply line
       ## read as "rejected outright".
       $reason = $this->lastSubmissionFailureReason( $stderr );
@@ -1120,7 +1120,7 @@ class remote_exec
          return false;
       }
 
-      ## Real Slurm 20.11 texts (round 9 nit; the previous list matched
+      ## Real Slurm 20.11 texts (the previous list matched
       ## nothing real for several of these):
       $verdicts = array(
          'Invalid partition',
@@ -1175,7 +1175,7 @@ class remote_exec
          return false;
       }
 
-      ## Two more end-of-loop busy verdicts (round 9 nit), alongside sbatch's
+      ## Two more end-of-loop busy verdicts, alongside sbatch's
       ## own EAGAIN give-up text.
       return (bool) preg_match(
          '/Batch job submission failed:\s*(?:Resource temporarily unavailable'

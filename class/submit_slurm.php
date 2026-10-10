@@ -313,7 +313,7 @@ class submit_slurm extends jobsubmit
          $wait *= 2;
       }
 
-      ## Checked ahead of $never_started (round 9 nit): a breaker-open
+      ## Checked ahead of $never_started: a breaker-open
       ## refusal is itself always "never started" (attempt() short-circuits
       ## before the command runs at all), which otherwise swallows the
       ## genuine connect failures that opened the breaker in the first
@@ -370,9 +370,9 @@ class submit_slurm extends jobsubmit
       ## (TIMED_OUT) ... outcome unknown" for a call that was about to give
       ## a clean, definite answer. 150s leaves room for sbatch's own budget
       ## to finish and still bounds the call.
-      ## Validated the same way remote_exec validates its own timeouts
-      ## (round 9 nit): unvalidated, 0 removed the bound entirely, '2m'
-      ## became 2 seconds via the (int) cast, and 99999 was accepted outright.
+      ## Validated the same way remote_exec validates its own timeouts:
+      ## left unvalidated, 0 would remove the bound entirely, '2m' would
+      ## become 2 seconds via the (int) cast, and 99999 would be accepted outright.
       $configured = $this->grid[ $cluster ][ 'sbatch_timeout_seconds' ]
                   ?? $GLOBALS[ 'global_sbatch_timeout_seconds' ] ?? null;
 
@@ -385,7 +385,7 @@ class submit_slurm extends jobsubmit
       $timeout = $configured ?? 150;
 
       ## Never silently shorten a cluster's own remote_exec_overrides
-      ## command_timeout_seconds exception (round 9 nit): that is a
+      ## command_timeout_seconds exception: that is a
       ## demonstrated timeout need for this specific login node, and
       ## sbatch_timeout_seconds's job is only to guarantee a FLOOR high
       ## enough for sbatch's own ~120s internal retry budget above, not to

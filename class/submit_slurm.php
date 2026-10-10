@@ -313,16 +313,26 @@ class submit_slurm extends jobsubmit
          $wait *= 2;
       }
 
-      $error = $never_started
-             ? $result[ 'error' ] . "; sbatch never started, so nothing was submitted"
-             : ( $connect_failure
-               ? $result[ 'error' ] . "; sbatch could not reach the controller, so nothing was submitted"
-               : ( ! empty( $result[ 'definite_rejection' ] )
-                 ? $result[ 'error' ] . "; the controller rejected the job outright, so nothing was submitted"
-                 : ( ! empty( $result[ 'busy' ] )
-                   ? $result[ 'error' ] . "; cluster busy or queue full, so nothing was submitted"
-                   : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
-                     . " outcome is unknown: reconcile on the cluster before resubmitting" ) ) );
+      ## Checked ahead of $never_started (round 9 nit): a breaker-open
+      ## refusal is itself always "never started" (attempt() short-circuits
+      ## before the command runs at all), which otherwise swallows the
+      ## genuine connect failures that opened the breaker in the first
+      ## place -- the operator saw "sbatch never started" with no mention
+      ## that this cluster could not be reached, when that is exactly why.
+      $breaker_open = ! empty( $result[ 'breaker_open' ] );
+
+      $error = $breaker_open
+             ? $result[ 'error' ] . "; sbatch could not reach the controller, so nothing was submitted"
+             : ( $never_started
+               ? $result[ 'error' ] . "; sbatch never started, so nothing was submitted"
+               : ( $connect_failure
+                 ? $result[ 'error' ] . "; sbatch could not reach the controller, so nothing was submitted"
+                 : ( ! empty( $result[ 'definite_rejection' ] )
+                   ? $result[ 'error' ] . "; the controller rejected the job outright, so nothing was submitted"
+                   : ( ! empty( $result[ 'busy' ] )
+                     ? $result[ 'error' ] . "; cluster busy or queue full, so nothing was submitted"
+                     : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
+                       . " outcome is unknown: reconcile on the cluster before resubmitting" ) ) ) );
 
       return array( 'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt );
    }
@@ -360,8 +370,32 @@ class submit_slurm extends jobsubmit
       ## (TIMED_OUT) ... outcome unknown" for a call that was about to give
       ## a clean, definite answer. 150s leaves room for sbatch's own budget
       ## to finish and still bounds the call.
-      $timeout = (int) ( $this->grid[ $cluster ][ 'sbatch_timeout_seconds' ]
-                        ?? $GLOBALS[ 'global_sbatch_timeout_seconds' ] ?? 150 );
+      ## Validated the same way remote_exec validates its own timeouts
+      ## (round 9 nit): unvalidated, 0 removed the bound entirely, '2m'
+      ## became 2 seconds via the (int) cast, and 99999 was accepted outright.
+      $configured = $this->grid[ $cluster ][ 'sbatch_timeout_seconds' ]
+                  ?? $GLOBALS[ 'global_sbatch_timeout_seconds' ] ?? null;
+
+      if ( $configured !== null && ( ! is_int( $configured ) || $configured < 1 || $configured > 3600 ) )
+      {
+         throw new InvalidArgumentException(
+            "submit_slurm: cluster '$cluster' sbatch_timeout_seconds must be an integer from 1 through 3600" );
+      }
+
+      $timeout = $configured ?? 150;
+
+      ## Never silently shorten a cluster's own remote_exec_overrides
+      ## command_timeout_seconds exception (round 9 nit): that is a
+      ## demonstrated timeout need for this specific login node, and
+      ## sbatch_timeout_seconds's job is only to guarantee a FLOOR high
+      ## enough for sbatch's own ~120s internal retry budget above, not to
+      ## cap a cluster that already needs more than that for every call.
+      $clusterOverride = $this->grid[ $cluster ][ 'remote_exec_overrides' ][ 'command_timeout_seconds' ] ?? null;
+
+      if ( is_int( $clusterOverride ) && $clusterOverride > $timeout )
+      {
+         $timeout = $clusterOverride;
+      }
 
       $res = $rx->run( $sbatch_cmd, [
          'retries'   => 0,
@@ -399,6 +433,7 @@ class submit_slurm extends jobsubmit
 
          return array( 'ok' => false, 'job_id' => '', 'error' => $error, 'class' => $res[ 'class' ],
                        'began'              => ! empty( $res[ 'began' ] ),
+                       'breaker_open'       => ! empty( $res[ 'breaker_open' ] ),
                        'connect_failure'    => $rx->is_scheduler_rejection( $stderr_text ),
                        'definite_rejection' => $rx->is_scheduler_definite_rejection( $stderr_text ),
                        'busy'               => $rx->is_scheduler_busy( $stderr_text ) );
@@ -692,10 +727,12 @@ class submit_slurm extends jobsubmit
 
    ## Run a command on the cluster. Returns remote_exec's classified result.
    ## multiplex: true unless the caller overrides it, since this and scp()
-   ## below are the staging+sbatch calls a submission makes to the same
-   ## login one after another -- the one case the shared ssh connection is
-   ## actually meant for. Other callers (gridctl's probes, results fetch,
-   ## queue viewer) go through remote_exec directly and so never set it.
+   ## below are the staging calls (mkdir, then the copy) a submission makes
+   ## to the same login one after another -- the one case the shared ssh
+   ## connection is actually meant for. sbatch itself does not go through
+   ## this helper and deliberately does not multiplex (see sbatchOnce()).
+   ## Other callers (gridctl's probes, results fetch, queue viewer) go
+   ## through remote_exec directly and so never set it either.
    private function ssh( $cluster, $remote_cmd, $opts = [] )
    {
       $res = $this->remote( $cluster )->run( $remote_cmd, $opts + [ 'multiplex' => true ] );

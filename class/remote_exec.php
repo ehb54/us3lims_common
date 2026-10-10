@@ -91,6 +91,10 @@ class remote_exec
    ## instead of once per call.
    private $muxDirectoryWarned = false;
 
+   ## Set by the controlPath() call just made; read immediately after by
+   ## multiplexOpts() to choose the right log wording (round 9 nit).
+   private $controlDirExplicitlyDisabled = false;
+
    ## Resolved lazily by timeout_bin(); '' means "not available on this host".
    protected $timeout_bin = null;
 
@@ -155,15 +159,59 @@ class remote_exec
    ## polling over ssh (round 8's scale failure, never actually fixed for
    ## new installs). An explicit 'localhost' => true on the entry itself
    ## still works and still wins regardless of this variable.
+   ##
+   ## Marked local is not enough by itself: mkdir/scp still address
+   ## us3@<self>, and the monitor it hands jobs to always runs as us3
+   ## (submit_slurm's launch_monitor path), so a local exec() as any other
+   ## account creates files one of those two can't reach -- a split-account
+   ## host (web tier != us3, which dbutils#45 provisions for) gets a
+   ## staging failure with no reason, a denied scp, or scancel refused by a
+   ## job it doesn't own, depending on where it is in the lifecycle (round
+   ## 9 should-fix). ssh is always correct regardless of which account asks
+   ## for it, so an unconfirmed match falls back to ssh rather than risking
+   ## the wrong owner -- this only gives up the local path's speed, never
+   ## correctness.
    public function is_local()
    {
-      if ( ! empty( $this->details[ 'localhost' ] ) )
+      if ( empty( $this->details[ 'localhost' ] )
+         && ( ! isset( $GLOBALS[ 'default_local_cluster' ] )
+            || $GLOBALS[ 'default_local_cluster' ] !== $this->cluster ) )
       {
-         return true;
+         return false;
       }
 
-      return isset( $GLOBALS[ 'default_local_cluster' ] )
-             && $GLOBALS[ 'default_local_cluster' ] === $this->cluster;
+      return $this->runsAsLoginUser();
+   }
+
+   /** Whether this process's own account is the one the local exec() would run as. */
+   private function runsAsLoginUser()
+   {
+      $whoami = $this->currentAccountName();
+
+      if ( $whoami === '' )
+      {
+         return false;
+      }
+
+      $login = $this->login();
+      $at = strpos( $login, '@' );
+      $loginUser = $at !== false ? substr( $login, 0, $at ) : $login;
+
+      return $whoami === $loginUser;
+   }
+
+   ## Seam: the test double scripts this instead of reading the real
+   ## process identity, the same way runExec()/pause() are overridden.
+   protected function currentAccountName()
+   {
+      if ( ! function_exists( 'posix_geteuid' ) || ! function_exists( 'posix_getpwuid' ) )
+      {
+         return '';
+      }
+
+      $pw = @posix_getpwuid( posix_geteuid() );
+
+      return is_array( $pw ) && isset( $pw[ 'name' ] ) ? $pw[ 'name' ] : '';
    }
 
    /**
@@ -307,7 +355,9 @@ class remote_exec
       ## matching the marker text anywhere in the line, also stops a
       ## marker-looking substring followed by real trailing output on the
       ## same line from truncating that output.
-      $endPattern = '/^(.*)' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':\d+$/D';
+      ## \s*$ (round 9 nit, regressed from round 8): a trailing \r (CRLF
+      ## output), trailing blanks, or both after the digits must still match.
+      $endPattern = '/^(.*)' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':\d+\s*$/D';
       $last = null;
 
       for ( $i = count( $lines ) - 1; $i > $first; $i-- )
@@ -399,9 +449,22 @@ class remote_exec
          isset( $opts['label'] ) ? $opts['label'] : 'copy_to', $fallback_cmd );
    }
 
-   /** Probe without retries or breaker gating. Feeds an infra fault back into
-    *  the breaker as a failure; never records a success, since bare ssh
-    *  reachability says nothing about the controller behind it. */
+   /**
+    * Probe without retries or breaker gating. Feeds an infra fault back into
+    * the breaker as a failure; never records a success, since bare ssh
+    * reachability says nothing about the controller behind it.
+    *
+    * For a local cluster (round 9 nit, not yet resolved): '/bin/true' run
+    * directly has no network hop to fail at all, so outage_timeout_verdict()
+    * (job_state_machine.php), which reads this to decide whether a stall is
+    * the cluster's own fault, always sees "reachable" and never defers --
+    * even during a real slurmctld outage on that same host. This mirrors a
+    * gap already accepted for a remote cluster (ping proves ssh, not the
+    * controller, by design), but local makes the gap total rather than
+    * partial, since there is no transport left to fail at all. Needs a
+    * deliberate design pass (what would actually indicate "this host's
+    * controller is down" for the local case) rather than a quick patch here.
+    */
    public function ping( $opts = array() )
    {
       $timeout = $this->operationTimeout(
@@ -632,7 +695,14 @@ class remote_exec
     */
    private function controlPath()
    {
-      $dir = $GLOBALS[ 'global_ssh_control_dir' ] ?? self::default_control_dir();
+      $explicitOverride = array_key_exists( 'global_ssh_control_dir', $GLOBALS );
+      $dir = $explicitOverride ? $GLOBALS[ 'global_ssh_control_dir' ] : self::default_control_dir();
+
+      ## Remembered for multiplexOpts()'s log line (round 9 nit): an admin
+      ## who sets $global_ssh_control_dir = '' to turn multiplexing off on
+      ## purpose was logged the same "no usable ssh control directory" text
+      ## as a real failure to find or create one.
+      $this->controlDirExplicitlyDisabled = $explicitOverride && $dir === '';
 
       if ( $dir === '' )
       {
@@ -834,8 +904,10 @@ class remote_exec
       ## same reason -- our real marker is always the last one frame() can
       ## produce, and anchoring at end-of-line stops a marker-looking
       ## substring followed by real trailing text from being mistaken for it.
+      ## \s*$ (round 9 nit, regressed from round 8): a trailing \r (CRLF
+      ## output), trailing blanks, or both after the digits must still match.
       if ( $nonce !== null
-         && preg_match_all( '/^.*' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':(\d+)$/m', $joined, $m ) )
+         && preg_match_all( '/^.*' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':(\d+)\s*$/m', $joined, $m ) )
       {
          $ended      = true;
          $remoteExit = (int) end( $m[1] );
@@ -850,7 +922,17 @@ class remote_exec
       ## ... Invalid partition" when sbatch itself actually exited 1 --
       ## both true but confusing side by side, since classify() already
       ## decided to trust the marker over ssh's own code.
-      $reported_exit_code = ( $ended && $remoteExit !== null ) ? $remoteExit : $exit_code;
+      ##
+      ## Not when classify() called it TIMED_OUT, though (round 9 nit): that
+      ## always comes from timeout(1)'s own 124/137, which classify() trusts
+      ## over the marker unconditionally (the end marker can arrive and the
+      ## wrapper can still be killed, e.g. something downstream of the
+      ## command's own "exit" holding the pipe open past the deadline) -- the
+      ## wrapper's real exit code is what explains a TIMED_OUT result;
+      ## showing the marker's 0 next to it read as "exit=0 class=TIMED_OUT",
+      ## true but backwards.
+      $reported_exit_code = ( $ended && $remoteExit !== null && $class !== self::TIMED_OUT )
+                           ? $remoteExit : $exit_code;
 
       ## Single-line: $cmd is the framed, multi-line wrapped command, and
       ## $stderr can hold several lines of its own (ssh banners, the
@@ -1027,31 +1109,52 @@ class remote_exec
          return false;
       }
 
-      if ( ! preg_match( '/Batch job submission failed:\s*\S/i', $stderr ) )
+      ## Only the LAST "Batch job submission failed:" line is sbatch's actual
+      ## final verdict (round 9 nit): matching these patterns anywhere in
+      ## $stderr let a stray phrase ahead of an unrelated lost-reply line
+      ## read as "rejected outright".
+      $reason = $this->lastSubmissionFailureReason( $stderr );
+
+      if ( $reason === null )
       {
          return false;
       }
 
+      ## Real Slurm 20.11 texts (round 9 nit; the previous list matched
+      ## nothing real for several of these):
       $verdicts = array(
          'Invalid partition',
-         'partition is currently not available',
-         'partition configuration (?:is )?not available',
+         'Required partition not available \(inactive or drain\)',
+         'Requested partition configuration (?:is )?not available',
          'Invalid account',
-         'Invalid time limit',
+         'Requested time limit is invalid',
          'Requested node configuration is not available',
+         'Node count specification invalid',
+         'More processors requested than permitted',
          'Invalid qos',
          'accounting[/ ]QOS policy',
       );
 
       foreach ( $verdicts as $pattern )
       {
-         if ( preg_match( '#' . $pattern . '#i', $stderr ) )
+         if ( preg_match( '#' . $pattern . '#i', $reason ) )
          {
             return true;
          }
       }
 
       return false;
+   }
+
+   /** The reason text on the LAST "Batch job submission failed:" line, or null if there is none. */
+   private function lastSubmissionFailureReason( $stderr )
+   {
+      if ( ! preg_match_all( '/Batch job submission failed:\s*(\S.*)$/mi', (string) $stderr, $m ) )
+      {
+         return null;
+      }
+
+      return end( $m[ 1 ] );
    }
 
    /**
@@ -1072,8 +1175,12 @@ class remote_exec
          return false;
       }
 
+      ## Two more end-of-loop busy verdicts (round 9 nit), alongside sbatch's
+      ## own EAGAIN give-up text.
       return (bool) preg_match(
-         '/Batch job submission failed:\s*Resource temporarily unavailable/i', $stderr );
+         '/Batch job submission failed:\s*(?:Resource temporarily unavailable'
+         . '|Unable to create job record, try again'
+         . '|Requested nodes are busy)/i', $stderr );
    }
 
    /** Authentication and host-key failures are configuration errors: retrying cannot help. */
@@ -1191,7 +1298,9 @@ class remote_exec
          if ( ! $this->muxDirectoryWarned )
          {
             $this->muxDirectoryWarned = true;
-            $this->logf( "multiplexing disabled for {$this->cluster}: no usable ssh control directory" );
+            $this->logf( $this->controlDirExplicitlyDisabled
+               ? "multiplexing disabled for {$this->cluster}: \$global_ssh_control_dir is set to ''"
+               : "multiplexing disabled for {$this->cluster}: no usable ssh control directory" );
          }
 
          return '';

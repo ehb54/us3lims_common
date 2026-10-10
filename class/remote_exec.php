@@ -178,7 +178,15 @@ class remote_exec
       ## single argument, so began/ended/exit-status detection is unchanged.
       if ( $this->is_local() )
       {
-         $cmd = $this->frame( $remote_cmd, $nonce );
+         ## frame() returns a multi-line shell script. once()'s
+         ## "$wrapped 2>$stderr_tmp" and withTimeout()'s "timeout -k 10 N
+         ## $cmd" both assume $cmd is one simple command -- run raw, only
+         ## the first line gets the timeout and the redirect lands after
+         ## the script's own final "exit", where it has no effect. Passed
+         ## through ssh this is already one argument to the remote shell;
+         ## here it has to be made one argument to the local shell the
+         ## same way (round 9 blocking fix).
+         $cmd = '/bin/sh -c ' . escapeshellarg( $this->frame( $remote_cmd, $nonce ) );
 
          $result = $this->unframe(
             $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'run', null, $nonce ),

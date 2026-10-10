@@ -207,9 +207,21 @@ class circuit_breaker
       ## change what this one believes about a cluster.
       $mine = $this->state_dir();
 
-      if ( ! is_dir( $mine ) )
+      if ( ! is_dir( $mine ) && ! @mkdir( $mine, 0700, true ) && ! is_dir( $mine ) )
       {
-         @mkdir( $mine, 0700, true );
+         ## The second is_dir() catches two processes racing the first use:
+         ## the loser's mkdir() fails with EEXIST once the winner's mkdir()
+         ## has already landed, which is success, not the permission problem
+         ## this message describes.
+         ##
+         ## Distinct from the symlink/ownership check below: this account
+         ## could not even create its own subdirectory, almost always
+         ## because $this->dir's group does not include it. The generic
+         ## "symlink or not owned" message used to fire here too, naming a
+         ## cause this account had no way to have caused.
+         $this->log( "could not create $mine under {$this->dir}, which this account"
+                     . " may lack permission to write into; breaker disabled" );
+         return $this->usable = false;
       }
 
       $euid = function_exists( 'posix_geteuid' ) ? posix_geteuid() : null;

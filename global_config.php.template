@@ -156,10 +156,18 @@ $global_cluster_status_max_age_seconds = 1800;
 $single_tenant_deployment = false;
 
 ## which cluster the literal cluster name "localhost" resolves to, for CLI
-## submission (submitone.php).  if unset, "localhost" resolves to nothing and
-## the submission is rejected.
+## submission (submitone.php), AND which cluster entry remote_exec runs
+## directly instead of over ssh (remote_exec::is_local(), round 9) -- an
+## appliance has exactly one cluster co-located with LIMS, so one variable
+## names it for both purposes.  if unset, "localhost" submissions are
+## rejected and every cluster goes over ssh, including this one.
+##
+## us3iab-node0 is the appliance's own node; set by uslims_upgrade.php on
+## upgrade, and here by default for a fresh install. Change this (or set
+## 'localhost' => true directly on another entry) if this appliance's
+## co-located node is named differently.
 
-## $default_local_cluster = 'us3iab-node0';
+$default_local_cluster = 'us3iab-node0';
 
 ## Define cluster connection details and resource limits here.
 ## Instance cluster_config.php selects which clusters may be used; loaders

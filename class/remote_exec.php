@@ -144,9 +144,26 @@ class remote_exec
 
    ## The appliance's own node: the scheduler and LIMS run on the same host,
    ## so run() below bypasses ssh for this cluster entirely (round 8).
+   ##
+   ## Also true for the cluster named by $default_local_cluster (round 9):
+   ## that variable is global_config.php's own answer to "which cluster is
+   ## this host", already set by uslims_upgrade.php and used by
+   ## submitone.php/submitctl.php to resolve the literal cluster name
+   ## "localhost" -- the per-entry 'localhost' flag is a second, easy-to-
+   ## forget place to say the same thing, and a fresh install's template
+   ## set only this one, not that flag, which left every fresh appliance
+   ## polling over ssh (round 8's scale failure, never actually fixed for
+   ## new installs). An explicit 'localhost' => true on the entry itself
+   ## still works and still wins regardless of this variable.
    public function is_local()
    {
-      return ! empty( $this->details[ 'localhost' ] );
+      if ( ! empty( $this->details[ 'localhost' ] ) )
+      {
+         return true;
+      }
+
+      return isset( $GLOBALS[ 'default_local_cluster' ] )
+             && $GLOBALS[ 'default_local_cluster' ] === $this->cluster;
    }
 
    /**

@@ -34,7 +34,7 @@ $global_max_run_time_hours   = 0;
 ## cluster_probe_outage_verdict() in gridctl explains the policy.
 $global_cluster_abandon_hours = 72;
 
-## sbatch retries (round 8: narrowed back from "any definite verdict"), when
+## sbatch retries when
 ## ssh never ran the command at all (connect failure or an open breaker) or
 ## sbatch's own final line says it never reached the controller (a pre-send
 ## connect failure, distinct from ssh's own). Every other definite verdict --
@@ -51,8 +51,8 @@ $global_cluster_abandon_hours = 72;
 $global_sbatch_submit_retries            = 3;
 $global_sbatch_submit_retry_wait_seconds = 5;
 
-## sbatch's own command timeout, longer than remote_exec's 120s default
-## (round 8): sbatch answers EAGAIN by retrying internally for up to
+## sbatch's own command timeout, longer than remote_exec's 120s default:
+## sbatch answers EAGAIN by retrying internally for up to
 ## ~120s/15 attempts before printing its own busy verdict (measured at
 ## ~121.4s), so the 120s default could kill it a fraction of a second
 ## before that verdict printed, reading as "cluster unreachable (TIMED_OUT)
@@ -76,7 +76,7 @@ $global_complete_max_seconds   = 21600;
 ## when sbatch's own final line says it never reached the controller at all.
 ## Every other definite verdict sbatch can print -- a real rejection reason,
 ## or its own busy/EAGAIN give-up -- is reported without a retry of ours
-## (round 8; see $global_sbatch_submit_retries above for why). An SSH
+## (see $global_sbatch_submit_retries above for why). An SSH
 ## failure or dropped connection after the begin marker, with no definite
 ## verdict line to go on, can mean Slurm accepted the job while its ID was
 ## lost on the way back, and retrying then would risk a duplicate, so that
@@ -111,9 +111,10 @@ $global_cluster_status_max_age_seconds = 1800;
 ## $global_circuit_breaker_dir = '/home/us3/lims/etc/circuit-breaker';
 
 ## Where submit_slurm's reused ssh/scp connections keep their control socket
-## for a submission's staging calls (the mkdir and the scp -- not sbatch
-## itself; see class/remote_exec.php's CONTROL_DIR comment for why sbatch is
-## never multiplexed). Same per-account subdirectory reasoning as the
+## for a submission's staging calls and the post-submit scontrol confirm
+## (the mkdir, the scp, and the scontrol check -- not sbatch itself; see
+## class/remote_exec.php's CONTROL_DIR comment for why sbatch is never
+## multiplexed). Same per-account subdirectory reasoning as the
 ## breaker directory above. dbutils#45 step 5 provisions this directory
 ## 3770 us3:<web group> (the sticky bit so an account's own subdirectory,
 ## once created, cannot be renamed or removed by the other account). Set to
@@ -157,7 +158,7 @@ $single_tenant_deployment = false;
 
 ## which cluster the literal cluster name "localhost" resolves to, for CLI
 ## submission (submitone.php), AND which cluster entry remote_exec runs
-## directly instead of over ssh (remote_exec::is_local(), round 9) -- an
+## directly instead of over ssh (remote_exec::is_local()) -- an
 ## appliance has exactly one cluster co-located with LIMS, so one variable
 ## names it for both purposes.  if unset, "localhost" submissions are
 ## rejected and every cluster goes over ssh, including this one.

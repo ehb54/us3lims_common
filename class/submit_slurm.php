@@ -278,7 +278,7 @@ class submit_slurm extends jobsubmit
    ## provably never started (the begin marker never came back) or when its
    ## own final line says it never reached the controller at all (a pre-send
    ## connect failure -- see remote_exec::is_scheduler_rejection()). Every
-   ## other definite verdict (round 8: an explicit rejection reason, or
+   ## other definite verdict (an explicit rejection reason, or
    ## sbatch's own busy/EAGAIN give-up) is reported without a retry of ours:
    ## sbatch itself already tried for its full internal budget before
    ## printing a busy verdict, and a real rejection reason does not change on
@@ -362,7 +362,7 @@ class submit_slurm extends jobsubmit
       ## from one call. A plain connection per attempt costs one extra
       ## connection per job and removes the window entirely.
       ##
-      ## Timeout above remote_exec's own default (round 8): sbatch answers
+      ## Timeout above remote_exec's own default: sbatch answers
       ## EAGAIN by retrying internally for up to ~120s/15 attempts before
       ## printing its own busy verdict (measured at ~121.4s). The default
       ## 120s command timeout used to kill it a fraction of a second before
@@ -701,7 +701,7 @@ class submit_slurm extends jobsubmit
 
 
    ## One remote_exec instance per cluster, reused for every call this
-   ## submit_slurm object makes to that cluster (round 8 nit): remote() used
+   ## submit_slurm object makes to that cluster: remote() used
    ## to build a fresh instance every call -- 5 per submission (login(),
    ## sbatchOnce(), ssh(), scp(), confirmSlurmJob()) -- so remote_exec's own
    ## per-instance "mux unusable"/"control directory warned" memory never

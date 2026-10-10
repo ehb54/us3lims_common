@@ -12,10 +12,20 @@ class remote_exec
    const CONNECT_TIMEOUT_SECONDS = 15;
    const COMMAND_TIMEOUT_SECONDS = 120;
    const COPY_TIMEOUT_SECONDS    = 900;
-   const TRANSPORT_RETRIES       = 3;
+   ## One retry only: the job monitor already repolls every job on a cluster
+   ## every ~30s on its own (see is_local()'s comment below), so a second
+   ## in-call retry is already covered by the next poll a few seconds later.
+   ## Blocking a web/PHP worker for up to 35s (the old 5+10+20 backoff) to
+   ## retry a call that the next poll would retry anyway bought nothing.
+   const TRANSPORT_RETRIES       = 1;
    const RETRY_WAIT_SECONDS      = 5;
    const BREAKER_FAILURES        = 3;
    const BREAKER_COOLDOWN_SECONDS = 120;
+   ## Doubles on each consecutive trip (120, 240, 480, ...) so a sustained
+   ## outage backs off instead of re-probing the controller every 120s for
+   ## its whole duration; caps so a resolved outage is still found within
+   ## one capped cooldown of it clearing.
+   const BREAKER_MAX_COOLDOWN_SECONDS = 1800;
 
    ## Use a shared path outside service-private /tmp directories.
    ## Override with $global_circuit_breaker_dir when needed.
@@ -911,7 +921,8 @@ class remote_exec
          $GLOBALS[ 'global_circuit_breaker_dir' ] ?? self::default_breaker_dir(),
          self::BREAKER_FAILURES,
          self::BREAKER_COOLDOWN_SECONDS,
-         $this->log
+         $this->log,
+         self::BREAKER_MAX_COOLDOWN_SECONDS
       );
 
       return $this->breaker;

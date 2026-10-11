@@ -103,7 +103,7 @@ class submit_slurm extends jobsubmit
     */
    public function stage_files()
    {
-      $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster   = $this->execution_cluster();
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $login     = $this->remote( $cluster )->login();
       $workdir   = $this->workdir( $cluster, $requestID );
@@ -280,7 +280,7 @@ class submit_slurm extends jobsubmit
    {
       date_default_timezone_set( "America/Chicago" );
 
-      $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster   = $this->execution_cluster();
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $workdir   = $this->workdir( $cluster, $requestID );
 
@@ -573,10 +573,19 @@ class submit_slurm extends jobsubmit
          return false;
       }
 
+      ## Only set when this job went through a metascheduler pseudo-cluster
+      ## (see pick_cluster.php / submitone.php); a direct submission to a
+      ## named cluster leaves this column NULL, as it always has.
+      $metaCluster = isset( $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] )
+                   ? $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] : null;
+
       $query = "INSERT INTO analysis SET "
              . "gfacID='$slurm_id', "
              . "autoflowAnalysisID='$autoflowID', "
              . "cluster='$cluster', "
+             . ( $metaCluster !== null
+                 ? "metaschedulerClusterExecuting='" . mysqli_real_escape_string( $gfac_link, $metaCluster ) . "', "
+                 : "" )
              . "us3_db='$dbname'";
       $result = mysqli_query( $gfac_link, $query );
       if ( ! $result ) {

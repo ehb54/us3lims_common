@@ -177,6 +177,26 @@ class jobsubmit
                continue;
            }
 
+           ## A metascheduler pool whose 'clusters' list names a key that
+           ## does not exist in $cluster_details at all (a typo, a renamed
+           ## or removed cluster) must fail loudly here rather than silently
+           ## shrinking the pool -- pick_cluster() itself only sees the
+           ## candidate list it is handed and has no way to tell "this name
+           ## was never configured anywhere" from "this real cluster just
+           ## happens to be inactive right now".
+           if ( array_key_exists( "clusters", $v ) ) {
+               foreach ( $v[ 'clusters' ] as $member ) {
+                   if ( !array_key_exists( $member, $cluster_details ) ) {
+                       $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', "
+                                 . "but no such cluster exists in \$cluster_details" );
+                       $ok = false;
+                   }
+               }
+               if ( !$ok ) {
+                   continue;
+               }
+           }
+
            ## go with entry
 
            $this->grid[ $k ] = $v;
@@ -196,6 +216,29 @@ class jobsubmit
       $this->jobfile = "";
       $this->message = array();
       $this->xmlfile = "";
+   }
+
+   ## Record the real cluster a metascheduler pseudo-cluster submission
+   ## resolved to, so update_db() can write it to gfac.analysis separately
+   ## from cluster_shortname (which stays the pseudo name). Call after
+   ## parse_input()/clear(), since clear() wipes $data. A direct submission
+   ## to a real cluster never calls this, so the field stays unset/NULL.
+   function set_metascheduler_cluster_executing( $cluster )
+   {
+      $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] = $cluster;
+   }
+
+   ## The real $this->grid[...] entry to read for every execution-time
+   ## config lookup (workdir, queue, sshport, maxtime, ppn/ppbj/maxproc,
+   ## login, ...): metaschedulerClusterExecuting when a metascheduler
+   ## pseudo-cluster has been resolved to a real one, else cluster_shortname
+   ## itself for a direct submission. cluster_shortname is still what gets
+   ## written to gfac.analysis and shown to the user -- this is only for
+   ## "which real machine do we actually run this on".
+   function execution_cluster()
+   {
+      return $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ]
+             ?? $this->data[ 'job' ][ 'cluster_shortname' ];
    }
 
    ## Request status
@@ -735,7 +778,7 @@ class jobsubmit
    ## The GA demes=1 case also updates ppbj; repeated calls are stable.
    protected function tasks_per_group_plan()
    {
-      $cluster       = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster       = $this->execution_cluster();
       $cfg           = $this->grid[ $cluster ];
       $parameters    = $this->data[ 'job' ][ 'jobParameters' ];
       $fixed         = (bool) $this->cluster_opt( $cluster, 'fixed_capacity', false );
@@ -825,7 +868,7 @@ class jobsubmit
    ## allocated ranks per group, total MPI tasks, node capacity and node count.
    public function resource_plan()
    {
-      $cluster       = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster       = $this->execution_cluster();
       $cfg           = $this->grid[ $cluster ];
       $parameters    = $this->data[ 'job' ][ 'jobParameters' ];
       $single        = (bool) $this->cluster_opt( $cluster, 'single_node', false );
@@ -912,7 +955,7 @@ class jobsubmit
       $mciters = (int)( $this->data[ 'job' ][ 'jobParameters' ][ 'mc_iterations' ] ?? 1 );
       $limit   = 32;
 
-      $cluster = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster = $this->execution_cluster();
       if ( ! $this->cluster_opt( $cluster, 'pmg', false )
            || preg_match( "/SA/", $this->data[ 'method' ] ) )
       {
@@ -936,7 +979,7 @@ class jobsubmit
    ## Return the group ceiling before applying the requested group count.
    public function max_mgroupcount()
    {
-      $cluster = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster = $this->execution_cluster();
 
       return $this->group_ceiling(
          $this->tasks_per_group_plan()[ 'desired' ],

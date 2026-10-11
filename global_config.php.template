@@ -95,7 +95,7 @@ $global_complete_max_seconds   = 21600;
 ## code uses 1800, which is what this matches.
 $global_cluster_status_max_age_seconds = 1800;
 
-## Metascheduler pick_cluster() tunables (see METASCHEDULER-DESIGN.md).
+## Metascheduler pick_cluster() tunables.
 ##
 ## queued+running at/above this on every local candidate in a pool means
 ## "local is busy enough to try national instead". 0 disables local overflow
@@ -115,6 +115,14 @@ $global_cluster_saturation_threshold = 20;
 ## finished and drained. Unset, the code uses 90, which is what this
 ## matches.
 $global_cluster_nudge_ttl_seconds = 90;
+##
+## How long, in seconds, a gfac.metascheduler_decision row is kept before an
+## opportunistic purge. That table is an audit trail, not a correctness
+## ledger like cluster_status_nudge above -- this exists only to bound its
+## growth, not to serve any decision logic, so the default is deliberately
+## long (a year) rather than tuned like the nudge TTL. 0 disables the purge
+## entirely. Unset, the code uses 31536000, which is what this matches.
+$global_metascheduler_decision_retention_seconds = 31536000;
 
 
 ## Optional breaker directory; defaults to ~us3/lims/etc/circuit-breaker.

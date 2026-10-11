@@ -171,6 +171,13 @@ $single_tenant_deployment = false;
 ##                               only national HPC entries request a walltime
 ##   wall_override        int     fixed walltime in minutes unless usemaxtime is set
 ##                               estimates and overrides are capped by maxtime
+##   prediction_cluster_name
+##                        string  identity to score the runtime advisory against,
+##                               when this entry's own name/alias does not match
+##                               one of the historical identities the model knows
+##                               (a local or renamed install's cluster names rarely
+##                               do). Unset, the advisory falls back to this
+##                               entry's own 'name', then its short alias.
 ##
 ## Independent sizing settings:
 ##   single_node         bool   require one node and maxproc <= ppn (default false)

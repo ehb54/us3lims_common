@@ -703,7 +703,13 @@ class submit_slurm extends jobsubmit
             'speedsteps'    => isset( $dataset[ 'speedsteps' ] ) ? $dataset[ 'speedsteps' ] : array(),
             'simpoints'     => isset( $dataset[ 'parameters' ][ 'simpoints' ] )
                                ? $dataset[ 'parameters' ][ 'simpoints' ] : null,
-            'edit_filename' => isset( $files[ 'edit' ] ) ? $files[ 'edit' ] : null,
+            ## is_string(): some dataset shapes carry 'edit' as an array (more
+            ## than one file), and an array reaching here unchanged becomes
+            ## the literal string "Array" downstream (a PHP Notice/Warning,
+            ## "Array to string conversion") the first time it is used in a
+            ## string context, instead of the filename this is actually for.
+            'edit_filename' => isset( $files[ 'edit' ] ) && is_string( $files[ 'edit' ] )
+                                ? $files[ 'edit' ] : null,
 
             ## The incumbent, and what is actually being emitted, recorded apart.
             'formula_reference_seconds' => (int) $wallmins * 60,
@@ -713,6 +719,16 @@ class submit_slurm extends jobsubmit
             'link'      => $link,
             'gfac_link' => $gfac,
          ) );
+
+         ## Captured before the close below: runtime_record::insert() is the
+         ## only thing that can produce 'record_error', and it always does so
+         ## against $gfac (see observe()'s own 'gfac_link' => $gfac), so this
+         ## is the connection whose error actually explains it -- an existing
+         ## pilot table missing the newer columns reads here as "Unknown
+         ## column 'prediction_cluster'" (8.2) instead of a bare status with
+         ## no way to tell a missing column from any other reason the insert
+         ## could have failed.
+         $gfacError = ( $gfac && $status === 'record_error' ) ? mysqli_error( $gfac ) : '';
 
          if ( $link )
          {
@@ -728,7 +744,8 @@ class submit_slurm extends jobsubmit
          ## input trouble is visible without querying gfac.runtime_prediction.
          if ( $status !== 'ok' )
          {
-            elog2( "runtime advisory: request $requestID status $status" );
+            elog2( "runtime advisory: request $requestID status $status"
+                 . ( $gfacError !== '' ? " ($gfacError)" : '' ) );
          }
       } catch ( Throwable $e ) {
          ## Deliberately silent beyond the log: the job is what matters here.

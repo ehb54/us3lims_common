@@ -140,9 +140,13 @@ class db_connection_pool
 
    ## ---------------------------------------------------------------- internals
 
+   ## sha256, not md5: this key never needs to be short or fast to compute --
+   ## it is only ever compared to itself as an array index -- so there is no
+   ## reason to use a weak hash merely because the input happens to include
+   ## a password.
    private function signature( $host, $user, $pass, $db )
    {
-      return md5( $host . "\0" . $user . "\0" . $pass . "\0" . $db );
+      return hash( 'sha256', $host . "\0" . $user . "\0" . $pass . "\0" . $db );
    }
 
    /** A lightweight round-trip: an idle connection can have been dropped by the

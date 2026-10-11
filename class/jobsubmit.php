@@ -223,7 +223,7 @@ class jobsubmit
    ## from cluster_shortname (which stays the pseudo name). Call after
    ## parse_input()/clear(), since clear() wipes $data. A direct submission
    ## to a real cluster never calls this, so the field stays unset/NULL.
-   function set_metascheduler_cluster_executing( $cluster )
+   public function set_metascheduler_cluster_executing( $cluster )
    {
       $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] = $cluster;
    }
@@ -235,7 +235,7 @@ class jobsubmit
    ## itself for a direct submission. cluster_shortname is still what gets
    ## written to gfac.analysis and shown to the user -- this is only for
    ## "which real machine do we actually run this on".
-   function execution_cluster()
+   public function execution_cluster()
    {
       return $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ]
              ?? $this->data[ 'job' ][ 'cluster_shortname' ];

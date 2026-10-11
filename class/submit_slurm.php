@@ -304,12 +304,17 @@ class submit_slurm extends jobsubmit
       elog2( "submit_job: slurm_job_id=$slurm_job_id confirmed after " . $submitResult[ 'attempt' ] . " attempt(s)" );
    }
 
-   ## Run sbatch via SSH and validate its result. Retried when it provably
-   ## never started (the begin marker never came back) or when it started and
-   ## the controller definitely rejected it (no job created either way). Once
-   ## it has begun and the controller's answer was merely lost, a retry could
-   ## create a duplicate of a job Slurm already accepted, so that case is left
-   ## to fail with an "outcome unknown" message instead.
+   ## Run sbatch via SSH and validate its result. Retried only when it
+   ## provably never started (the begin marker never came back) or when its
+   ## own final line says it never reached the controller at all (a pre-send
+   ## connect failure -- see remote_exec::is_scheduler_rejection()). Every
+   ## other definite verdict (an explicit rejection reason, or
+   ## sbatch's own busy/EAGAIN give-up) is reported without a retry of ours:
+   ## sbatch itself already tried for its full internal budget before
+   ## printing a busy verdict, and a real rejection reason does not change on
+   ## retry. Once it has begun and the controller's answer was merely lost,
+   ## a retry could create a duplicate of a job Slurm already accepted, so
+   ## that case is left to fail with an "outcome unknown" message instead.
    private function attemptSubmit( $cluster, $workdir )
    {
       $retries = (int) ( $this->grid[ $cluster ][ 'submit_retries' ]
@@ -325,10 +330,10 @@ class submit_slurm extends jobsubmit
             return array( 'submit_ok' => true, 'job_id' => $result[ 'job_id' ], 'error' => '', 'attempt' => $attempt );
          }
 
-         $unreachable   = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE;
-         $never_started = $unreachable && empty( $result[ 'began' ] );
-         $rejected      = $unreachable && ! empty( $result[ 'began' ] ) && ! empty( $result[ 'rejected' ] );
-         $retryable     = $never_started || $rejected;
+         $unreachable      = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE;
+         $never_started    = $unreachable && empty( $result[ 'began' ] );
+         $connect_failure  = ! empty( $result[ 'connect_failure' ] );
+         $retryable        = $never_started || $connect_failure;
 
          if ( ! $retryable || $attempt > $retries ) {
             break;
@@ -338,12 +343,26 @@ class submit_slurm extends jobsubmit
          $wait *= 2;
       }
 
-      $error = $never_started
-             ? $result[ 'error' ] . "; sbatch never started, so nothing was submitted"
-             : ( $rejected
-               ? $result[ 'error' ] . "; the controller rejected the job outright, so nothing was submitted"
-               : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
-                 . " outcome is unknown: reconcile on the cluster before resubmitting" );
+      ## Checked ahead of $never_started: a breaker-open
+      ## refusal is itself always "never started" (attempt() short-circuits
+      ## before the command runs at all), which otherwise swallows the
+      ## genuine connect failures that opened the breaker in the first
+      ## place -- the operator saw "sbatch never started" with no mention
+      ## that this cluster could not be reached, when that is exactly why.
+      $breaker_open = ! empty( $result[ 'breaker_open' ] );
+
+      $error = $breaker_open
+             ? $result[ 'error' ] . "; sbatch could not reach the controller, so nothing was submitted"
+             : ( $never_started
+               ? $result[ 'error' ] . "; sbatch never started, so nothing was submitted"
+               : ( $connect_failure
+                 ? $result[ 'error' ] . "; sbatch could not reach the controller, so nothing was submitted"
+                 : ( ! empty( $result[ 'definite_rejection' ] )
+                   ? $result[ 'error' ] . "; the controller rejected the job outright, so nothing was submitted"
+                   : ( ! empty( $result[ 'busy' ] )
+                     ? $result[ 'error' ] . "; cluster busy or queue full, so nothing was submitted"
+                     : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
+                       . " outcome is unknown: reconcile on the cluster before resubmitting" ) ) ) );
 
       return array( 'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt );
    }
@@ -364,10 +383,54 @@ class submit_slurm extends jobsubmit
 
       ## retries => 0 deliberately. Neither remote_exec nor submit_slurm may
       ## repeat this non-idempotent operation without first reconciling it.
+      ##
+      ## No 'multiplex' here, unlike staging and the scontrol confirm: an
+      ## OpenSSH mux master that dies after sending the exec request but
+      ## before replying to this client re-runs the command over a fresh
+      ## connection (mux.c's own fallback, not remote_exec's) -- for a read
+      ## like a confirm that is harmless, but for sbatch it means two jobs
+      ## from one call. A plain connection per attempt costs one extra
+      ## connection per job and removes the window entirely.
+      ##
+      ## Timeout above remote_exec's own default: sbatch answers
+      ## EAGAIN by retrying internally for up to ~120s/15 attempts before
+      ## printing its own busy verdict (measured at ~121.4s). The default
+      ## 120s command timeout used to kill it a fraction of a second before
+      ## that verdict printed, so the caller saw "cluster unreachable
+      ## (TIMED_OUT) ... outcome unknown" for a call that was about to give
+      ## a clean, definite answer. 150s leaves room for sbatch's own budget
+      ## to finish and still bounds the call.
+      ## Validated the same way remote_exec validates its own timeouts:
+      ## left unvalidated, 0 would remove the bound entirely, '2m' would
+      ## become 2 seconds via the (int) cast, and 99999 would be accepted outright.
+      $configured = $this->grid[ $cluster ][ 'sbatch_timeout_seconds' ]
+                  ?? $GLOBALS[ 'global_sbatch_timeout_seconds' ] ?? null;
+
+      if ( $configured !== null && ( ! is_int( $configured ) || $configured < 1 || $configured > 3600 ) )
+      {
+         throw new InvalidArgumentException(
+            "submit_slurm: cluster '$cluster' sbatch_timeout_seconds must be an integer from 1 through 3600" );
+      }
+
+      $timeout = $configured ?? 150;
+
+      ## Never silently shorten a cluster's own remote_exec_overrides
+      ## command_timeout_seconds exception: that is a
+      ## demonstrated timeout need for this specific login node, and
+      ## sbatch_timeout_seconds's job is only to guarantee a FLOOR high
+      ## enough for sbatch's own ~120s internal retry budget above, not to
+      ## cap a cluster that already needs more than that for every call.
+      $clusterOverride = $this->grid[ $cluster ][ 'remote_exec_overrides' ][ 'command_timeout_seconds' ] ?? null;
+
+      if ( is_int( $clusterOverride ) && $clusterOverride > $timeout )
+      {
+         $timeout = $clusterOverride;
+      }
+
       $res = $rx->run( $sbatch_cmd, [
          'retries'   => 0,
+         'timeout'   => $timeout,
          'label'     => "sbatch attempt $attempt",
-         'multiplex' => true,
       ] );
 
       $stdout_lines = $res[ 'stdout' ];
@@ -384,7 +447,12 @@ class submit_slurm extends jobsubmit
          $this->message[] = "sbatchOnce (attempt $attempt): stderr=$stderr_text";
       }
 
-      elog2( "sbatchOnce (attempt $attempt): exit=$exit_code class={$res['class']} stdout=$stdout_text stderr=$stderr_text" );
+      ## Single-line: $stdout_text/$stderr_text can each hold several lines
+      ## of real output, which otherwise breaks this one log entry across
+      ## several lines in the log file.
+      elog2( "sbatchOnce (attempt $attempt): exit=$exit_code class={$res['class']}"
+           . " stdout=" . str_replace( "\n", ' / ', $stdout_text )
+           . " stderr=" . str_replace( "\n", ' / ', $stderr_text ) );
 
       ## Require a successful command before trusting its job ID.
       if ( ! $res[ 'ok' ] ) {
@@ -394,8 +462,11 @@ class submit_slurm extends jobsubmit
                  : "sbatch exited $exit_code: $detail";
 
          return array( 'ok' => false, 'job_id' => '', 'error' => $error, 'class' => $res[ 'class' ],
-                       'began' => ! empty( $res[ 'began' ] ),
-                       'rejected' => $rx->is_scheduler_rejection( $stderr_text ) );
+                       'began'              => ! empty( $res[ 'began' ] ),
+                       'breaker_open'       => ! empty( $res[ 'breaker_open' ] ),
+                       'connect_failure'    => $rx->is_scheduler_rejection( $stderr_text ),
+                       'definite_rejection' => $rx->is_scheduler_definite_rejection( $stderr_text ),
+                       'busy'               => $rx->is_scheduler_busy( $stderr_text ) );
       }
 
       ## Parse --parsable output: "12345" or "12345;clustername"
@@ -836,22 +907,39 @@ class submit_slurm extends jobsubmit
    }
 
 
+   ## One remote_exec instance per cluster, reused for every call this
+   ## submit_slurm object makes to that cluster: remote() used
+   ## to build a fresh instance every call -- 5 per submission (login(),
+   ## sbatchOnce(), ssh(), scp(), confirmSlurmJob()) -- so remote_exec's own
+   ## per-instance "mux unusable"/"control directory warned" memory never
+   ## survived from one call to the next within the same submission, and
+   ## every multiplexed call after a denied bind()/link() paid the same
+   ## wasted connect again. isset(), not ??=, for PHP 7.2 compatibility.
+   private $rx_cache = [];
+
    /** Build the cluster transport using this object's executor. */
    protected function remote( $cluster )
    {
-      $rx = new remote_exec( $cluster, $this->grid, 'elog2' );
+      if ( ! isset( $this->rx_cache[ $cluster ] ) )
+      {
+         $rx = new remote_exec( $cluster, $this->grid, 'elog2' );
+         $rx->set_executor( function ( $cmd, &$output, &$exit_code ) {
+            $this->runExec( $cmd, $output, $exit_code );
+         } );
+         $this->rx_cache[ $cluster ] = $rx;
+      }
 
-      return $rx->set_executor( function ( $cmd, &$output, &$exit_code ) {
-         $this->runExec( $cmd, $output, $exit_code );
-      } );
+      return $this->rx_cache[ $cluster ];
    }
 
    ## Run a command on the cluster. Returns remote_exec's classified result.
    ## multiplex: true unless the caller overrides it, since this and scp()
-   ## below are the staging+sbatch calls a submission makes to the same
-   ## login one after another -- the one case the shared ssh connection is
-   ## actually meant for. Other callers (gridctl's probes, results fetch,
-   ## queue viewer) go through remote_exec directly and so never set it.
+   ## below are the staging calls (mkdir, then the copy) a submission makes
+   ## to the same login one after another -- the one case the shared ssh
+   ## connection is actually meant for. sbatch itself does not go through
+   ## this helper and deliberately does not multiplex (see sbatchOnce()).
+   ## Other callers (gridctl's probes, results fetch, queue viewer) go
+   ## through remote_exec directly and so never set it either.
    private function ssh( $cluster, $remote_cmd, $opts = [] )
    {
       $res = $this->remote( $cluster )->run( $remote_cmd, $opts + [ 'multiplex' => true ] );

@@ -2,6 +2,7 @@
 /* Submit Slurm jobs through SSH and SCP, including co-located clusters. */
 require_once $class_dir . 'jobsubmit.php';
 require_once $class_dir . 'remote_exec.php';
+require_once $class_dir . 'db_connection_pool.php';
 include_once $class_dir . 'priority.php';
 
 function elog2( $msg )
@@ -492,24 +493,29 @@ class submit_slurm extends jobsubmit
          return;
       }
 
-      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+      $link = db_connection_pool::shared()->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
       if ( ! $link ) {
          $this->message[] = "markAutoflowSubmitFailed: cannot connect to $dbhost:$dbname";
          return;
       }
 
-      $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
-      $query = "UPDATE autoflowAnalysis SET "
-             . "status='SUBMIT_TIMEOUT', "
-             . "statusMsg='Job submission failed: $qfmsg' "
-             . "WHERE requestID='$autoflowID'";
-      $result = mysqli_query( $link, $query );
-      if ( ! $result )
+      try
       {
-         $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
+         $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
+         $query = "UPDATE autoflowAnalysis SET "
+                . "status='SUBMIT_TIMEOUT', "
+                . "statusMsg='Job submission failed: $qfmsg' "
+                . "WHERE requestID='$autoflowID'";
+         $result = mysqli_query( $link, $query );
+         if ( ! $result )
+         {
+            $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
+         }
       }
-
-      mysqli_close( $link );
+      finally
+      {
+         db_connection_pool::shared()->release( $link );
+      }
    }
 
    ## Record the job in both databases and launch jobmonitor.
@@ -528,73 +534,84 @@ class submit_slurm extends jobsubmit
       $slurm_id  = $this->data[ 'eprfile' ];
       $autoflowID = ( $is_cli && $ID ) ? $ID : 0;
 
+      $pool = db_connection_pool::shared();
+
       ## Write to instance DB
-      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+      $link = $pool->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
       if ( ! $link ) {
          $this->message[] = "WARNING: job {$this->data['eprfile']}: cannot connect to $dbhost:$dbname - job is running but unrecorded";
          return false;
       }
 
-      $jobfile = mysqli_real_escape_string( $link, $this->data[ 'jobfile' ] );
-      $query = "INSERT INTO HPCAnalysisResult SET "
-             . "HPCAnalysisRequestID='$requestID', "
-             . "jobfile='$jobfile', "
-             . "gfacID='$slurm_id'";
-      $result = mysqli_query( $link, $query );
-      if ( ! $result ) {
-         $this->message[] = "WARNING: job {$this->data['eprfile']}: HPCAnalysisResult insert failed - job is running but "
-                          . "unrecorded: " . mysqli_error( $link );
-         mysqli_close( $link );
-         return false;
-      }
-
-      if ( $autoflowID > 0 ) {
-         $query = "UPDATE autoflowAnalysis SET "
-                . "currentGfacID='$slurm_id', "
-                . "currentHPCARID='$requestID', "
-                . "status='SUBMITTED', "
-                . "statusMsg='Job submitted' "
-                . "WHERE requestID='$autoflowID'";
+      try
+      {
+         $jobfile = mysqli_real_escape_string( $link, $this->data[ 'jobfile' ] );
+         $query = "INSERT INTO HPCAnalysisResult SET "
+                . "HPCAnalysisRequestID='$requestID', "
+                . "jobfile='$jobfile', "
+                . "gfacID='$slurm_id'";
          $result = mysqli_query( $link, $query );
          if ( ! $result ) {
-            $this->message[] = "WARNING: job {$this->data['eprfile']}: autoflowAnalysis update failed - the pipeline will not "
-                             . "advance: " . mysqli_error( $link );
-            $ok = false;
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: HPCAnalysisResult insert failed - job is running but "
+                             . "unrecorded: " . mysqli_error( $link );
+            return false;
+         }
+
+         if ( $autoflowID > 0 ) {
+            $query = "UPDATE autoflowAnalysis SET "
+                   . "currentGfacID='$slurm_id', "
+                   . "currentHPCARID='$requestID', "
+                   . "status='SUBMITTED', "
+                   . "statusMsg='Job submitted' "
+                   . "WHERE requestID='$autoflowID'";
+            $result = mysqli_query( $link, $query );
+            if ( ! $result ) {
+               $this->message[] = "WARNING: job {$this->data['eprfile']}: autoflowAnalysis update failed - the pipeline will not "
+                                . "advance: " . mysqli_error( $link );
+               $ok = false;
+            }
          }
       }
-
-      mysqli_close( $link );
+      finally
+      {
+         $pool->release( $link );
+      }
 
       ## Write to global gfac DB (job tracking)
-      $gfac_link = mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
+      $gfac_link = $pool->checkout( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
       if ( ! $gfac_link ) {
          $this->message[] = "WARNING: job {$this->data['eprfile']}: cannot connect to global DB $globaldbhost:$globaldbname - "
                           . "job will not be tracked";
          return false;
       }
 
-      ## Only set when this job went through a metascheduler pseudo-cluster
-      ## (see pick_cluster.php / submitone.php); a direct submission to a
-      ## named cluster leaves this column NULL, as it always has.
-      $metaCluster = isset( $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] )
-                   ? $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] : null;
+      try
+      {
+         ## Only set when this job went through a metascheduler pseudo-cluster
+         ## (see pick_cluster.php / submitone.php); a direct submission to a
+         ## named cluster leaves this column NULL, as it always has.
+         $metaCluster = isset( $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] )
+                      ? $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] : null;
 
-      $query = "INSERT INTO analysis SET "
-             . "gfacID='$slurm_id', "
-             . "autoflowAnalysisID='$autoflowID', "
-             . "cluster='$cluster', "
-             . ( $metaCluster !== null
-                 ? "metaschedulerClusterExecuting='" . mysqli_real_escape_string( $gfac_link, $metaCluster ) . "', "
-                 : "" )
-             . "us3_db='$dbname'";
-      $result = mysqli_query( $gfac_link, $query );
-      if ( ! $result ) {
-         $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "
-                          . "cleaned up: " . mysqli_error( $gfac_link );
-         $ok = false;
+         $query = "INSERT INTO analysis SET "
+                . "gfacID='$slurm_id', "
+                . "autoflowAnalysisID='$autoflowID', "
+                . "cluster='$cluster', "
+                . ( $metaCluster !== null
+                    ? "metaschedulerClusterExecuting='" . mysqli_real_escape_string( $gfac_link, $metaCluster ) . "', "
+                    : "" )
+                . "us3_db='$dbname'";
+         $result = mysqli_query( $gfac_link, $query );
+         if ( ! $result ) {
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "
+                             . "cleaned up: " . mysqli_error( $gfac_link );
+            $ok = false;
+         }
       }
-
-      mysqli_close( $gfac_link );
+      finally
+      {
+         $pool->release( $gfac_link );
+      }
 
       $this->message[] = "DB updated: requestID=$requestID slurm_id=$slurm_id";
 
@@ -707,8 +724,8 @@ class submit_slurm extends jobsubmit
          $dataset = isset( $this->data[ 'dataset' ][ 0 ] ) ? $this->data[ 'dataset' ][ 0 ] : array();
          $files   = isset( $dataset[ 'files' ] ) ? $dataset[ 'files' ] : array();
 
-         $link = @mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
-         $gfac = @mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
+         $link = db_connection_pool::shared()->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
+         $gfac = db_connection_pool::shared()->checkout( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
 
          $status = runtime_advisory::observe( array(
             'us3_db'      => $dbname,
@@ -736,15 +753,6 @@ class submit_slurm extends jobsubmit
             'gfac_link' => $gfac,
          ) );
 
-         if ( $link )
-         {
-            mysqli_close( $link );
-         }
-         if ( $gfac )
-         {
-            mysqli_close( $gfac );
-         }
-
          ## A row was still written for every one of these; this is the one
          ## place that notices when it was not 'ok', so a run of artifact or
          ## input trouble is visible without querying gfac.runtime_prediction.
@@ -755,6 +763,19 @@ class submit_slurm extends jobsubmit
       } catch ( Throwable $e ) {
          ## Deliberately silent beyond the log: the job is what matters here.
          elog2( 'runtime advisory: ' . $e->getMessage() );
+      } finally {
+         ## Pooled connections, not closed: this method runs once per job on the
+         ## same credentials submit()/update_db() already used, so releasing
+         ## back to the pool here is what lets those earlier checkouts actually
+         ## get reused instead of each opening its own connection.
+         if ( isset( $link ) )
+         {
+            db_connection_pool::shared()->release( $link );
+         }
+         if ( isset( $gfac ) )
+         {
+            db_connection_pool::shared()->release( $gfac );
+         }
       }
    }
 

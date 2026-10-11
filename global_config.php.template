@@ -130,6 +130,16 @@ $global_cluster_nudge_ttl_seconds = 90;
 
 ## $global_circuit_breaker_dir = '/home/us3/lims/etc/circuit-breaker';
 
+## Ceiling the breaker's cooldown doubles up to on consecutive trips (a trip
+## whose probe immediately fails again). Must be an int at least as large as
+## remote_exec's own BREAKER_COOLDOWN_SECONDS (120); anything else is logged
+## as invalid and treated as unset. Unset, the code uses 1800s, which is what
+## this matches: a sustained outage backs off instead of re-probing every
+## 120s for its whole duration, but a resolved one is still found within one
+## capped cooldown of it clearing.
+
+## $global_circuit_breaker_max_cooldown_seconds = 1800;
+
 ## Where submit_slurm's reused ssh/scp connections keep their control socket
 ## for a submission's staging calls and the post-submit scontrol confirm
 ## (the mkdir, the scp, and the scontrol check -- not sbatch itself; see
@@ -203,16 +213,16 @@ $global_runtime_advisory_enabled = false;
 $single_tenant_deployment = false;
 
 ## which cluster the literal cluster name "localhost" resolves to, for CLI
-## submission (submitone.php), AND which cluster entry remote_exec runs
-## directly instead of over ssh (remote_exec::is_local()) -- an
-## appliance has exactly one cluster co-located with LIMS, so one variable
-## names it for both purposes.  if unset, "localhost" submissions are
-## rejected and every cluster goes over ssh, including this one.
+## submission (submitone.php). if unset, "localhost" submissions are
+## rejected.
 ##
-## us3iab-node0 is the appliance's own node; set by uslims_upgrade.php on
-## upgrade, and here by default for a fresh install. Change this (or set
-## 'localhost' => true directly on another entry) if this appliance's
-## co-located node is named differently.
+## This does NOT decide which cluster entry remote_exec runs directly
+## instead of over ssh -- that is decided only by 'localhost' => true on
+## the entry itself (remote_exec::is_local()), set below on us3iab-node0.
+## Keep this variable naming whichever entry carries that flag: it's the
+## appliance's own node, set by uslims_upgrade.php on upgrade, and here by
+## default for a fresh install. Renaming the appliance's node means
+## changing both the flag's entry and this variable, not just this one.
 
 $default_local_cluster = 'us3iab-node0';
 
@@ -526,6 +536,7 @@ $cluster_details =
          'active'              => true
          ,'name'               => 'us3iab-node0.localhost'
          ,'login'              => 'us3@us3iab-node0'
+         ,'localhost'          => true
          ,'ssh_host_key_policy' => 'yes'
          ,'fixed_capacity'     => true
          ,'workdir'            => '/home/us3/lims/work/'

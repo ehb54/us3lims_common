@@ -95,6 +95,27 @@ $global_complete_max_seconds   = 21600;
 ## code uses 1800, which is what this matches.
 $global_cluster_status_max_age_seconds = 1800;
 
+## Metascheduler pick_cluster() tunables (see METASCHEDULER-DESIGN.md).
+##
+## queued+running at/above this on every local candidate in a pool means
+## "local is busy enough to try national instead". 0 disables local overflow
+## entirely (every job goes national), which is never the intended default;
+## a deployment that wants that should say so explicitly. Unset, the code
+## uses 20, which is what this matches.
+$global_cluster_saturation_threshold = 20;
+##
+## How long, in seconds, a pick_cluster_reserve() load nudge (gfac.
+## cluster_status_nudge) counts toward a candidate's load after being
+## written, before pick_cluster_status_snapshot() stops counting it. Long
+## enough to bridge a burst of decisions made moments apart -- the nudge's
+## only job -- short enough that it never stands in for a real probe
+## (cluster_status.php runs every 12 minutes by default) for long: set this
+## too high and a large burst can read as "every candidate saturated" for
+## real jobs submitted well after the burst that caused it has already
+## finished and drained. Unset, the code uses 90, which is what this
+## matches.
+$global_cluster_nudge_ttl_seconds = 90;
+
 
 ## Optional breaker directory; defaults to ~us3/lims/etc/circuit-breaker.
 ## Provision it as 2770 us3:<web group> so both the web tier and the us3 daemons

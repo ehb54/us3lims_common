@@ -675,9 +675,20 @@ class submit_slurm extends jobsubmit
    {
       $details = isset( $this->grid[ $cluster ] ) ? $this->grid[ $cluster ] : array();
 
-      if ( isset( $details[ 'prediction_cluster_name' ] ) && $details[ 'prediction_cluster_name' ] !== '' )
+      ## is_string(): round 10 fixed this same "Array" conversion for
+      ## 'edit_filename' (a dataset file list that can genuinely be an
+      ## array), but missed that prediction_cluster_name -- an admin-set
+      ## cluster_details value, not user input -- has the identical
+      ## failure mode if it is ever mistakenly configured as one. (string)
+      ## alone does not protect against that: casting an array to string
+      ## produces the literal string "Array" (PHP Notice/Warning), not a
+      ## usable identity. Falls through to the next tier below instead,
+      ## same as the key simply being unset or empty.
+      if ( isset( $details[ 'prediction_cluster_name' ] )
+         && is_string( $details[ 'prediction_cluster_name' ] )
+         && $details[ 'prediction_cluster_name' ] !== '' )
       {
-         return array( 'identity' => (string) $details[ 'prediction_cluster_name' ], 'source' => 'configured' );
+         return array( 'identity' => $details[ 'prediction_cluster_name' ], 'source' => 'configured' );
       }
 
       if ( isset( $details[ 'name' ] ) && $details[ 'name' ] !== '' )

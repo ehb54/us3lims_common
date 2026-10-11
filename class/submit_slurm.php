@@ -344,7 +344,7 @@ class submit_slurm extends jobsubmit
          $wait *= 2;
       }
 
-      ## Checked ahead of $never_started (round 9 nit): a breaker-open
+      ## Checked ahead of $never_started: a breaker-open
       ## refusal is itself always "never started" (attempt() short-circuits
       ## before the command runs at all), which otherwise swallows the
       ## genuine connect failures that opened the breaker in the first
@@ -393,7 +393,7 @@ class submit_slurm extends jobsubmit
       ## from one call. A plain connection per attempt costs one extra
       ## connection per job and removes the window entirely.
       ##
-      ## Timeout above remote_exec's own default (round 8): sbatch answers
+      ## Timeout above remote_exec's own default: sbatch answers
       ## EAGAIN by retrying internally for up to ~120s/15 attempts before
       ## printing its own busy verdict (measured at ~121.4s). The default
       ## 120s command timeout used to kill it a fraction of a second before
@@ -401,9 +401,9 @@ class submit_slurm extends jobsubmit
       ## (TIMED_OUT) ... outcome unknown" for a call that was about to give
       ## a clean, definite answer. 150s leaves room for sbatch's own budget
       ## to finish and still bounds the call.
-      ## Validated the same way remote_exec validates its own timeouts
-      ## (round 9 nit): unvalidated, 0 removed the bound entirely, '2m'
-      ## became 2 seconds via the (int) cast, and 99999 was accepted outright.
+      ## Validated the same way remote_exec validates its own timeouts:
+      ## left unvalidated, 0 would remove the bound entirely, '2m' would
+      ## become 2 seconds via the (int) cast, and 99999 would be accepted outright.
       $configured = $this->grid[ $cluster ][ 'sbatch_timeout_seconds' ]
                   ?? $GLOBALS[ 'global_sbatch_timeout_seconds' ] ?? null;
 
@@ -416,7 +416,7 @@ class submit_slurm extends jobsubmit
       $timeout = $configured ?? 150;
 
       ## Never silently shorten a cluster's own remote_exec_overrides
-      ## command_timeout_seconds exception (round 9 nit): that is a
+      ## command_timeout_seconds exception: that is a
       ## demonstrated timeout need for this specific login node, and
       ## sbatch_timeout_seconds's job is only to guarantee a FLOOR high
       ## enough for sbatch's own ~120s internal retry budget above, not to
@@ -674,6 +674,58 @@ class submit_slurm extends jobsubmit
    }
 
    /**
+    * Which cluster identity the model's frozen mapping should be asked
+    * about, kept separate from where the job actually went.
+    *
+    * WHY SEPARATE. The destination is whatever this install calls the
+    * cluster it submits to -- 'us3iab-node0' for a co-located appliance
+    * cluster, say. The model was fitted against the historical identities
+    * runtime_cluster_map.php knows (real site hostnames), which a local or
+    * renamed entry will almost never match. Without a way to tell the
+    * advisory "score this as if it went to X", every submission from an
+    * install whose cluster names don't happen to match one of those reads
+    * 'unsupported' forever, regardless of whether the model could otherwise
+    * have scored it.
+    *
+    * One shared resolution for every family: this runs once per submission,
+    * before the family is even known, and feeds the same identity into
+    * whichever family's model ends up being asked.
+    *
+    * @return array{identity: string, source: string} source is 'configured'
+    *         when the entry sets prediction_cluster_name, 'fallback_name'
+    *         when it falls back to the entry's own name (this call's
+    *         previous and only behavior), or 'fallback_alias' when even
+    *         that is missing and the cluster's short name is used as-is.
+    */
+   protected function resolvePredictionClusterIdentity( $cluster )
+   {
+      $details = isset( $this->grid[ $cluster ] ) ? $this->grid[ $cluster ] : array();
+
+      ## is_string(): round 10 fixed this same "Array" conversion for
+      ## 'edit_filename' (a dataset file list that can genuinely be an
+      ## array), but missed that prediction_cluster_name -- an admin-set
+      ## cluster_details value, not user input -- has the identical
+      ## failure mode if it is ever mistakenly configured as one. (string)
+      ## alone does not protect against that: casting an array to string
+      ## produces the literal string "Array" (PHP Notice/Warning), not a
+      ## usable identity. Falls through to the next tier below instead,
+      ## same as the key simply being unset or empty.
+      if ( isset( $details[ 'prediction_cluster_name' ] )
+         && is_string( $details[ 'prediction_cluster_name' ] )
+         && $details[ 'prediction_cluster_name' ] !== '' )
+      {
+         return array( 'identity' => $details[ 'prediction_cluster_name' ], 'source' => 'configured' );
+      }
+
+      if ( isset( $details[ 'name' ] ) && $details[ 'name' ] !== '' )
+      {
+         return array( 'identity' => (string) $details[ 'name' ], 'source' => 'fallback_name' );
+      }
+
+      return array( 'identity' => (string) $cluster, 'source' => 'fallback_alias' );
+   }
+
+   /**
     * Hand the advisory path what it needs and forget about it.
     *
     * Called from submit(), not write_slurm_script(): the job id now exists,
@@ -712,8 +764,19 @@ class submit_slurm extends jobsubmit
             ## into the advisory would think to check. Covers both this file
             ## being missing and one of its own siblings being missing or
             ## broken (runtime_advisory.php degrades the same way for that).
-            elog2( "runtime advisory: request $requestID: class not available"
-                 . " after loading prediction/runtime_advisory.php; advisory skipped" );
+            ##
+            ## Once per process, not once per job: a missing/broken install
+            ## stays missing/broken for the life of the process, so logging
+            ## this on every submission just repeats the same line once per
+            ## job, forever, until someone fixes the install.
+            static $warned = false;
+            if ( ! $warned )
+            {
+               $warned = true;
+               elog2( "runtime advisory: request $requestID: class not available"
+                    . " after loading prediction/runtime_advisory.php; advisory skipped"
+                    . " for the rest of this process" );
+            }
             return;
          }
 
@@ -727,22 +790,34 @@ class submit_slurm extends jobsubmit
          $link = db_connection_pool::shared()->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
          $gfac = db_connection_pool::shared()->checkout( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
 
+         $predictionIdentity = $this->resolvePredictionClusterIdentity( $cluster );
+
          $status = runtime_advisory::observe( array(
             'us3_db'      => $dbname,
             'request_id'  => $requestID,
             ## Checked against the artifact's family: another method's request
             ## can carry enough of the same parameter names to be scored.
             'method'      => isset( $this->data[ 'method' ] ) ? $this->data[ 'method' ] : '',
-            ## The entry's name, which is what the request records and what the
-            ## model's frozen mapping is keyed on.
+            ## The entry's name, which is what the request actually went to.
             'destination' => isset( $this->grid[ $cluster ][ 'name' ] )
                              ? $this->grid[ $cluster ][ 'name' ] : $cluster,
+            ## The identity the model's frozen mapping is keyed on -- not
+            ## always the same as the destination above (see
+            ## resolvePredictionClusterIdentity()).
+            'prediction_cluster'        => $predictionIdentity[ 'identity' ],
+            'prediction_cluster_source' => $predictionIdentity[ 'source' ],
 
             'parameters'    => isset( $job[ 'jobParameters' ] ) ? $job[ 'jobParameters' ] : array(),
             'speedsteps'    => isset( $dataset[ 'speedsteps' ] ) ? $dataset[ 'speedsteps' ] : array(),
             'simpoints'     => isset( $dataset[ 'parameters' ][ 'simpoints' ] )
                                ? $dataset[ 'parameters' ][ 'simpoints' ] : null,
-            'edit_filename' => isset( $files[ 'edit' ] ) ? $files[ 'edit' ] : null,
+            ## is_string(): some dataset shapes carry 'edit' as an array (more
+            ## than one file), and an array reaching here unchanged becomes
+            ## the literal string "Array" downstream (a PHP Notice/Warning,
+            ## "Array to string conversion") the first time it is used in a
+            ## string context, instead of the filename this is actually for.
+            'edit_filename' => isset( $files[ 'edit' ] ) && is_string( $files[ 'edit' ] )
+                                ? $files[ 'edit' ] : null,
 
             ## The incumbent, and what is actually being emitted, recorded apart.
             'formula_reference_seconds' => (int) $wallmins * 60,
@@ -753,12 +828,32 @@ class submit_slurm extends jobsubmit
             'gfac_link' => $gfac,
          ) );
 
+         ## Captured before the close below: runtime_record::insert() is the
+         ## only thing that can produce 'record_error', and it always does so
+         ## against $gfac (see observe()'s own 'gfac_link' => $gfac), so this
+         ## is the connection whose error actually explains it -- an existing
+         ## pilot table missing the newer columns reads here as "Unknown
+         ## column 'prediction_cluster'" (8.2) instead of a bare status with
+         ## no way to tell a missing column from any other reason the insert
+         ## could have failed.
+         $gfacError = ( $gfac && $status === 'record_error' ) ? mysqli_error( $gfac ) : '';
+
+         if ( $link )
+         {
+            mysqli_close( $link );
+         }
+         if ( $gfac )
+         {
+            mysqli_close( $gfac );
+         }
+
          ## A row was still written for every one of these; this is the one
          ## place that notices when it was not 'ok', so a run of artifact or
          ## input trouble is visible without querying gfac.runtime_prediction.
          if ( $status !== 'ok' )
          {
-            elog2( "runtime advisory: request $requestID status $status" );
+            elog2( "runtime advisory: request $requestID status $status"
+                 . ( $gfacError !== '' ? " ($gfacError)" : '' ) );
          }
       } catch ( Throwable $e ) {
          ## Deliberately silent beyond the log: the job is what matters here.
@@ -863,7 +958,7 @@ class submit_slurm extends jobsubmit
 
 
    ## One remote_exec instance per cluster, reused for every call this
-   ## submit_slurm object makes to that cluster (round 8 nit): remote() used
+   ## submit_slurm object makes to that cluster: remote() used
    ## to build a fresh instance every call -- 5 per submission (login(),
    ## sbatchOnce(), ssh(), scp(), confirmSlurmJob()) -- so remote_exec's own
    ## per-instance "mux unusable"/"control directory warned" memory never

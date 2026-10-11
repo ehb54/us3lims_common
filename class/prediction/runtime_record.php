@@ -40,6 +40,7 @@ class runtime_record
     * Compose the record.
     *
     * @param array $context us3_db, request_id, gfac_id, family, destination,
+    *                       prediction_cluster, prediction_cluster_source,
     *                       formula_reference_seconds, formula_version,
     *                       emitted_directive, requested_ranks, artifact_sha256,
     *                       evaluate_us, decided_at
@@ -67,6 +68,15 @@ class runtime_record
 
          'family'      => self::text( isset( $context[ 'family' ] ) ? $context[ 'family' ] : '', 16 ),
          'destination' => self::text( isset( $context[ 'destination' ] ) ? $context[ 'destination' ] : '', 80 ),
+
+         ## The identity actually scored against the cluster map, and why: a
+         ## local/renamed destination routinely differs from the identity the
+         ## model recognizes (see submit_slurm::resolvePredictionClusterIdentity()).
+         ## Null source means a caller on the old contract set destination only.
+         'prediction_cluster'        => isset( $context[ 'prediction_cluster' ] )
+                                         ? self::text( $context[ 'prediction_cluster' ], 80 ) : null,
+         'prediction_cluster_source' => isset( $context[ 'prediction_cluster_source' ] )
+                                         ? self::text( $context[ 'prediction_cluster_source' ], 16 ) : null,
 
          ## Only when there is a vector: a failed extraction has no inputs to keep.
          'features'    => $ok && isset( $built[ 'features' ] ) ? self::features_json( $built[ 'features' ] ) : null,

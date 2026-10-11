@@ -47,6 +47,37 @@ Nothing else is required. Paths are only configured where a host keeps the
 files elsewhere, with `$global_runtime_advisory_artifact` as an array keyed by
 family.
 
+### When this host's cluster name isn't one the model recognizes
+
+The model's cluster input is keyed on the historical identities in
+`runtime_cluster_map.php` (real site hostnames). A co-located or renamed
+cluster entry -- `us3iab-node0` on an appliance, a dev stack's own name --
+almost never matches one of those, so every submission to it reads
+`unsupported` by default, regardless of whether the model could otherwise
+have scored it.
+
+Set `prediction_cluster_name` on that cluster's entry in `$cluster_details`
+to tell the advisory which identity to score the request as, without
+changing where or how the job is actually submitted:
+
+    $cluster_details['us3iab-node0']['prediction_cluster_name']
+        = 'demeler9.uleth.ca';
+
+This affects only the prediction: the submission destination, SSH target,
+queue, Slurm directives and walltime are all unchanged, and every record
+keeps both the real destination and the identity actually scored (and
+whether it came from this setting or from the entry's own name), so the two
+are never confused in the data. An identity that is unknown, or that this
+host's installed model has no indicator for, still records `unsupported` --
+this setting does not make every request scoreable, only the ones that can
+legitimately be regarded as going to a cluster the model knows.
+
+On a validation VM, a deliberately supported identity exercises a real
+`ok` prediction end to end so the pipeline itself is tested. That is a test
+mapping, not a demonstration of prediction accuracy on VM hardware, and it
+should say so wherever it is documented. A production mapping should name
+the identity that actually represents the hardware a job runs on.
+
 ## Turning it off
 
 Set `$global_runtime_advisory_enabled = false;`. With it off a submission reads

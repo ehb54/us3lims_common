@@ -12,28 +12,40 @@ class remote_exec
    const CONNECT_TIMEOUT_SECONDS = 15;
    const COMMAND_TIMEOUT_SECONDS = 120;
    const COPY_TIMEOUT_SECONDS    = 900;
-   const TRANSPORT_RETRIES       = 3;
+   ## One retry only: the job monitor already repolls every job on a cluster
+   ## every ~30s on its own (see is_local()'s comment below), so a second
+   ## in-call retry is already covered by the next poll a few seconds later.
+   ## Blocking a web/PHP worker for up to 35s (the old 5+10+20 backoff) to
+   ## retry a call that the next poll would retry anyway bought nothing.
+   const TRANSPORT_RETRIES       = 1;
    const RETRY_WAIT_SECONDS      = 5;
    const BREAKER_FAILURES        = 3;
    const BREAKER_COOLDOWN_SECONDS = 120;
+   ## Doubles on each consecutive trip (120, 240, 480, ...) so a sustained
+   ## outage backs off instead of re-probing the controller every 120s for
+   ## its whole duration; caps so a resolved outage is still found within
+   ## one capped cooldown of it clearing.
+   const BREAKER_MAX_COOLDOWN_SECONDS = 1800;
 
    ## Use a shared path outside service-private /tmp directories.
    ## Override with $global_circuit_breaker_dir when needed.
    ## Under ~us3/lims/etc (see breaker()); /var/tmp is split by PrivateTmp and aged out.
    const BREAKER_DIR = '/home/us3/lims/etc/circuit-breaker';
 
-   ## A submission makes three separate connections to the cluster login
-   ## (one mkdir, one scp, one sbatch); the ssh-launched monitor is a fourth
-   ## ssh call but to the LIMS host, not the cluster, so it never shares this
-   ## socket either. Each of the three paid full TCP+auth separately,
-   ## measured at ~2.7s/job. An SSH ControlMaster socket, left open for a
-   ## short while after the first connection, lets mkdir and scp reuse it.
+   ## A submission makes four separate connections to the cluster login
+   ## (one mkdir, one scp, one sbatch, one scontrol to confirm the job
+   ## landed); the ssh-launched monitor is a fifth ssh call but to the LIMS
+   ## host, not the cluster, so it never shares this socket either. Each of
+   ## the four paid full TCP+auth separately, measured at ~2.7s/job. An SSH
+   ## ControlMaster socket, left open for a short while after the first
+   ## connection, lets mkdir, scp, and the scontrol confirm all reuse it.
    ## sbatch itself (submit_slurm::sbatchOnce()) deliberately does not: an
    ## OpenSSH mux master that dies after sending the exec request but
    ## before relaying the reply makes its own client fall back to a fresh
    ## connection and re-run the command (mux.c, not this class), which for
-   ## a read like mkdir or scp is harmless but for sbatch means two jobs
-   ## from one call. Same PrivateTmp reasoning as the breaker directory: a
+   ## a read like mkdir, scp, or the scontrol confirm is harmless but for
+   ## sbatch means two jobs from one call. Same PrivateTmp reasoning as the
+   ## breaker directory: a
    ## service-private /tmp would make the socket invisible to the next call
    ## if it runs as a different unit, so this lives beside the breaker, not
    ## under /tmp. Override with $global_ssh_control_dir when needed.
@@ -92,7 +104,7 @@ class remote_exec
    private $muxDirectoryWarned = false;
 
    ## Set by the controlPath() call just made; read immediately after by
-   ## multiplexOpts() to choose the right log wording (round 9 nit).
+   ## multiplexOpts() to choose the right log wording.
    private $controlDirExplicitlyDisabled = false;
 
    ## Resolved lazily by timeout_bin(); '' means "not available on this host".
@@ -147,18 +159,22 @@ class remote_exec
    }
 
    ## The appliance's own node: the scheduler and LIMS run on the same host,
-   ## so run() below bypasses ssh for this cluster entirely (round 8).
+   ## so run() below bypasses ssh for this cluster entirely.
    ##
-   ## Also true for the cluster named by $default_local_cluster (round 9):
+   ## Also true for the cluster named by $default_local_cluster, PROVIDED
+   ## its own login host actually matches this machine (runsOnThisHost()):
    ## that variable is global_config.php's own answer to "which cluster is
    ## this host", already set by uslims_upgrade.php and used by
    ## submitone.php/submitctl.php to resolve the literal cluster name
    ## "localhost" -- the per-entry 'localhost' flag is a second, easy-to-
    ## forget place to say the same thing, and a fresh install's template
    ## set only this one, not that flag, which left every fresh appliance
-   ## polling over ssh (round 8's scale failure, never actually fixed for
-   ## new installs). An explicit 'localhost' => true on the entry itself
-   ## still works and still wins regardless of this variable.
+   ## polling over ssh at scale. But the name match alone is just "this is what CLI
+   ## 'localhost' resolves to", not a claim about where the entry actually
+   ## is -- pointed at a genuinely remote cluster, it was taken as local
+   ## regardless. An explicit 'localhost' => true on the entry itself is a
+   ## direct assertion instead, trusted without this extra check, and still
+   ## wins regardless of this variable.
    ##
    ## Marked local is not enough by itself: mkdir/scp still address
    ## us3@<self>, and the monitor it hands jobs to always runs as us3
@@ -173,14 +189,72 @@ class remote_exec
    ## correctness.
    public function is_local()
    {
-      if ( empty( $this->details[ 'localhost' ] )
-         && ( ! isset( $GLOBALS[ 'default_local_cluster' ] )
-            || $GLOBALS[ 'default_local_cluster' ] !== $this->cluster ) )
+      ## An explicit, present 'localhost' key is the admin directly saying
+      ## yes or no -- true is trusted as-is, no further host check; false
+      ## opts this entry out even when $default_local_cluster happens to
+      ## name it too, instead of (as before) being indistinguishable from
+      ## the key simply being absent.
+      if ( isset( $this->details[ 'localhost' ] ) )
       {
-         return false;
+         if ( ! $this->details[ 'localhost' ] )
+         {
+            $this->logf( "explicit 'localhost' => false; using ssh" );
+            return false;
+         }
+
+         return $this->runsAsLoginUser();
       }
 
-      return $this->runsAsLoginUser();
+      ## $default_local_cluster matching $this->cluster is a weaker signal:
+      ## it only says "this is the name CLI 'localhost' submissions resolve
+      ## to", not that the entry is actually on this machine. Pointed at a
+      ## remote cluster whose login happens to use the same account name as
+      ## this host runs as (e.g. 'us3'), runsAsLoginUser() alone could not
+      ## tell the difference -- mkdir/sbatch ran locally against a cluster
+      ## with no Slurm installed, and the job was held forever.
+      ## runsOnThisHost() closes that: the shortcut is now
+      ## only taken when the entry's own login host actually matches this
+      ## machine's hostname, not just its account name.
+      if ( isset( $GLOBALS[ 'default_local_cluster' ] )
+         && $GLOBALS[ 'default_local_cluster' ] === $this->cluster )
+      {
+         if ( ! $this->runsOnThisHost() )
+         {
+            $this->logf( "default_local_cluster names this cluster, but its login host"
+               . " does not match this machine; using ssh" );
+            return false;
+         }
+
+         return $this->runsAsLoginUser();
+      }
+
+      return false;
+   }
+
+   /** Whether this entry's login host is actually this machine, not just a same-named account elsewhere. */
+   private function runsOnThisHost()
+   {
+      $login = $this->login();
+      $at = strpos( $login, '@' );
+      $loginHost = $at !== false ? substr( $login, $at + 1 ) : '';
+
+      $here = $this->currentHostName();
+
+      return $loginHost !== '' && $here !== '' && strcasecmp( $loginHost, $here ) === 0;
+   }
+
+   ## Seam: the test double scripts this instead of reading the real host
+   ## identity, the same way currentAccountName() is overridden.
+   protected function currentHostName()
+   {
+      if ( ! function_exists( 'gethostname' ) )
+      {
+         return '';
+      }
+
+      $name = gethostname();
+
+      return is_string( $name ) ? $name : '';
    }
 
    /** Whether this process's own account is the one the local exec() would run as. */
@@ -232,7 +306,7 @@ class remote_exec
 
       ## A cluster entry marked 'localhost' (the appliance's own node, where
       ## LIMS and the scheduler run on the same host) is run directly, with
-      ## no ssh at all (round 8 blocking fix): an ssh login per poll scales
+      ## no ssh at all: an ssh login per poll scales
       ## far worse than a local command does, and a per-job monitor polls
       ## every job on its cluster this way every ~30s. On a loaded host that
       ## is thousands of logins a minute, and sshd's own default
@@ -250,8 +324,16 @@ class remote_exec
          ## the script's own final "exit", where it has no effect. Passed
          ## through ssh this is already one argument to the remote shell;
          ## here it has to be made one argument to the local shell the
-         ## same way (round 9 blocking fix).
-         $cmd = '/bin/sh -c ' . escapeshellarg( $this->frame( $remote_cmd, $nonce ) );
+         ## same way.
+         ##
+         ## < /dev/null: ssh's own options always pass '-n', so a remote
+         ## command that reads stdin gets none and fails/returns at once.
+         ## Without this, the local branch instead inherits PHP's own real
+         ## stdin -- a web server's, or a CLI caller's terminal/pipe -- so
+         ## the same command blocks reading it until the wall-clock timeout
+         ## fires locally, where the remote path would have ended
+         ## immediately.
+         $cmd = '/bin/sh -c ' . escapeshellarg( $this->frame( $remote_cmd, $nonce ) ) . ' < /dev/null';
 
          $result = $this->unframe(
             $this->attempt( $cmd, $timeout, $opts, isset( $opts['label'] ) ? $opts['label'] : 'run', null, $nonce ),
@@ -346,7 +428,7 @@ class remote_exec
       $result[ 'began' ] = true;
 
       ## Anchored at the end of the line, and the LAST such line, not the
-      ## first match found scanning forward (round 8 nit): our own real
+      ## first match found scanning forward: our own real
       ## marker is always the last line frame() can produce, so taking the
       ## last match is never wrong, while the first-match-anywhere approach
       ## could in principle be fooled by a remote command that happens to
@@ -355,7 +437,7 @@ class remote_exec
       ## matching the marker text anywhere in the line, also stops a
       ## marker-looking substring followed by real trailing output on the
       ## same line from truncating that output.
-      ## \s*$ (round 9 nit, regressed from round 8): a trailing \r (CRLF
+      ## \s*$: a trailing \r (CRLF
       ## output), trailing blanks, or both after the digits must still match.
       $endPattern = '/^(.*)' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':\d+\s*$/D';
       $last = null;
@@ -454,7 +536,7 @@ class remote_exec
     * the breaker as a failure; never records a success, since bare ssh
     * reachability says nothing about the controller behind it.
     *
-    * For a local cluster (round 9 nit, not yet resolved): '/bin/true' run
+    * For a local cluster (not yet resolved): '/bin/true' run
     * directly has no network hop to fail at all, so outage_timeout_verdict()
     * (job_state_machine.php), which reads this to decide whether a stall is
     * the cluster's own fault, always sees "reachable" and never defers --
@@ -698,7 +780,7 @@ class remote_exec
       $explicitOverride = array_key_exists( 'global_ssh_control_dir', $GLOBALS );
       $dir = $explicitOverride ? $GLOBALS[ 'global_ssh_control_dir' ] : self::default_control_dir();
 
-      ## Remembered for multiplexOpts()'s log line (round 9 nit): an admin
+      ## Remembered for multiplexOpts()'s log line: an admin
       ## who sets $global_ssh_control_dir = '' to turn multiplexing off on
       ## purpose was logged the same "no usable ssh control directory" text
       ## as a real failure to find or create one.
@@ -719,7 +801,7 @@ class remote_exec
       ## once. Checked before the mkdir below, not after: a value this
       ## check is about to refuse should not get a directory created for it
       ## on disk first.
-      ## 'D' modifier (round 8): without it, PCRE's '$' matches before a
+      ## 'D' modifier: without it, PCRE's '$' matches before a
       ## trailing "\n" too, not only at the true end of the string, so a
       ## configured value with a trailing newline passed this check, got a
       ## directory created for it, and then every multiplexed call exited
@@ -839,7 +921,8 @@ class remote_exec
          $GLOBALS[ 'global_circuit_breaker_dir' ] ?? self::default_breaker_dir(),
          self::BREAKER_FAILURES,
          self::BREAKER_COOLDOWN_SECONDS,
-         $this->log
+         $this->log,
+         self::BREAKER_MAX_COOLDOWN_SECONDS
       );
 
       return $this->breaker;
@@ -900,11 +983,11 @@ class remote_exec
       $remoteExit = null;
 
       ## Anchored at the end of each line ('m'), and the LAST match, not the
-      ## first (round 8 nit): matches unframe()'s own marker test, for the
+      ## first: matches unframe()'s own marker test, for the
       ## same reason -- our real marker is always the last one frame() can
       ## produce, and anchoring at end-of-line stops a marker-looking
       ## substring followed by real trailing text from being mistaken for it.
-      ## \s*$ (round 9 nit, regressed from round 8): a trailing \r (CRLF
+      ## \s*$: a trailing \r (CRLF
       ## output), trailing blanks, or both after the digits must still match.
       if ( $nonce !== null
          && preg_match_all( '/^.*' . preg_quote( self::FRAME_END . $nonce, '/' ) . ':(\d+)\s*$/m', $joined, $m ) )
@@ -915,7 +998,7 @@ class remote_exec
 
       $class = $this->classify( $exit_code, $stderr, strpos( $cmd, '/usr/bin/scp' ) === 0, $ended, $remoteExit );
 
-      ## Report the marker's own status when it is known (round 8 nit):
+      ## Report the marker's own status when it is known:
       ## otherwise a caller reading 'exit_code' still sees ssh's wrapper
       ## code, which can read "exit=255 class=OK" (connection dropped after
       ## a successful command printed its marker) or "sbatch exited 255:
@@ -923,7 +1006,7 @@ class remote_exec
       ## both true but confusing side by side, since classify() already
       ## decided to trust the marker over ssh's own code.
       ##
-      ## Not when classify() called it TIMED_OUT, though (round 9 nit): that
+      ## Not when classify() called it TIMED_OUT, though: that
       ## always comes from timeout(1)'s own 124/137, which classify() trusts
       ## over the marker unconditionally (the end marker can arrive and the
       ## wrapper can still be killed, e.g. something downstream of the
@@ -1120,7 +1203,8 @@ class remote_exec
          return false;
       }
 
-      ## Real Slurm 20.11 texts:
+      ## Real Slurm 20.11 texts (the previous list matched
+      ## nothing real for several of these):
       $verdicts = array(
          'Invalid partition',
          'Required partition not available \(inactive or drain\)',
@@ -1174,12 +1258,25 @@ class remote_exec
          return false;
       }
 
-      ## Two more end-of-loop busy verdicts, alongside sbatch's own EAGAIN
-      ## give-up text.
+      ## Only the LAST "Batch job submission failed:" line is sbatch's
+      ## actual final verdict, same reasoning as
+      ## is_scheduler_definite_rejection(): a banner line containing one of
+      ## these phrases, followed by a real reset/retry line, must not read
+      ## as "busy" just because the phrase appears somewhere earlier in
+      ## $stderr.
+      $reason = $this->lastSubmissionFailureReason( $stderr );
+
+      if ( $reason === null )
+      {
+         return false;
+      }
+
+      ## Two more end-of-loop busy verdicts, alongside sbatch's
+      ## own EAGAIN give-up text.
       return (bool) preg_match(
-         '/Batch job submission failed:\s*(?:Resource temporarily unavailable'
+         '/^(?:Resource temporarily unavailable'
          . '|Unable to create job record, try again'
-         . '|Requested nodes are busy)/i', $stderr );
+         . '|Requested nodes are busy)/i', $reason );
    }
 
    /** Authentication and host-key failures are configuration errors: retrying cannot help. */

@@ -1,0 +1,882 @@
+<?php
+/* Submit Slurm jobs through SSH and SCP, including co-located clusters. */
+require_once $class_dir . 'jobsubmit.php';
+require_once $class_dir . 'remote_exec.php';
+include_once $class_dir . 'priority.php';
+
+function elog2( $msg )
+{
+   ## Path comes from $elog2_path in global_config.php.
+   global $elog2_path;
+   $path = isset( $elog2_path ) ? $elog2_path : '/home/us3/lims/etc/elog2.txt';
+   error_log( "$msg\n", 3, $path );
+}
+
+elog2( "submit_slurm start" );
+
+class submit_slurm extends jobsubmit
+{
+   ## Where every deployment puts the monitor, and the interpreter the sudoers
+   ## rule names. Both overridable from global_config.php; see the accessors.
+   const MONITOR_SCRIPT   = '/home/us3/lims/bin/jobmonitor/jobmonitor.php';
+   const MONITOR_SUDO_PHP = '/usr/bin/php';
+
+   ## Set by stage_files() when staging fails, so submit() can persist a
+   ## specific reason rather than a generic "submission aborted".
+   protected $stage_error = '';
+
+   ## Top-level: stage files then submit
+   public function submit()
+   {
+      if ( ! isset( $this->data[ 'job' ][ 'cluster_shortname' ] ) )
+      {
+         $this->message[] = "ERROR: data profile is not defined. Return to Queue Setup.\n";
+         return;
+      }
+
+      $savedir = getcwd();
+      try
+      {
+         chdir( $this->data[ 'job' ][ 'directory' ] );
+
+         if ( ! $this->stage_files() ) {
+            ## Persist staging failure for autoflow requests.
+            $this->message[] = "ERROR: stage_files failed - submission aborted";
+            $this->markAutoflowSubmitFailed( $this->stage_error !== '' ? $this->stage_error : 'staging failed' );
+            return;
+         }
+
+         $this->submit_job();
+
+         ## Only write DB records and launch jobmonitor if we have a valid Slurm job ID.
+         ## A missing ID means sbatch failed; the error is already in $this->message.
+         if ( ! empty( $this->data[ 'eprfile' ] ) ) {
+            ## Report success only after recording the job and launching its monitor.
+            if ( $this->update_db() )
+            {
+               $this->message[] = "submit complete";
+            }
+         } else {
+            $this->message[] = "ERROR: submit_job failed — no valid Slurm job ID; DB not updated";
+         }
+      }
+      catch ( InvalidArgumentException | UnexpectedValueException $error )
+      {
+         if ( empty( $this->data[ 'eprfile' ] ) )
+         {
+            $this->message[] = "ERROR: submission configuration invalid: " . $error->getMessage();
+            $this->markAutoflowSubmitFailed( $error->getMessage() );
+         }
+         else
+         {
+            $this->message[] = "WARNING: job {$this->data['eprfile']} was accepted, but submission"
+                             . " setup failed: " . $error->getMessage();
+         }
+      }
+      finally
+      {
+         chdir( $savedir );
+      }
+   }
+
+   /**
+    * Create the remote directory, write the script and copy the input files.
+    * Staging operations are idempotent and may retry transport faults.
+    * Return false on failure; the caller persists the error.
+    */
+   public function stage_files()
+   {
+      $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $requestID = $this->data[ 'job' ][ 'requestID' ];
+      $login     = $this->remote( $cluster )->login();
+      $workdir   = $this->workdir( $cluster, $requestID );
+      $tarfile   = $this->tarfile();
+
+      $this->message[] = "stage_files: cluster=$cluster login=$login workdir=$workdir";
+
+      ## Generate (and check) the slurm script locally before touching the cluster
+      $slufile = $this->write_slurm_script( $cluster, $requestID, $workdir, $tarfile );
+      if ( $slufile === false ) {
+         ## The specific reason is already in message[]; this is the
+         ## autoflow failure category.
+         $this->stage_error = 'resource plan rejected';
+         return false;
+      }
+
+      ## Create the working directory on the submithost
+      $mk = $this->ssh( $cluster, "/bin/mkdir -p $workdir", [ 'label' => 'stage:mkdir' ] );
+      if ( ! $mk[ 'ok' ] ) {
+         $this->stage_error = $this->stageFailure( 'mkdir', $workdir, $mk );
+         return false;
+      }
+
+      ## Copy input tar and slurm script to the working directory.
+      $cp = $this->scp( $cluster, [ $tarfile, $slufile ], $workdir, [ 'label' => 'stage:copy' ] );
+      if ( ! $cp[ 'ok' ] ) {
+         $this->stage_error = $this->stageFailure( 'copy', "$tarfile $slufile", $cp );
+      }
+
+      return $cp[ 'ok' ];
+   }
+
+   /** Describe whether staging failed through transport loss or remote rejection. */
+   private function stageFailure( $step, $subject, $res )
+   {
+      $infra  = remote_exec_infra_fault( $res );
+      $detail = $res[ 'stderr' ] !== '' ? $res[ 'stderr' ] : $res[ 'text' ];
+
+      $msg = $infra
+           ? "cluster unreachable during staging ($step): {$res['class']} after {$res['attempts']} attempt(s): $detail"
+           : "staging $step rejected by cluster: $detail";
+
+      $this->message[] = "ERROR: stage_files: $msg [$subject]";
+      elog2( "stage_files: $msg [$subject]" );
+
+      return $msg;
+   }
+
+   ## Generate the Slurm batch script and write it to disk; return filename
+   public function write_slurm_script( $cluster, $requestID, $workdir, $tarfile )
+   {
+      elog2( "write_slurm_script: cluster=$cluster queue=" . $this->grid[ $cluster ][ 'queue' ] );
+
+      ## Do not recompute any of the plan's quantities here.
+      $plan = $this->resource_plan();
+      if ( $plan === false )
+      {
+         return false;
+      }
+
+      $cfg         = $this->grid[ $cluster ];
+      $quename     = $cfg[ 'queue' ];
+      $mgroupcount = $plan[ 'resolved_groups' ];
+      $nodes       = $plan[ 'node_count' ];
+      $ranks       = $plan[ 'total_tasks' ];
+      $tasks_per_node = $plan[ 'tasks_per_node' ];
+
+      ## Resolve wall time
+      list( $walltime, $wallmins ) = $this->resolveWalltime( $cfg );
+
+      ## Build environment setup lines from config
+      $env_lines = $this->buildEnvLines( $cfg );
+
+      ## Entries are complete, single-line #SBATCH directives.
+      $directives = (array)( $cfg[ 'sbatch_directives' ] ?? [] );
+
+      ## Fall back to mempercore when no batch directives are configured.
+      if ( ! $directives  &&  isset( $cfg[ 'mempercore' ] ) )
+      {
+         $directives = [ '#SBATCH --mem-per-cpu=' . (int) $cfg[ 'mempercore' ] ];
+      }
+
+      $site_directives = '';
+      foreach ( $directives as $directive )
+      {
+         if ( ! is_string( $directive )
+              || strpos( $directive, "\n" ) !== false
+              || strpos( $directive, "\r" ) !== false
+              || strpos( $directive, '#SBATCH ' ) !== 0 )
+         {
+            throw new UnexpectedValueException( "invalid sbatch directive for cluster $cluster" );
+         }
+
+         $site_directives .= "$directive\n";
+      }
+
+      $priority_nice = priority_nice_string();
+      if ( strlen( $priority_nice ) )
+      {
+         $this->message[] = "Priority set " . str_replace( "\n", "; ", $priority_nice );
+      }
+
+      ## ibrun reads SLURM_NTASKS; mpirun and srun receive an explicit rank count.
+      $launcher = $cfg[ 'mpi_launcher' ] ?? 'mpirun';
+
+      ## OMPI_MCA_btl is OpenMPI-specific; suppress for srun/ibrun launchers
+      $ompi_mca = ( $launcher === 'mpirun' )
+         ? "export OMPI_MCA_btl=vader,self,tcp\n"
+         : "";
+
+      ## Build the mpirun / srun / ibrun invocation line
+      if ( $launcher === 'ibrun' ) {
+         ## ibrun: task count comes from SLURM_NTASKS (#SBATCH -n), no -n flag
+         $launch_cmd = "ibrun us_mpi_analysis -walltime $wallmins"
+                     . " -mgroupcount $mgroupcount $tarfile";
+      } elseif ( $launcher === 'srun' ) {
+         ## srun: task count also from SLURM env, but explicit -n is harmless and clear
+         $launch_cmd = "srun -n $ranks us_mpi_analysis -walltime $wallmins"
+                     . " -mgroupcount $mgroupcount $tarfile";
+      } else {
+         ## mpirun: explicit -n required
+         $launch_cmd = "mpirun -n $ranks us_mpi_analysis -walltime $wallmins"
+                     . " -mgroupcount $mgroupcount $tarfile";
+      }
+
+      $script =
+         "#!/bin/bash\n"
+         . "#SBATCH -p $quename\n"
+         . "#SBATCH -J US3_Job_$requestID\n"
+         . "#SBATCH -N $nodes\n"
+         . "#SBATCH -n $ranks\n"
+         . "#SBATCH --ntasks-per-node=$tasks_per_node\n"
+         . "#SBATCH -t $walltime\n"
+         . "#SBATCH -e $workdir/stderr\n"
+         . "#SBATCH -o $workdir/stdout\n"
+         . $site_directives
+         . ( $priority_nice   ? "$priority_nice\n"   : "" )
+         . $env_lines
+         . "export UCX_LOG_LEVEL=error\n"
+         . $ompi_mca
+         . "export QT_LOGGING_RULES='*.debug=true'\n\n"
+         . "cd $workdir\n\n"
+         . "$launch_cmd\n";
+
+      ## Held for update_db(), which writes it to HPCAnalysisResult.jobfile.
+      $this->data[ 'jobfile' ] = $script;
+
+      $filename = "us3.slurm";
+      file_put_contents( $filename, $script );
+      return $filename;
+   }
+
+   ## SSH sbatch --parsable exactly once and capture the Slurm job ID.
+   ##
+   ## sbatch is not idempotent. If SSH drops after Slurm accepted the job but
+   ## before the reply reaches LIMS, a second sbatch can create a duplicate.
+   ## Without a durable scheduler-side receipt there is no safe automatic
+   ## retry, so an uncertain outcome is surfaced for operator reconciliation.
+   ## Sets $this->data['eprfile'] only when that one call returns a valid ID.
+   public function submit_job()
+   {
+      date_default_timezone_set( "America/Chicago" );
+
+      $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $requestID = $this->data[ 'job' ][ 'requestID' ];
+      $workdir   = $this->workdir( $cluster, $requestID );
+
+      $submitResult = $this->attemptSubmit( $cluster, $workdir );
+
+      if ( ! $submitResult[ 'submit_ok' ] ) {
+         $this->data[ 'eprfile' ] = '';
+         $this->message[] = "ERROR: job submission failed after " . $submitResult[ 'attempt' ]
+                           . " attempt(s): " . $submitResult[ 'error' ];
+         elog2( "submit_job: FAILED after " . $submitResult[ 'attempt' ] . " attempts: " . $submitResult[ 'error' ] );
+         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ] );
+         return;
+      }
+
+      $slurm_job_id = $submitResult[ 'job_id' ];
+
+      ## Best-effort scontrol check; does not gate submission (see below).
+      $this->confirmSlurmJob( $cluster, $slurm_job_id );
+
+      $this->data[ 'eprfile' ] = $slurm_job_id;
+      elog2( "submit_job: slurm_job_id=$slurm_job_id confirmed after " . $submitResult[ 'attempt' ] . " attempt(s)" );
+   }
+
+   ## Run sbatch via SSH and validate its result. Retried only when it
+   ## provably never started (the begin marker never came back) or when its
+   ## own final line says it never reached the controller at all (a pre-send
+   ## connect failure -- see remote_exec::is_scheduler_rejection()). Every
+   ## other definite verdict (an explicit rejection reason, or
+   ## sbatch's own busy/EAGAIN give-up) is reported without a retry of ours:
+   ## sbatch itself already tried for its full internal budget before
+   ## printing a busy verdict, and a real rejection reason does not change on
+   ## retry. Once it has begun and the controller's answer was merely lost,
+   ## a retry could create a duplicate of a job Slurm already accepted, so
+   ## that case is left to fail with an "outcome unknown" message instead.
+   private function attemptSubmit( $cluster, $workdir )
+   {
+      $retries = (int) ( $this->grid[ $cluster ][ 'submit_retries' ]
+                         ?? $GLOBALS[ 'global_sbatch_submit_retries' ] ?? 3 );
+      $wait    = (int) ( $this->grid[ $cluster ][ 'submit_retry_wait' ]
+                         ?? $GLOBALS[ 'global_sbatch_submit_retry_wait_seconds' ] ?? 5 );
+
+      for ( $attempt = 1; ; $attempt++ )
+      {
+         $result = $this->sbatchOnce( $cluster, $workdir, $attempt );
+
+         if ( $result[ 'ok' ] ) {
+            return array( 'submit_ok' => true, 'job_id' => $result[ 'job_id' ], 'error' => '', 'attempt' => $attempt );
+         }
+
+         $unreachable      = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE;
+         $never_started    = $unreachable && empty( $result[ 'began' ] );
+         $connect_failure  = ! empty( $result[ 'connect_failure' ] );
+         $retryable        = $never_started || $connect_failure;
+
+         if ( ! $retryable || $attempt > $retries ) {
+            break;
+         }
+
+         $this->pause( $wait );
+         $wait *= 2;
+      }
+
+      ## Checked ahead of $never_started: a breaker-open
+      ## refusal is itself always "never started" (attempt() short-circuits
+      ## before the command runs at all), which otherwise swallows the
+      ## genuine connect failures that opened the breaker in the first
+      ## place -- the operator saw "sbatch never started" with no mention
+      ## that this cluster could not be reached, when that is exactly why.
+      $breaker_open = ! empty( $result[ 'breaker_open' ] );
+
+      $error = $breaker_open
+             ? $result[ 'error' ] . "; sbatch could not reach the controller, so nothing was submitted"
+             : ( $never_started
+               ? $result[ 'error' ] . "; sbatch never started, so nothing was submitted"
+               : ( $connect_failure
+                 ? $result[ 'error' ] . "; sbatch could not reach the controller, so nothing was submitted"
+                 : ( ! empty( $result[ 'definite_rejection' ] )
+                   ? $result[ 'error' ] . "; the controller rejected the job outright, so nothing was submitted"
+                   : ( ! empty( $result[ 'busy' ] )
+                     ? $result[ 'error' ] . "; cluster busy or queue full, so nothing was submitted"
+                     : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
+                       . " outcome is unknown: reconcile on the cluster before resubmitting" ) ) ) );
+
+      return array( 'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt );
+   }
+
+   protected function pause( $seconds )
+   {
+      sleep( $seconds );
+   }
+
+   ## Run sbatch --parsable once via SSH and validate the result.
+   ## Stdout and stderr are kept separate so --parsable's stdout is never
+   ## contaminated by SSH warnings or sbatch error text.
+   ## Returns ['ok' => bool, 'job_id' => string, 'error' => string].
+   private function sbatchOnce( $cluster, $workdir, $attempt )
+   {
+      $sbatch_cmd = "sbatch --parsable --get-user-env $workdir/us3.slurm";
+      $rx         = $this->remote( $cluster );
+
+      ## retries => 0 deliberately. Neither remote_exec nor submit_slurm may
+      ## repeat this non-idempotent operation without first reconciling it.
+      ##
+      ## No 'multiplex' here, unlike staging and the scontrol confirm: an
+      ## OpenSSH mux master that dies after sending the exec request but
+      ## before replying to this client re-runs the command over a fresh
+      ## connection (mux.c's own fallback, not remote_exec's) -- for a read
+      ## like a confirm that is harmless, but for sbatch it means two jobs
+      ## from one call. A plain connection per attempt costs one extra
+      ## connection per job and removes the window entirely.
+      ##
+      ## Timeout above remote_exec's own default: sbatch answers
+      ## EAGAIN by retrying internally for up to ~120s/15 attempts before
+      ## printing its own busy verdict (measured at ~121.4s). The default
+      ## 120s command timeout used to kill it a fraction of a second before
+      ## that verdict printed, so the caller saw "cluster unreachable
+      ## (TIMED_OUT) ... outcome unknown" for a call that was about to give
+      ## a clean, definite answer. 150s leaves room for sbatch's own budget
+      ## to finish and still bounds the call.
+      ## Validated the same way remote_exec validates its own timeouts:
+      ## left unvalidated, 0 would remove the bound entirely, '2m' would
+      ## become 2 seconds via the (int) cast, and 99999 would be accepted outright.
+      $configured = $this->grid[ $cluster ][ 'sbatch_timeout_seconds' ]
+                  ?? $GLOBALS[ 'global_sbatch_timeout_seconds' ] ?? null;
+
+      if ( $configured !== null && ( ! is_int( $configured ) || $configured < 1 || $configured > 3600 ) )
+      {
+         throw new InvalidArgumentException(
+            "submit_slurm: cluster '$cluster' sbatch_timeout_seconds must be an integer from 1 through 3600" );
+      }
+
+      $timeout = $configured ?? 150;
+
+      ## Never silently shorten a cluster's own remote_exec_overrides
+      ## command_timeout_seconds exception: that is a
+      ## demonstrated timeout need for this specific login node, and
+      ## sbatch_timeout_seconds's job is only to guarantee a FLOOR high
+      ## enough for sbatch's own ~120s internal retry budget above, not to
+      ## cap a cluster that already needs more than that for every call.
+      $clusterOverride = $this->grid[ $cluster ][ 'remote_exec_overrides' ][ 'command_timeout_seconds' ] ?? null;
+
+      if ( is_int( $clusterOverride ) && $clusterOverride > $timeout )
+      {
+         $timeout = $clusterOverride;
+      }
+
+      $res = $rx->run( $sbatch_cmd, [
+         'retries'   => 0,
+         'timeout'   => $timeout,
+         'label'     => "sbatch attempt $attempt",
+      ] );
+
+      $stdout_lines = $res[ 'stdout' ];
+      $stdout_text  = $res[ 'text' ];
+      $stderr_text  = $res[ 'stderr' ];
+      $exit_code    = $res[ 'exit_code' ];
+
+      ## Always log full diagnostics
+      $this->message[] = "sbatchOnce (attempt $attempt): cmd={$res['cmd']}";
+      $this->message[] = "sbatchOnce (attempt $attempt): exit=$exit_code class={$res['class']}";
+      $this->message[] = "sbatchOnce (attempt $attempt): stdout=$stdout_text";
+      if ( $stderr_text !== '' )
+      {
+         $this->message[] = "sbatchOnce (attempt $attempt): stderr=$stderr_text";
+      }
+
+      ## Single-line: $stdout_text/$stderr_text can each hold several lines
+      ## of real output, which otherwise breaks this one log entry across
+      ## several lines in the log file.
+      elog2( "sbatchOnce (attempt $attempt): exit=$exit_code class={$res['class']}"
+           . " stdout=" . str_replace( "\n", ' / ', $stdout_text )
+           . " stderr=" . str_replace( "\n", ' / ', $stderr_text ) );
+
+      ## Require a successful command before trusting its job ID.
+      if ( ! $res[ 'ok' ] ) {
+         $detail = $stderr_text !== '' ? $stderr_text : $stdout_text;
+         $error  = remote_exec_infra_fault( $res )
+                 ? "cluster unreachable ({$res['class']}): $detail"
+                 : "sbatch exited $exit_code: $detail";
+
+         return array( 'ok' => false, 'job_id' => '', 'error' => $error, 'class' => $res[ 'class' ],
+                       'began'              => ! empty( $res[ 'began' ] ),
+                       'breaker_open'       => ! empty( $res[ 'breaker_open' ] ),
+                       'connect_failure'    => $rx->is_scheduler_rejection( $stderr_text ),
+                       'definite_rejection' => $rx->is_scheduler_definite_rejection( $stderr_text ),
+                       'busy'               => $rx->is_scheduler_busy( $stderr_text ) );
+      }
+
+      ## Parse --parsable output: "12345" or "12345;clustername"
+      $job_id = $this->parseParsableSbatchOutput( $stdout_lines );
+
+      if ( $job_id === '' ) {
+         ## parse method already appended a specific error to $this->message
+         return array( 'ok' => false, 'job_id' => '', 'error' => "invalid sbatch output: $stdout_text" );
+      }
+
+      return array( 'ok' => true, 'job_id' => $job_id, 'error' => '' );
+   }
+
+   ## Mark autoflow submission failed when no valid job ID was received.
+   protected function markAutoflowSubmitFailed( $statusMsg )
+   {
+      global $dbusername, $dbpasswd, $dbhost, $dbname;
+      global $ID, $is_cli;
+
+      $autoflowID = ( $is_cli && $ID ) ? $ID : 0;
+      if ( $autoflowID <= 0 )
+      {
+         return;
+      }
+
+      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+      if ( ! $link ) {
+         $this->message[] = "markAutoflowSubmitFailed: cannot connect to $dbhost:$dbname";
+         return;
+      }
+
+      $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
+      $query = "UPDATE autoflowAnalysis SET "
+             . "status='SUBMIT_TIMEOUT', "
+             . "statusMsg='Job submission failed: $qfmsg' "
+             . "WHERE requestID='$autoflowID'";
+      $result = mysqli_query( $link, $query );
+      if ( ! $result )
+      {
+         $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
+      }
+
+      mysqli_close( $link );
+   }
+
+   ## Record the job in both databases and launch jobmonitor.
+   ## After sbatch accepted the job, problems are WARNING: (the job is running);
+   ## ERROR: is kept for submissions that did not happen.
+   public function update_db()
+   {
+      $ok = true;
+
+      global $globaldbuser, $globaldbpasswd, $globaldbhost, $globaldbname;
+      global $dbusername, $dbpasswd, $dbhost, $dbname;
+      global $ID, $is_cli;
+
+      $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $requestID = $this->data[ 'job' ][ 'requestID' ];
+      $slurm_id  = $this->data[ 'eprfile' ];
+      $autoflowID = ( $is_cli && $ID ) ? $ID : 0;
+
+      ## Write to instance DB
+      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+      if ( ! $link ) {
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: cannot connect to $dbhost:$dbname - job is running but unrecorded";
+         return false;
+      }
+
+      $jobfile = mysqli_real_escape_string( $link, $this->data[ 'jobfile' ] );
+      $query = "INSERT INTO HPCAnalysisResult SET "
+             . "HPCAnalysisRequestID='$requestID', "
+             . "jobfile='$jobfile', "
+             . "gfacID='$slurm_id'";
+      $result = mysqli_query( $link, $query );
+      if ( ! $result ) {
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: HPCAnalysisResult insert failed - job is running but "
+                          . "unrecorded: " . mysqli_error( $link );
+         mysqli_close( $link );
+         return false;
+      }
+
+      if ( $autoflowID > 0 ) {
+         $query = "UPDATE autoflowAnalysis SET "
+                . "currentGfacID='$slurm_id', "
+                . "currentHPCARID='$requestID', "
+                . "status='SUBMITTED', "
+                . "statusMsg='Job submitted' "
+                . "WHERE requestID='$autoflowID'";
+         $result = mysqli_query( $link, $query );
+         if ( ! $result ) {
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: autoflowAnalysis update failed - the pipeline will not "
+                             . "advance: " . mysqli_error( $link );
+            $ok = false;
+         }
+      }
+
+      mysqli_close( $link );
+
+      ## Write to global gfac DB (job tracking)
+      $gfac_link = mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
+      if ( ! $gfac_link ) {
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: cannot connect to global DB $globaldbhost:$globaldbname - "
+                          . "job will not be tracked";
+         return false;
+      }
+
+      $query = "INSERT INTO analysis SET "
+             . "gfacID='$slurm_id', "
+             . "autoflowAnalysisID='$autoflowID', "
+             . "cluster='$cluster', "
+             . "us3_db='$dbname'";
+      $result = mysqli_query( $gfac_link, $query );
+      if ( ! $result ) {
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "
+                          . "cleaned up: " . mysqli_error( $gfac_link );
+         $ok = false;
+      }
+
+      mysqli_close( $gfac_link );
+
+      $this->message[] = "DB updated: requestID=$requestID slurm_id=$slurm_id";
+
+      ## Run the monitor as us3; use sudo only when PHP runs under another account.
+      $monitor_host = getenv( 'US3_JOBMONITOR_SSH_HOST' );
+
+      if ( $monitor_host !== false && $monitor_host !== '' ) {
+         ## The deployment's own LIMS host, never the job's compute cluster.
+         $res = $this->launch_monitor_over_ssh( $monitor_host, $dbname, $slurm_id, $requestID );
+         $exit_code = $res[ 'class' ] === remote_exec::OK ? 0 : 1;
+         if ( $exit_code !== 0 )
+         {
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: monitor transport failed: " . $res[ 'class' ];
+         }
+      } else {
+         $php     = escapeshellarg( $this->monitor_php_binary() );
+         $monitor = escapeshellarg( $this->monitor_script() );
+         $args    = escapeshellarg( (string) $dbname ) . ' ' . escapeshellarg( (string) $slurm_id )
+                  . ' ' . escapeshellarg( (string) $requestID );
+
+         $whoami  = function_exists( 'posix_geteuid' ) && function_exists( 'posix_getpwuid' )
+                    ? ( posix_getpwuid( posix_geteuid() )[ 'name' ] ?? '' )
+                    : '';
+
+         if ( $whoami === 'us3' || $whoami === '' )
+         {
+            $cmd = "nice -15 $php $monitor $args 2>&1";
+         }
+         else
+         {
+            ## NOPASSWD rules match sudo's direct command; keep PHP there and wrap sudo with nice.
+            ## Both are admin-set via $global_jobmonitor_php/_script, same as $monitor above: quoted
+            ## for hygiene, not because a hole was found, but a value typed into global_config.php is
+            ## still a value this command line has to carry safely.
+            $cmd = "nice -15 sudo -u us3 " . escapeshellarg( $this->monitor_sudo_php() ) . " $monitor $args 2>&1";
+         }
+
+         exec( $cmd, $null, $exit_code );
+      }
+
+      if ( $exit_code !== 0 ) {
+         ## A failed monitor launch leaves the recorded job without monitoring.
+         $this->message[] = "WARNING: job {$this->data['eprfile']}: jobmonitor launch failed (exit=$exit_code) - job will not "
+                          . "be monitored";
+         $ok = false;
+      } else {
+         $this->message[] = "jobmonitor launch: exit=$exit_code";
+      }
+
+      return $ok;
+   }
+
+   public function close_transport() { /* no-op: no persistent transport */ }
+
+   ## PHP_BINARY may name php-fpm; use the CLI binary for the monitor.
+   protected function monitor_php_binary( $sapi = PHP_SAPI, $binary = PHP_BINARY,
+                                          $bindir = PHP_BINDIR )
+   {
+      return $sapi === 'cli' && $binary !== '' ? $binary : $bindir . '/php';
+   }
+
+   /**
+    * The monitor script, for every way of launching it.
+    *
+    * One source, because the path was written out twice: once for the local
+    * launch and once for the launch over ssh. Two literals for one fact drift,
+    * and a monitor that does not start leaves a running job unwatched, which is
+    * not visible until the job finishes and nothing collects it.
+    *
+    * Override with $global_jobmonitor_script. The default is where every
+    * deployment puts it.
+    */
+   protected function monitor_script()
+   {
+      $configured = isset( $GLOBALS[ 'global_jobmonitor_script' ] )
+                    ? trim( (string) $GLOBALS[ 'global_jobmonitor_script' ] ) : '';
+
+      return $configured !== '' ? $configured : self::MONITOR_SCRIPT;
+   }
+
+   /**
+    * The interpreter named in the sudo command, which is deliberately not
+    * monitor_php_binary(): a NOPASSWD rule matches the command exactly, so this
+    * has to be the path the rule was written for, not whichever interpreter is
+    * serving this request. Change this and the sudoers rule together.
+    *
+    * Override with $global_jobmonitor_php.
+    */
+   protected function monitor_sudo_php()
+   {
+      $configured = isset( $GLOBALS[ 'global_jobmonitor_php' ] )
+                    ? trim( (string) $GLOBALS[ 'global_jobmonitor_php' ] ) : '';
+
+      return $configured !== '' ? $configured : self::MONITOR_SUDO_PHP;
+   }
+
+   ## Launch through the LIMS host when the web pool cannot spawn the monitor.
+   ## The monitor must daemonize and close its streams before SSH returns.
+   ## The host key must be installed during provisioning.
+   protected function launch_monitor_over_ssh( $host, $dbname, $jobID, $requestID )
+   {
+      if ( ! preg_match( '/^[A-Za-z0-9][A-Za-z0-9._-]*$/D', $host ) )
+      {
+         throw new InvalidArgumentException( 'Invalid US3_JOBMONITOR_SSH_HOST' );
+      }
+      $rx = new remote_exec( 'lims-jobmonitor', [
+         'lims-jobmonitor' => [ 'name' => $host, 'login' => 'us3@' . $host, 'sshport' => 22,
+                               'ssh_host_key_policy' => 'yes' ],
+      ], 'elog2' );
+      $rx->set_executor( function ( $cmd, &$output, &$exit_code ) {
+         $this->runExec( $cmd, $output, $exit_code );
+      } );
+      ## The remote host runs this as us3, so the interpreter is that host's,
+      ## not this request's: the same value the sudo rule names. Quoted like
+      ## the arguments below: both come from $global_jobmonitor_php/_script,
+      ## admin-set values this command line still has to carry safely.
+      $cmd = escapeshellarg( $this->monitor_sudo_php() ) . ' ' . escapeshellarg( $this->monitor_script() ) . ' '
+           . escapeshellarg( $dbname ) . ' ' . escapeshellarg( (string) $jobID )
+           . ' ' . escapeshellarg( (string) $requestID );
+      ## A lost response may follow a successful launch. Do not launch twice.
+      return $rx->run( $cmd, [ 'retries' => 0 ] );
+   }
+
+   ## -------------------------------------------------------------------------
+   ## Private helpers
+   ## -------------------------------------------------------------------------
+
+   ## Build the remote working directory path for this request
+   private function workdir( $cluster, $requestID )
+   {
+      $jobid = $this->data[ 'db' ][ 'name' ] . sprintf( "-%06d", $requestID );
+      return rtrim( $this->grid[ $cluster ][ 'workdir' ], '/' ) . '/' . $jobid;
+   }
+
+   ## Build the input tar filename for this request
+   private function tarfile()
+   {
+      return sprintf( "hpcinput-%s-%s-%05d.tar",
+         $this->data[ 'db' ][ 'host' ],
+         $this->data[ 'db' ][ 'name' ],
+         $this->data[ 'job' ][ 'requestID' ] );
+   }
+
+
+   ## One remote_exec instance per cluster, reused for every call this
+   ## submit_slurm object makes to that cluster: remote() used
+   ## to build a fresh instance every call -- 5 per submission (login(),
+   ## sbatchOnce(), ssh(), scp(), confirmSlurmJob()) -- so remote_exec's own
+   ## per-instance "mux unusable"/"control directory warned" memory never
+   ## survived from one call to the next within the same submission, and
+   ## every multiplexed call after a denied bind()/link() paid the same
+   ## wasted connect again. isset(), not ??=, for PHP 7.2 compatibility.
+   private $rx_cache = [];
+
+   /** Build the cluster transport using this object's executor. */
+   protected function remote( $cluster )
+   {
+      if ( ! isset( $this->rx_cache[ $cluster ] ) )
+      {
+         $rx = new remote_exec( $cluster, $this->grid, 'elog2' );
+         $rx->set_executor( function ( $cmd, &$output, &$exit_code ) {
+            $this->runExec( $cmd, $output, $exit_code );
+         } );
+         $this->rx_cache[ $cluster ] = $rx;
+      }
+
+      return $this->rx_cache[ $cluster ];
+   }
+
+   ## Run a command on the cluster. Returns remote_exec's classified result.
+   ## multiplex: true unless the caller overrides it, since this and scp()
+   ## below are the staging calls (mkdir, then the copy) a submission makes
+   ## to the same login one after another -- the one case the shared ssh
+   ## connection is actually meant for. sbatch itself does not go through
+   ## this helper and deliberately does not multiplex (see sbatchOnce()).
+   ## Other callers (gridctl's probes, results fetch, queue viewer) go
+   ## through remote_exec directly and so never set it either.
+   private function ssh( $cluster, $remote_cmd, $opts = [] )
+   {
+      $res = $this->remote( $cluster )->run( $remote_cmd, $opts + [ 'multiplex' => true ] );
+      $this->recordRemote( 'exec', $res );
+      return $res;
+   }
+
+   ## Copy staged files to the cluster over SCP.
+   private function scp( $cluster, $files, $dest, $opts = [] )
+   {
+      $res = $this->remote( $cluster )->copy_to( $files, $dest, $opts + [ 'multiplex' => true ] );
+      $this->recordRemote( 'copy', $res );
+      return $res;
+   }
+
+   ## Append transport diagnostics to the submission messages.
+   private function recordRemote( $label, $res )
+   {
+      $error = '';
+      if ( ! $res[ 'ok' ] ) {
+         $detail = $res[ 'stderr' ] !== '' ? $res[ 'stderr' ] : $res[ 'text' ];
+         $error = "  err=$detail";
+      }
+      $this->message[] = "$label: {$res['cmd']}  exit={$res['exit_code']}"
+                       . "  class={$res['class']}  attempts={$res['attempts']}" . $error;
+   }
+
+   ## Overridable executor for shell commands.
+   protected function runExec( $cmd, &$output, &$exit_code )
+   {
+      $output = [];
+      exec( $cmd, $output, $exit_code );
+   }
+
+   ## Parse sbatch --parsable stdout lines.
+   ## Valid forms: "12345"  or  "12345;clustername"
+   ## Returns the numeric job ID string on success, empty string on any failure.
+   private function parseParsableSbatchOutput( $stdout_lines )
+   {
+      ## --parsable emits exactly one line; use the first non-empty line
+      $line = '';
+      foreach ( $stdout_lines as $l ) {
+         $l = trim( $l );
+         if ( $l !== '' ) { $line = $l; break; }
+      }
+
+      if ( $line === '' ) {
+         $this->message[] = "ERROR: sbatch --parsable returned empty stdout";
+         return '';
+      }
+
+      ## Strip optional cluster suffix: "12345;clustername" → "12345"
+      $job_id_str = explode( ';', $line )[0];
+
+      ## Validate: must be purely numeric and non-zero
+      if ( ! preg_match( '/^\d+$/', $job_id_str ) || (int)$job_id_str === 0 ) {
+         $this->message[] = "ERROR: sbatch --parsable output is not a valid job ID: '$line'";
+         return '';
+      }
+
+      return $job_id_str;
+   }
+
+   ## Confirm the submitted job is visible to Slurm via scontrol show job.
+   ## This is a best-effort check: a lookup failure is logged but does not
+   ## abort submission — the ID came from a successful --parsable response.
+   private function confirmSlurmJob( $cluster, $slurm_job_id )
+   {
+      ## Skip retries for this optional check to avoid delaying submission.
+      $res = $this->remote( $cluster )->run( "scontrol show job $slurm_job_id", [
+         'retries'   => 0,
+         'label'     => 'scontrol confirm',
+         'multiplex' => true,
+      ] );
+
+      if ( $res[ 'ok' ] ) {
+         $this->message[] = "submit_job: scontrol confirmed job $slurm_job_id exists";
+         elog2( "submit_job: scontrol confirmed job $slurm_job_id" );
+         return;
+      }
+
+      $detail = $res[ 'stderr' ] !== '' ? $res[ 'stderr' ] : $res[ 'text' ];
+      $this->message[] = "WARNING: scontrol show job $slurm_job_id failed"
+                       . " (exit={$res['exit_code']} class={$res['class']}): $detail";
+      elog2( "submit_job: scontrol check failed for job $slurm_job_id class={$res['class']}: $detail" );
+      ## Not fatal: --parsable already gave us a valid ID, and a transport
+      ## fault here says nothing about whether the job was accepted.
+   }
+
+   ## Walltime precedence: usemaxtime, wall_override, then maxwall() * 3.
+   ## Clamp estimates and overrides to maxtime; zero means unlimited.
+   private function resolveWalltime( $cfg )
+   {
+      ## usemaxtime: skip computed estimate, use the configured cluster maximum
+      if ( ! empty( $cfg[ 'usemaxtime' ] ) ) {
+         $max_time = (int) $cfg[ 'maxtime' ];
+         if ( $max_time === 0 )
+         {
+            return [ "00:00:00", 999999 ];
+         }  ## maxtime=0 means no limit
+         $hours    = (int)( $max_time / 60 );
+         $mins     = (int)( $max_time % 60 );
+         return [ sprintf( "%02d:%02d:00", $hours, $mins ), $max_time ];
+      }
+
+      $wall = $this->maxwall() * 3.0;
+
+      if ( ! empty( $cfg[ 'wall_override' ] ) )
+      {
+         $wall = (float) $cfg[ 'wall_override' ];
+      }
+
+      ## Clamp to the cluster's queue limit; maxtime = 0 means unlimited
+      $max_time = isset( $cfg[ 'maxtime' ] ) ? (int) $cfg[ 'maxtime' ] : 0;
+      if ( $max_time > 0  &&  $wall > $max_time ) {
+         $this->message[] = "NOTE: walltime "
+                          . (int)$wall
+                          . " min exceeds cluster maxtime $max_time min; clamped to $max_time";
+         $wall = (float) $max_time;
+      }
+
+      $hours    = (int)( $wall / 60 );
+      $mins     = (int)( $wall % 60 );
+      $walltime = sprintf( "%02d:%02d:00", $hours, $mins );
+      $wallmins = $hours * 60 + $mins;
+
+      return [ $walltime, $wallmins ];
+   }
+
+   ## Return the environment setup block for the Slurm script.
+   ## Reads env_script_lines directly from cluster config.
+   ## Ensures the block is separated from the surrounding script with a trailing newline.
+   private function buildEnvLines( $cfg )
+   {
+      ## The key must be present: an old config without it would start the job
+      ## with no modules or MPI and fail at runtime. An empty value is a
+      ## deliberate "nothing to set up" (binaries already on the default PATH).
+      if ( ! array_key_exists( 'env_script_lines', $cfg ) )
+      {
+         throw new UnexpectedValueException( "cluster has no env_script_lines in global_config.php"
+            . " (use '' if it needs none); run php ~us3/lims/database/utils/uslims_upgrade.php" );
+      }
+      $block = trim( (string) $cfg[ 'env_script_lines' ] );
+      return $block !== '' ? "\n" . $block . "\n\n" : "\n";
+   }
+
+}

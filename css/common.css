@@ -12,6 +12,8 @@
  *   #C7BA99 light brown
  */
 
+@import url("utilities.css");
+
 body {
   margin                : 0px;
   padding               : 0px;
@@ -72,6 +74,11 @@ table.style1 {
   border                : 5px groove #2B4E72;
   width                 : 98%;
   margin                : 2em 1em;
+}
+
+/* Outranks table.style1 so list tables keep their former inline 95% width. */
+table.style1.w-95p {
+  width                 : 95%;
 }
 
 table.style1 thead th {
@@ -288,6 +295,11 @@ div#sidebar {
   color                 : white;
 }
 
+/* Outranks div#sidebar so the utility class replaces the former inline style. */
+div#sidebar.pb-30em {
+  padding-bottom        : 30em;
+}
+
 div#sidebar h4 {
   margin                : 0;
   padding-top           : 1em;
@@ -435,6 +447,19 @@ fieldset#clusters td.cluster
 fieldset#clusters tr.subheader th
 {
   font-size  : x-small;
+}
+
+.submit-progress {
+  color                 : darkblue;
+  background            : white;
+  font-family           : monospace;
+  font-size             : 20px;
+  text-align            : center;
+}
+
+/* Only the newest progress line shows; all are hidden once the page follows */
+.submit-progress:has(~ *) {
+  display               : none;
 }
 
 #fixed {

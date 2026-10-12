@@ -6,8 +6,7 @@
 ## can be overriden in dbinst specific cluster_config.php
 
 $admin_list = [
-    'gegorbet@gmail.com'
-    ,'demeler@umontana.edu'
+    'demeler@umontana.edu'
     ,'alexsav.science@gmail.com'
     ,'emre.brookes@umontana.edu'
     ];

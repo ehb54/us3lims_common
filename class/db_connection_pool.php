@@ -183,7 +183,15 @@ class db_connection_pool
          return false;
       }
 
-      if ( $result === false )
+      ## Not just `=== false`: on PHP 7.2, a query against an already-closed
+      ## mysqli object returns NULL rather than false (or throwing), so a
+      ## strict false-only check wrongly treats a dead, closed connection as
+      ## alive and hands it back out of the pool -- every query on it then
+      ## silently fails. Anything other than an unambiguous "alive" signal
+      ## (a mysqli_result, or boolean true for a query with no result set)
+      ## is rejected here, which also covers a connection release()d twice:
+      ## the second release() would otherwise pool an already-dead handle.
+      if ( $result !== true && ! ( $result instanceof mysqli_result ) )
       {
          return false;
       }

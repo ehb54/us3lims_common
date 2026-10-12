@@ -365,16 +365,21 @@ class submit_slurm extends jobsubmit
             break;
          }
 
-         ## The next attempt, once $attempt reaches $retries, is the forced,
-         ## always-real last one above -- it runs no matter what the gate or
-         ## breaker says, so a backoff wait here protects nothing: it was
-         ## always going to be tried. Waiting anyway only adds dead latency
-         ## to a submission whose outcome this wait cannot change.
-         if ( $attempt < $retries )
-         {
-            $this->pause( $wait );
-            $wait *= 2;
-         }
+         ## Round 12 skipped this wait once the next attempt is the forced,
+         ## always-real last one above, reasoning that a wait "protects
+         ## nothing" since that attempt was always going to run regardless
+         ## of gate/breaker state. That reasoning missed what the wait
+         ## actually buys: time for a transient outage to recover before
+         ## the forced attempt fires. Confirmed against a ~90s outage
+         ## (stops 25s before submission, recovers at +91s): skipping this
+         ## wait made the forced 4th attempt land at +68s, before recovery,
+         ## failing with no job ever created; waiting the full schedule
+         ## lands it at +87-88s, after recovery, succeeding -- matching
+         ## 4.2.0 and round 11's (common#24 / 040a3dc) behavior. The forced
+         ## attempt still always runs for real either way; only its timing
+         ## changes.
+         $this->pause( $wait );
+         $wait *= 2;
       }
 
       ## Checked ahead of $never_started: a breaker-open
@@ -1010,15 +1015,16 @@ class submit_slurm extends jobsubmit
          ## could have failed.
          $gfacError = ( $gfac && $status === 'record_error' ) ? mysqli_error( $gfac ) : '';
 
-         if ( $link )
-         {
-            mysqli_close( $link );
-         }
-         if ( $gfac )
-         {
-            mysqli_close( $gfac );
-         }
-
+         ## Not closed here: both are pooled connections (see the finally
+         ## block below), and this class never closes a pooled connection
+         ## itself -- only release() may return it to, or discard it from,
+         ## the pool. Closing it here and then still calling release() on
+         ## it handed the pool a connection already dead, which is_alive()'s
+         ## own query probe can misread as still alive on PHP 7.2 (a
+         ## closed mysqli's query returns NULL there, not false), so the
+         ## next checkout() got handed a dead connection and every query
+         ## on it silently failed.
+         ##
          ## A row was still written for every one of these; this is the one
          ## place that notices when it was not 'ok', so a run of artifact or
          ## input trouble is visible without querying gfac.runtime_prediction.

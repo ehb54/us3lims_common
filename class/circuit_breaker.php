@@ -93,6 +93,11 @@ class circuit_breaker
     * half-open probe failing again. Either way, "about to open" here always
     * means a fresh trip, so $trips can be incremented unconditionally
     * whenever $failures crosses the threshold.
+    *
+    * @return bool true exactly on the call that opens the breaker (this
+    *              failure crossed the threshold), false otherwise. Lets a
+    *              caller mail an admin once per outage instead of once per
+    *              refused submission while the breaker stays open.
     */
    public function record_failure( $cluster )
    {
@@ -117,12 +122,13 @@ class circuit_breaker
          $this->write( $cluster, array(
             'failures' => $failures, 'open_until' => $open_until, 'trips' => $trips, 'updated' => time()
          ) );
-         return;
+         return true;
       }
 
       $this->write( $cluster, array(
          'failures' => $failures, 'open_until' => 0, 'trips' => $state[ 'trips' ], 'updated' => time()
       ) );
+      return false;
    }
 
    ## Human-readable state, for the health probe and logs.

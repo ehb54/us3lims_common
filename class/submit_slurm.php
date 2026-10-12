@@ -2,6 +2,7 @@
 /* Submit Slurm jobs through SSH and SCP, including co-located clusters. */
 require_once $class_dir . 'jobsubmit.php';
 require_once $class_dir . 'remote_exec.php';
+require_once $class_dir . 'db_connection_pool.php';
 include_once $class_dir . 'priority.php';
 
 function elog2( $msg )
@@ -24,6 +25,10 @@ class submit_slurm extends jobsubmit
    ## Set by stage_files() when staging fails, so submit() can persist a
    ## specific reason rather than a generic "submission aborted".
    protected $stage_error = '';
+
+   ## Captured by write_slurm_script() for observe_runtime_advisory(), which
+   ## submit() calls later, after sbatch and update_db() have both succeeded.
+   protected $advisoryPlan = null;
 
    ## Top-level: stage files then submit
    public function submit()
@@ -54,6 +59,19 @@ class submit_slurm extends jobsubmit
             ## Report success only after recording the job and launching its monitor.
             if ( $this->update_db() )
             {
+               ## Only now: the job is submitted and recorded. Advisory only,
+               ## off unless global_config.php turns it on, cannot throw, and
+               ## cannot change what was already submitted above.
+               if ( $this->advisoryPlan !== null )
+               {
+                  $this->observe_runtime_advisory(
+                     $this->advisoryPlan[ 'cluster' ],
+                     $this->advisoryPlan[ 'requestID' ],
+                     $this->advisoryPlan[ 'plan' ],
+                     $this->advisoryPlan[ 'walltime' ],
+                     $this->advisoryPlan[ 'wallmins' ]
+                  );
+               }
                $this->message[] = "submit complete";
             }
          } else {
@@ -86,7 +104,7 @@ class submit_slurm extends jobsubmit
     */
    public function stage_files()
    {
-      $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster   = $this->execution_cluster();
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $login     = $this->remote( $cluster )->login();
       $workdir   = $this->workdir( $cluster, $requestID );
@@ -156,6 +174,19 @@ class submit_slurm extends jobsubmit
 
       ## Resolve wall time
       list( $walltime, $wallmins ) = $this->resolveWalltime( $cfg );
+
+      ## Captured for observe_runtime_advisory(), called from submit() only
+      ## after sbatch and update_db() have both succeeded: not here, where a
+      ## fatal downstream of this point (an unread artifact, an oversized
+      ## edit file) would abort a submission the advisory had no business
+      ## being able to touch.
+      $this->advisoryPlan = array(
+         'cluster'    => $cluster,
+         'requestID'  => $requestID,
+         'plan'       => $plan,
+         'walltime'   => $walltime,
+         'wallmins'   => $wallmins,
+      );
 
       ## Build environment setup lines from config
       $env_lines = $this->buildEnvLines( $cfg );
@@ -250,7 +281,7 @@ class submit_slurm extends jobsubmit
    {
       date_default_timezone_set( "America/Chicago" );
 
-      $cluster   = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster   = $this->execution_cluster();
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $workdir   = $this->workdir( $cluster, $requestID );
 
@@ -279,13 +310,13 @@ class submit_slurm extends jobsubmit
    ## provably never started (the begin marker never came back) or when its
    ## own final line says it never reached the controller at all (a pre-send
    ## connect failure -- see remote_exec::is_scheduler_rejection()). Every
-   ## other definite verdict (an explicit rejection reason, or
-   ## sbatch's own busy/EAGAIN give-up) is reported without a retry of ours:
-   ## sbatch itself already tried for its full internal budget before
-   ## printing a busy verdict, and a real rejection reason does not change on
-   ## retry. Once it has begun and the controller's answer was merely lost,
-   ## a retry could create a duplicate of a job Slurm already accepted, so
-   ## that case is left to fail with an "outcome unknown" message instead.
+   ## other definite verdict (an explicit rejection reason, or sbatch's own
+   ## busy/EAGAIN give-up) is reported without a retry of ours: sbatch itself
+   ## already tried for its full internal budget before printing a busy
+   ## verdict, and a real rejection reason does not change on retry. Once it
+   ## has begun and the controller's answer was merely lost, a retry could
+   ## create a duplicate of a job Slurm already accepted, so that case is
+   ## left to fail with an "outcome unknown" message instead.
    private function attemptSubmit( $cluster, $workdir )
    {
       $retries = (int) ( $this->grid[ $cluster ][ 'submit_retries' ]
@@ -551,19 +582,11 @@ class submit_slurm extends jobsubmit
          return;
       }
 
-      ## @ + catch, not a bare call: PHP 8.1+'s mysqli defaults to throwing
-      ## on a connect failure instead of returning false, which would have
-      ## left the "instance database unreachable" admin-mail fallback below
-      ## unreachable code -- the exact failure case it exists for would
-      ## throw straight past it instead of being handled.
-      try
-      {
-         $link = @mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
-      }
-      catch ( \Throwable $e )
-      {
-         $link = false;
-      }
+      ## Pooled, not a direct mysqli_connect()/mysqli_close() pair
+      ## (common#31): a connect failure here returns null rather than
+      ## throwing, so $dbUnreachable below still reflects it correctly
+      ## without needing the try/catch a direct connect call used to need.
+      $link = db_connection_pool::shared()->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
 
       $investigator_email = null;
       $tripleName         = null;
@@ -571,40 +594,49 @@ class submit_slurm extends jobsubmit
 
       if ( $link )
       {
-         $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
-         $query = "UPDATE autoflowAnalysis SET "
-                . "status='SUBMIT_TIMEOUT', "
-                . "statusMsg='Job submission failed: $qfmsg' "
-                . "WHERE requestID=$autoflowID";
-         $result = mysqli_query( $link, $query );
-         if ( ! $result )
+         try
          {
-            $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
-         }
+            $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
+            $query = "UPDATE autoflowAnalysis SET "
+                   . "status='SUBMIT_TIMEOUT', "
+                   . "statusMsg='Job submission failed: $qfmsg' "
+                   . "WHERE requestID=$autoflowID";
+            $result = mysqli_query( $link, $query );
+            if ( ! $result )
+            {
+               $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
+            }
 
-         ## The investigator's address and the run's own tripleName are
-         ## looked up fresh here, not threaded in from a caller, since every
-         ## one of the five analysis-type pages that reach submit_job()
-         ## (2DSA_2.php, 2DSA-CG_2.php, DMGA_2.php, GA_3.php, PCSA_2.php)
-         ## would otherwise need its own copy of this lookup.
-         $lookup_stmt = mysqli_prepare( $link,
-            "SELECT p.email, a.tripleName FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
-          . " WHERE a.requestID = ?" );
-         if ( $lookup_stmt )
+            ## The investigator's address and the run's own tripleName are
+            ## looked up fresh here, not threaded in from a caller, since every
+            ## one of the five analysis-type pages that reach submit_job()
+            ## (2DSA_2.php, 2DSA-CG_2.php, DMGA_2.php, GA_3.php, PCSA_2.php)
+            ## would otherwise need its own copy of this lookup. Done inside
+            ## this try, before the pooled connection is released below -- not
+            ## closed outright, since release() returns it to the pool for
+            ## reuse by the next caller.
+            $lookup_stmt = mysqli_prepare( $link,
+               "SELECT p.email, a.tripleName FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
+             . " WHERE a.requestID = ?" );
+            if ( $lookup_stmt )
+            {
+               mysqli_stmt_bind_param( $lookup_stmt, 'i', $autoflowID );
+               mysqli_stmt_execute( $lookup_stmt );
+               mysqli_stmt_bind_result( $lookup_stmt, $investigator_email, $tripleName );
+               mysqli_stmt_fetch( $lookup_stmt );
+               mysqli_stmt_close( $lookup_stmt );
+            }
+         }
+         finally
          {
-            mysqli_stmt_bind_param( $lookup_stmt, 'i', $autoflowID );
-            mysqli_stmt_execute( $lookup_stmt );
-            mysqli_stmt_bind_result( $lookup_stmt, $investigator_email, $tripleName );
-            mysqli_stmt_fetch( $lookup_stmt );
-            mysqli_stmt_close( $lookup_stmt );
+            db_connection_pool::shared()->release( $link );
          }
-
-         mysqli_close( $link );
       }
       else
       {
          $this->message[] = "markAutoflowSubmitFailed: cannot connect to $dbhost:$dbname";
       }
+
 
       if ( empty( $org_name ) || empty( $admin_email ) )
       {
@@ -674,64 +706,84 @@ class submit_slurm extends jobsubmit
       $slurm_id  = $this->data[ 'eprfile' ];
       $autoflowID = ( $is_cli && $ID ) ? $ID : 0;
 
+      $pool = db_connection_pool::shared();
+
       ## Write to instance DB
-      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+      $link = $pool->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
       if ( ! $link ) {
          $this->message[] = "WARNING: job {$this->data['eprfile']}: cannot connect to $dbhost:$dbname - job is running but unrecorded";
          return false;
       }
 
-      $jobfile = mysqli_real_escape_string( $link, $this->data[ 'jobfile' ] );
-      $query = "INSERT INTO HPCAnalysisResult SET "
-             . "HPCAnalysisRequestID='$requestID', "
-             . "jobfile='$jobfile', "
-             . "gfacID='$slurm_id'";
-      $result = mysqli_query( $link, $query );
-      if ( ! $result ) {
-         $this->message[] = "WARNING: job {$this->data['eprfile']}: HPCAnalysisResult insert failed - job is running but "
-                          . "unrecorded: " . mysqli_error( $link );
-         mysqli_close( $link );
-         return false;
-      }
-
-      if ( $autoflowID > 0 ) {
-         $query = "UPDATE autoflowAnalysis SET "
-                . "currentGfacID='$slurm_id', "
-                . "currentHPCARID='$requestID', "
-                . "status='SUBMITTED', "
-                . "statusMsg='Job submitted' "
-                . "WHERE requestID='$autoflowID'";
+      try
+      {
+         $jobfile = mysqli_real_escape_string( $link, $this->data[ 'jobfile' ] );
+         $query = "INSERT INTO HPCAnalysisResult SET "
+                . "HPCAnalysisRequestID='$requestID', "
+                . "jobfile='$jobfile', "
+                . "gfacID='$slurm_id'";
          $result = mysqli_query( $link, $query );
          if ( ! $result ) {
-            $this->message[] = "WARNING: job {$this->data['eprfile']}: autoflowAnalysis update failed - the pipeline will not "
-                             . "advance: " . mysqli_error( $link );
-            $ok = false;
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: HPCAnalysisResult insert failed - job is running but "
+                             . "unrecorded: " . mysqli_error( $link );
+            return false;
+         }
+
+         if ( $autoflowID > 0 ) {
+            $query = "UPDATE autoflowAnalysis SET "
+                   . "currentGfacID='$slurm_id', "
+                   . "currentHPCARID='$requestID', "
+                   . "status='SUBMITTED', "
+                   . "statusMsg='Job submitted' "
+                   . "WHERE requestID='$autoflowID'";
+            $result = mysqli_query( $link, $query );
+            if ( ! $result ) {
+               $this->message[] = "WARNING: job {$this->data['eprfile']}: autoflowAnalysis update failed - the pipeline will not "
+                                . "advance: " . mysqli_error( $link );
+               $ok = false;
+            }
          }
       }
-
-      mysqli_close( $link );
+      finally
+      {
+         $pool->release( $link );
+      }
 
       ## Write to global gfac DB (job tracking)
-      $gfac_link = mysqli_connect( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
+      $gfac_link = $pool->checkout( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
       if ( ! $gfac_link ) {
          $this->message[] = "WARNING: job {$this->data['eprfile']}: cannot connect to global DB $globaldbhost:$globaldbname - "
                           . "job will not be tracked";
          return false;
       }
 
-      $query = "INSERT INTO analysis SET "
-             . "gfacID='$slurm_id', "
-             . "autoflowAnalysisID='$autoflowID', "
-             . "cluster='$cluster', "
-             . "us3_db='$dbname'";
-      $result = mysqli_query( $gfac_link, $query );
-      if ( ! $result ) {
-         $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "
-                          . "cleaned up: " . mysqli_error( $gfac_link );
-         $ok = false;
-      }
+      try
+      {
+         ## Only set when this job went through a metascheduler pseudo-cluster
+         ## (see pick_cluster.php / submitone.php); a direct submission to a
+         ## named cluster leaves this column NULL, as it always has.
+         $metaCluster = isset( $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] )
+                      ? $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] : null;
 
-      mysqli_close( $gfac_link );
+         $query = "INSERT INTO analysis SET "
+                . "gfacID='$slurm_id', "
+                . "autoflowAnalysisID='$autoflowID', "
+                . "cluster='$cluster', "
+                . ( $metaCluster !== null
+                    ? "metaschedulerClusterExecuting='" . mysqli_real_escape_string( $gfac_link, $metaCluster ) . "', "
+                    : "" )
+                . "us3_db='$dbname'";
+         $result = mysqli_query( $gfac_link, $query );
+         if ( ! $result ) {
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "
+                             . "cleaned up: " . mysqli_error( $gfac_link );
+            $ok = false;
+         }
+      }
+      finally
+      {
+         $pool->release( $gfac_link );
+      }
 
       $this->message[] = "DB updated: requestID=$requestID slurm_id=$slurm_id";
 
@@ -791,6 +843,207 @@ class submit_slurm extends jobsubmit
                                           $bindir = PHP_BINDIR )
    {
       return $sapi === 'cli' && $binary !== '' ? $binary : $bindir . '/php';
+   }
+
+   /**
+    * Which cluster identity the model's frozen mapping should be asked
+    * about, kept separate from where the job actually went.
+    *
+    * WHY SEPARATE. The destination is whatever this install calls the
+    * cluster it submits to -- 'us3iab-node0' for a co-located appliance
+    * cluster, say. The model was fitted against the historical identities
+    * runtime_cluster_map.php knows (real site hostnames), which a local or
+    * renamed entry will almost never match. Without a way to tell the
+    * advisory "score this as if it went to X", every submission from an
+    * install whose cluster names don't happen to match one of those reads
+    * 'unsupported' forever, regardless of whether the model could otherwise
+    * have scored it.
+    *
+    * One shared resolution for every family: this runs once per submission,
+    * before the family is even known, and feeds the same identity into
+    * whichever family's model ends up being asked.
+    *
+    * @return array{identity: string, source: string} source is 'configured'
+    *         when the entry sets prediction_cluster_name, 'fallback_name'
+    *         when it falls back to the entry's own name (this call's
+    *         previous and only behavior), or 'fallback_alias' when even
+    *         that is missing and the cluster's short name is used as-is.
+    */
+   protected function resolvePredictionClusterIdentity( $cluster )
+   {
+      $details = isset( $this->grid[ $cluster ] ) ? $this->grid[ $cluster ] : array();
+
+      ## is_string(): round 10 fixed this same "Array" conversion for
+      ## 'edit_filename' (a dataset file list that can genuinely be an
+      ## array), but missed that prediction_cluster_name -- an admin-set
+      ## cluster_details value, not user input -- has the identical
+      ## failure mode if it is ever mistakenly configured as one. (string)
+      ## alone does not protect against that: casting an array to string
+      ## produces the literal string "Array" (PHP Notice/Warning), not a
+      ## usable identity. Falls through to the next tier below instead,
+      ## same as the key simply being unset or empty.
+      if ( isset( $details[ 'prediction_cluster_name' ] )
+         && is_string( $details[ 'prediction_cluster_name' ] )
+         && $details[ 'prediction_cluster_name' ] !== '' )
+      {
+         return array( 'identity' => $details[ 'prediction_cluster_name' ], 'source' => 'configured' );
+      }
+
+      if ( isset( $details[ 'name' ] ) && $details[ 'name' ] !== '' )
+      {
+         return array( 'identity' => (string) $details[ 'name' ], 'source' => 'fallback_name' );
+      }
+
+      return array( 'identity' => (string) $cluster, 'source' => 'fallback_alias' );
+   }
+
+   /**
+    * Hand the advisory path what it needs and forget about it.
+    *
+    * Called from submit(), not write_slurm_script(): the job id now exists,
+    * and this only fires once update_db() has returned true, i.e. after
+    * sbatch has already run and the submission is otherwise committed. Kept
+    * off the critical path that way on purpose -- see the README for why.
+    *
+    * Swallows everything. An advisory failure is not a submission failure.
+    */
+   protected function observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins )
+   {
+      ## Checked directly, not through the class, so the switch stays a single
+      ## global lookup and nothing is required when it is off: that promise is
+      ## stated in class/prediction/README.md and belongs to this call site,
+      ## not to the class, which cannot load itself.
+      if ( empty( $GLOBALS[ 'global_runtime_advisory_enabled' ] ) )
+      {
+         return;
+      }
+
+      try {
+         ## include_once, not require_once: a missing file here is the same
+         ## "advisory unusable" case this whole call swallows, not a reason
+         ## to take the submission down with a compile error after the job
+         ## is already recorded.
+         if ( ! class_exists( 'runtime_advisory' ) )
+         {
+            global $class_dir;
+            include_once $class_dir . 'prediction/runtime_advisory.php';
+         }
+
+         if ( ! class_exists( 'runtime_advisory' ) )
+         {
+            ## Otherwise this is silent apart from PHP's own include warning,
+            ## which goes to the PHP error log, not where an admin looking
+            ## into the advisory would think to check. Covers both this file
+            ## being missing and one of its own siblings being missing or
+            ## broken (runtime_advisory.php degrades the same way for that).
+            ##
+            ## Once per process, not once per job: a missing/broken install
+            ## stays missing/broken for the life of the process, so logging
+            ## this on every submission just repeats the same line once per
+            ## job, forever, until someone fixes the install.
+            static $warned = false;
+            if ( ! $warned )
+            {
+               $warned = true;
+               elog2( "runtime advisory: request $requestID: class not available"
+                    . " after loading prediction/runtime_advisory.php; advisory skipped"
+                    . " for the rest of this process" );
+            }
+            return;
+         }
+
+         global $dbusername, $dbpasswd, $dbhost, $dbname;
+         global $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname;
+
+         $job     = isset( $this->data[ 'job' ] ) ? $this->data[ 'job' ] : array();
+         $dataset = isset( $this->data[ 'dataset' ][ 0 ] ) ? $this->data[ 'dataset' ][ 0 ] : array();
+         $files   = isset( $dataset[ 'files' ] ) ? $dataset[ 'files' ] : array();
+
+         $link = db_connection_pool::shared()->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
+         $gfac = db_connection_pool::shared()->checkout( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
+
+         $predictionIdentity = $this->resolvePredictionClusterIdentity( $cluster );
+
+         $status = runtime_advisory::observe( array(
+            'us3_db'      => $dbname,
+            'request_id'  => $requestID,
+            ## Checked against the artifact's family: another method's request
+            ## can carry enough of the same parameter names to be scored.
+            'method'      => isset( $this->data[ 'method' ] ) ? $this->data[ 'method' ] : '',
+            ## The entry's name, which is what the request actually went to.
+            'destination' => isset( $this->grid[ $cluster ][ 'name' ] )
+                             ? $this->grid[ $cluster ][ 'name' ] : $cluster,
+            ## The identity the model's frozen mapping is keyed on -- not
+            ## always the same as the destination above (see
+            ## resolvePredictionClusterIdentity()).
+            'prediction_cluster'        => $predictionIdentity[ 'identity' ],
+            'prediction_cluster_source' => $predictionIdentity[ 'source' ],
+
+            'parameters'    => isset( $job[ 'jobParameters' ] ) ? $job[ 'jobParameters' ] : array(),
+            'speedsteps'    => isset( $dataset[ 'speedsteps' ] ) ? $dataset[ 'speedsteps' ] : array(),
+            'simpoints'     => isset( $dataset[ 'parameters' ][ 'simpoints' ] )
+                               ? $dataset[ 'parameters' ][ 'simpoints' ] : null,
+            ## is_string(): some dataset shapes carry 'edit' as an array (more
+            ## than one file), and an array reaching here unchanged becomes
+            ## the literal string "Array" downstream (a PHP Notice/Warning,
+            ## "Array to string conversion") the first time it is used in a
+            ## string context, instead of the filename this is actually for.
+            'edit_filename' => isset( $files[ 'edit' ] ) && is_string( $files[ 'edit' ] )
+                                ? $files[ 'edit' ] : null,
+
+            ## The incumbent, and what is actually being emitted, recorded apart.
+            'formula_reference_seconds' => (int) $wallmins * 60,
+            'emitted_directive'         => $walltime,
+            'requested_ranks'           => isset( $plan[ 'total_tasks' ] ) ? $plan[ 'total_tasks' ] : null,
+
+            'link'      => $link,
+            'gfac_link' => $gfac,
+         ) );
+
+         ## Captured before the close below: runtime_record::insert() is the
+         ## only thing that can produce 'record_error', and it always does so
+         ## against $gfac (see observe()'s own 'gfac_link' => $gfac), so this
+         ## is the connection whose error actually explains it -- an existing
+         ## pilot table missing the newer columns reads here as "Unknown
+         ## column 'prediction_cluster'" (8.2) instead of a bare status with
+         ## no way to tell a missing column from any other reason the insert
+         ## could have failed.
+         $gfacError = ( $gfac && $status === 'record_error' ) ? mysqli_error( $gfac ) : '';
+
+         if ( $link )
+         {
+            mysqli_close( $link );
+         }
+         if ( $gfac )
+         {
+            mysqli_close( $gfac );
+         }
+
+         ## A row was still written for every one of these; this is the one
+         ## place that notices when it was not 'ok', so a run of artifact or
+         ## input trouble is visible without querying gfac.runtime_prediction.
+         if ( $status !== 'ok' )
+         {
+            elog2( "runtime advisory: request $requestID status $status"
+                 . ( $gfacError !== '' ? " ($gfacError)" : '' ) );
+         }
+      } catch ( Throwable $e ) {
+         ## Deliberately silent beyond the log: the job is what matters here.
+         elog2( 'runtime advisory: ' . $e->getMessage() );
+      } finally {
+         ## Pooled connections, not closed: this method runs once per job on the
+         ## same credentials submit()/update_db() already used, so releasing
+         ## back to the pool here is what lets those earlier checkouts actually
+         ## get reused instead of each opening its own connection.
+         if ( isset( $link ) )
+         {
+            db_connection_pool::shared()->release( $link );
+         }
+         if ( isset( $gfac ) )
+         {
+            db_connection_pool::shared()->release( $gfac );
+         }
+      }
    }
 
    /**

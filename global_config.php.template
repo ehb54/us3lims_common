@@ -75,9 +75,8 @@ $global_complete_max_seconds   = 21600;
 ## marker never came back, as with a connect failure or an open breaker) or
 ## when sbatch's own final line says it never reached the controller at all.
 ## Every other definite verdict sbatch can print -- a real rejection reason,
-## or its own busy/EAGAIN give-up -- is reported without a retry of ours
-## (see $global_sbatch_submit_retries above for why). An SSH
-## failure or dropped connection after the begin marker, with no definite
+## or its own busy/EAGAIN give-up -- is reported without a retry of ours; an
+## SSH failure or dropped connection after the begin marker, with no definite
 ## verdict line to go on, can mean Slurm accepted the job while its ID was
 ## lost on the way back, and retrying then would risk a duplicate, so that
 ## case is left for an operator to reconcile on the scheduler.
@@ -95,6 +94,35 @@ $global_complete_max_seconds   = 21600;
 ## probe marks a healthy cluster down. Zero disables the age check. Unset, the
 ## code uses 1800, which is what this matches.
 $global_cluster_status_max_age_seconds = 1800;
+
+## Metascheduler pick_cluster() tunables.
+##
+## queued+running at/above this on every local candidate in a pool means
+## "local is busy enough to try national instead". 0 disables local overflow
+## entirely (every job goes national), which is never the intended default;
+## a deployment that wants that should say so explicitly. Unset, the code
+## uses 20, which is what this matches.
+$global_cluster_saturation_threshold = 20;
+##
+## How long, in seconds, a pick_cluster_reserve() load nudge (gfac.
+## cluster_status_nudge) counts toward a candidate's load after being
+## written, before pick_cluster_status_snapshot() stops counting it. Long
+## enough to bridge a burst of decisions made moments apart -- the nudge's
+## only job -- short enough that it never stands in for a real probe
+## (cluster_status.php runs every 12 minutes by default) for long: set this
+## too high and a large burst can read as "every candidate saturated" for
+## real jobs submitted well after the burst that caused it has already
+## finished and drained. Unset, the code uses 90, which is what this
+## matches.
+$global_cluster_nudge_ttl_seconds = 90;
+##
+## How long, in seconds, a gfac.metascheduler_decision row is kept before an
+## opportunistic purge. That table is an audit trail, not a correctness
+## ledger like cluster_status_nudge above -- this exists only to bound its
+## growth, not to serve any decision logic, so the default is deliberately
+## long (a year) rather than tuned like the nudge TTL. 0 disables the purge
+## entirely. Unset, the code uses 31536000, which is what this matches.
+$global_metascheduler_decision_retention_seconds = 31536000;
 
 
 ## Optional breaker directory; defaults to ~us3/lims/etc/circuit-breaker.
@@ -138,6 +166,32 @@ $global_cluster_status_max_age_seconds = 1800;
 ## and '=', expands '%' sequences, and (OpenSSH 8.7+, EL9) rejects a "'".
 
 ## $global_ssh_control_dir = '/home/us3/lims/etc/ssh-control';
+
+## runtime advisory: record a predicted runtime for each eligible submission.
+##
+## advisory only. it cannot change the limit a job is given, and it is off
+## unless this is true. with it off, a submission reads this one setting and
+## does nothing further: no artifact is read and no record is written.
+##
+## a submission is never failed by the advisory. where the model, the inputs or
+## the recording are unusable, the submission proceeds unchanged and the reason
+## is recorded in gfac.runtime_prediction.
+$global_runtime_advisory_enabled = false;
+
+## the frozen model artifacts, one per method family. by default each family is
+## read from /home/us3/lims/etc/runtime_advisory_<family>.json, and a family
+## whose file is absent is simply not served. the file's content hash is
+## recorded with every recommendation, so changing a file mid-window is visible
+## in the records.
+##
+## set this only to put the files elsewhere. an array names them per family and
+## leaves out a family deliberately; a single string names one file, which is
+## still only used for the family it was fitted for.
+## $global_runtime_advisory_artifact = array(
+##    '2DSA' => '/home/us3/lims/etc/runtime_advisory_2DSA.json',
+##    'GA'   => '/home/us3/lims/etc/runtime_advisory_GA.json',
+##    'PCSA' => '/home/us3/lims/etc/runtime_advisory_PCSA.json',
+## );
 
 ## No $global_elog_dir setting: dbinst's elog.php is always ~us3/lims/etc.
 ## elog()'s own callers call it before global_config.php is loaded, so a
@@ -211,6 +265,13 @@ $default_local_cluster = 'us3iab-node0';
 ##                               only national HPC entries request a walltime
 ##   wall_override        int     fixed walltime in minutes unless usemaxtime is set
 ##                               estimates and overrides are capped by maxtime
+##   prediction_cluster_name
+##                        string  identity to score the runtime advisory against,
+##                               when this entry's own name/alias does not match
+##                               one of the historical identities the model knows
+##                               (a local or renamed install's cluster names rarely
+##                               do). Unset, the advisory falls back to this
+##                               entry's own 'name', then its short alias.
 ##
 ## Independent sizing settings:
 ##   single_node         bool   require one node and maxproc <= ppn (default false)

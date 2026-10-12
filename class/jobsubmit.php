@@ -177,6 +177,68 @@ class jobsubmit
                continue;
            }
 
+           ## A metascheduler pool whose 'clusters' list names a key that
+           ## does not exist in $cluster_details at all (a typo, a renamed
+           ## or removed cluster) must fail loudly here rather than silently
+           ## shrinking the pool -- pick_cluster() itself only sees the
+           ## candidate list it is handed and has no way to tell "this name
+           ## was never configured anywhere" from "this real cluster just
+           ## happens to be inactive right now".
+           ##
+           ## Round-12 nit (common#32, moved here since #32 was closed in
+           ## favor of this branch): this validation accepted a 'clusters'
+           ## value that was not an array at all (foreach on a string warns
+           ## and iterates zero times, so the pool entry was silently kept
+           ## with an unusable member list), an empty array (a pool with
+           ## nothing to ever choose from), a pool naming itself as its own
+           ## member, another pool nested inside this one's member list
+           ## (pick_cluster() expects real clusters only), and a member that
+           ## exists in $cluster_details but is not actually enabled for
+           ## this instance (the same active/present checks already run
+           ## for the pool entry itself above, never run per-member).
+           if ( array_key_exists( "clusters", $v ) ) {
+               if ( !is_array( $v[ 'clusters' ] ) ) {
+                   $error_msg( "metascheduler '$k' has a 'clusters' value that is not an array" );
+                   $ok = false;
+               } elseif ( count( $v[ 'clusters' ] ) === 0 ) {
+                   $error_msg( "metascheduler '$k' has an empty 'clusters' list" );
+                   $ok = false;
+               } else {
+                   foreach ( $v[ 'clusters' ] as $member ) {
+                       if ( $member === $k ) {
+                           $error_msg( "metascheduler '$k' lists itself in its own 'clusters'" );
+                           $ok = false;
+                           continue;
+                       }
+                       if ( !array_key_exists( $member, $cluster_details ) ) {
+                           $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', "
+                                     . "but no such cluster exists in \$cluster_details" );
+                           $ok = false;
+                           continue;
+                       }
+                       if ( is_array( $cluster_details[ $member ] )
+                            && array_key_exists( 'clusters', $cluster_details[ $member ] ) ) {
+                           $error_msg( "metascheduler '$k' lists another pool ('$member') in its"
+                                     . " 'clusters', not a real cluster" );
+                           $ok = false;
+                           continue;
+                       }
+                       if ( !array_key_exists( $member, $cluster_configuration )
+                            || !is_array( $cluster_configuration[ $member ] )
+                            || empty( $cluster_configuration[ $member ][ 'active' ] ) ) {
+                           $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', but it"
+                                     . " is not enabled for this instance (missing or inactive in"
+                                     . " \$cluster_configuration)" );
+                           $ok = false;
+                           continue;
+                       }
+                   }
+               }
+               if ( !$ok ) {
+                   continue;
+               }
+           }
+
            ## go with entry
 
            $this->grid[ $k ] = $v;
@@ -196,6 +258,29 @@ class jobsubmit
       $this->jobfile = "";
       $this->message = array();
       $this->xmlfile = "";
+   }
+
+   ## Record the real cluster a metascheduler pseudo-cluster submission
+   ## resolved to, so update_db() can write it to gfac.analysis separately
+   ## from cluster_shortname (which stays the pseudo name). Call after
+   ## parse_input()/clear(), since clear() wipes $data. A direct submission
+   ## to a real cluster never calls this, so the field stays unset/NULL.
+   public function set_metascheduler_cluster_executing( $cluster )
+   {
+      $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] = $cluster;
+   }
+
+   ## The real $this->grid[...] entry to read for every execution-time
+   ## config lookup (workdir, queue, sshport, maxtime, ppn/ppbj/maxproc,
+   ## login, ...): metaschedulerClusterExecuting when a metascheduler
+   ## pseudo-cluster has been resolved to a real one, else cluster_shortname
+   ## itself for a direct submission. cluster_shortname is still what gets
+   ## written to gfac.analysis and shown to the user -- this is only for
+   ## "which real machine do we actually run this on".
+   public function execution_cluster()
+   {
+      return $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ]
+             ?? $this->data[ 'job' ][ 'cluster_shortname' ];
    }
 
    ## Request status
@@ -354,7 +439,8 @@ class jobsubmit
 
    function parse_jobParameters( &$parser, &$job )
    {
-      $parameters = array();
+      $parameters  = array();
+      $occurrences = array();
 
       while ( $parser->read() )
       {
@@ -370,6 +456,39 @@ class jobsubmit
          }
 
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
+         $occurrences[ $tag ] = isset( $occurrences[ $tag ] ) ? $occurrences[ $tag ] + 1 : 1;
+
+         ## A few elements carry their meaning in further attributes rather than
+         ## in 'value': GA's bucket_fixed records which axes are held fixed in
+         ## fixedtype, xtype and ytype. Keeping only 'value' discarded those,
+         ## so anything reading this array could not tell a fixed axis from a
+         ## free one. Named "<tag>_<attribute>", which is how the historical
+         ## extraction names them, so one spelling serves both.
+         foreach ( array( 'fixedtype', 'xtype', 'ytype' ) as $attribute )
+         {
+            $value = $parser->getAttribute( $attribute );
+
+            if ( $value !== null )
+            {
+               $parameters[ $tag . '_' . $attribute ] = $value;
+            }
+         }
+      }
+
+      ## A repeated element carries its meaning in how many there are rather
+      ## than in any one of them: GA's buckets are written as one <bucket> each
+      ## with no count element anywhere, and only the last of them survives the
+      ## assignment above. Named "<tag>_count", which is how the historical
+      ## extraction names it, and never written over an element that already
+      ## holds that name, so a real vars_count stays the request's own value.
+      foreach ( $occurrences as $tag => $seen )
+      {
+         $key = $tag . '_count';
+
+         if ( ! array_key_exists( $key, $parameters ) )
+         {
+            $parameters[ $key ] = $seen;
+         }
       }
 
       $job[ 'jobParameters' ] = $parameters;
@@ -428,8 +547,20 @@ class jobsubmit
             case 'auc'       :
             case 'edit'      :
             case 'model'     :
+               ## Keyed by role, not positional: a <files> block names each of
+               ## these at most once, and callers (the runtime advisory) need
+               ## the filename for a specific role, not the Nth one present.
+               $files[ $tag ] = $parser->getAttribute( 'filename' );
+              break;
+
             case 'noise'     :
-               array_push( $files, $parser->getAttribute( 'filename' ) );
+               ## Unlike the roles above, dbinst writes one <noise> per noise
+               ## file (ri and ti noise can both be in use), so this is a list.
+               if ( ! isset( $files[ 'noise' ] ) )
+               {
+                  $files[ 'noise' ] = array();
+               }
+               $files[ 'noise' ][] = $parser->getAttribute( 'filename' );
               break;
          }
       }
@@ -439,6 +570,7 @@ class jobsubmit
    function parse_parameters( &$parser, &$dataset )
    {
       $parameters = array();
+      $speedsteps = array();
 
       while ( $parser->read() )
       {
@@ -453,16 +585,36 @@ class jobsubmit
          { continue;
          }
 
+         ## <speedstep> repeats, one per step, and carries its own attributes
+         ## rather than a single "value" like every other parameter tag.
+         if ( $tag == 'speedstep' )
+         {
+            array_push( $speedsteps, array(
+               'rotorspeed'    => $parser->getAttribute( 'rotorspeed' ),
+               'duration_hrs'  => $parser->getAttribute( 'duration_hrs' ),
+               'duration_mins' => $parser->getAttribute( 'duration_mins' ),
+            ) );
+            continue;
+         }
+
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
       }
 
-      $dataset[ 'parameters' ] = $parameters;
+      $dataset[ 'parameters' ]  = $parameters;
+      $dataset[ 'speedsteps' ]  = $speedsteps;
    }
 
    function maxwall()
    {
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
-      $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
+      ## execution_cluster(), not cluster_shortname directly: a metascheduler
+      ## pool submission resolves to a real cluster whose maxtime/ppn/maxproc
+      ## can differ sharply from the pool's own pseudo-entry -- reading
+      ## cluster_shortname here instead used the pool's own (often
+      ## unconfigured/default) wall-time limit, confirmed giving a CG job 44
+      ## minutes instead of the real cluster's 176 (round-12 should-fix,
+      ## common#32, moved here since #32 was closed in favor of this branch).
+      $cluster    = $this->execution_cluster();
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
       $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
@@ -675,7 +827,7 @@ class jobsubmit
    ## The GA demes=1 case also updates ppbj; repeated calls are stable.
    protected function tasks_per_group_plan()
    {
-      $cluster       = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster       = $this->execution_cluster();
       $cfg           = $this->grid[ $cluster ];
       $parameters    = $this->data[ 'job' ][ 'jobParameters' ];
       $fixed         = (bool) $this->cluster_opt( $cluster, 'fixed_capacity', false );
@@ -765,7 +917,7 @@ class jobsubmit
    ## allocated ranks per group, total MPI tasks, node capacity and node count.
    public function resource_plan()
    {
-      $cluster       = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster       = $this->execution_cluster();
       $cfg           = $this->grid[ $cluster ];
       $parameters    = $this->data[ 'job' ][ 'jobParameters' ];
       $single        = (bool) $this->cluster_opt( $cluster, 'single_node', false );
@@ -852,7 +1004,7 @@ class jobsubmit
       $mciters = (int)( $this->data[ 'job' ][ 'jobParameters' ][ 'mc_iterations' ] ?? 1 );
       $limit   = 32;
 
-      $cluster = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster = $this->execution_cluster();
       if ( ! $this->cluster_opt( $cluster, 'pmg', false )
            || preg_match( "/SA/", $this->data[ 'method' ] ) )
       {
@@ -876,7 +1028,7 @@ class jobsubmit
    ## Return the group ceiling before applying the requested group count.
    public function max_mgroupcount()
    {
-      $cluster = $this->data[ 'job' ][ 'cluster_shortname' ];
+      $cluster = $this->execution_cluster();
 
       return $this->group_ceiling(
          $this->tasks_per_group_plan()[ 'desired' ],

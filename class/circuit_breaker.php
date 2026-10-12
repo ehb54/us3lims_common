@@ -20,6 +20,14 @@ class circuit_breaker
    private $log;
    private $usable = null;
 
+   ## An outer bound on $max_cooldown itself: without one, a caller mistake
+   ## (or a hand-edited config many zeros too many) could lock a cluster
+   ## out for longer than any reasonable outage, with no way to recover
+   ## before someone notices and edits the file. 24h is generous enough
+   ## that no legitimate doubling schedule would ever reach it by accident,
+   ## while still being a real ceiling rather than no ceiling at all.
+   const MAX_COOLDOWN_CEILING_SECONDS = 86400;
+
    /**
     * $dir       directory for state files. Created if absent.
     * $threshold consecutive transport faults before the breaker opens.
@@ -30,12 +38,19 @@ class circuit_breaker
     *            trips (a trip the probe immediately fails again). Omitted
     *            (null) means $cooldown itself, i.e. no progressive
     *            backoff, so an existing caller that doesn't pass this
-    *            keeps today's behavior exactly. Anything else that isn't a
-    *            positive int at least $cooldown is a caller mistake, not a
-    *            request for "no backoff" -- that case now logs a warning
-    *            and falls back the same way, instead of silently doing the
-    *            same thing a genuine 0 or a typo'd non-numeric value would
-    *            have done with no way to tell them apart.
+    *            keeps today's behavior exactly. An int, or a clean numeric
+    *            string (a hand-edited config value quoted by mistake, e.g.
+    *            '1800', is still an unambiguous request for that ceiling,
+    *            not a request for "no backoff" -- silently falling back to
+    *            no-backoff for a typo this easy to make is a worse failure
+    *            mode than being lenient about the type), from $cooldown
+    *            through self::MAX_COOLDOWN_CEILING_SECONDS, is accepted.
+    *            Anything else -- too small, too large, non-numeric -- is a
+    *            caller mistake, not a request for "no backoff": that case
+    *            now logs a warning and falls back the same way, instead of
+    *            silently doing the same thing a genuine 0 or a typo'd
+    *            non-numeric value would have done with no way to tell them
+    *            apart.
     */
    public function __construct( $dir, $threshold = 3, $cooldown = 120, $log = null, $max_cooldown = null )
    {
@@ -48,17 +63,26 @@ class circuit_breaker
       {
          $this->max_cooldown = $this->cooldown;
       }
-      elseif ( is_int( $max_cooldown ) && $max_cooldown >= $this->cooldown )
-      {
-         $this->max_cooldown = $max_cooldown;
-      }
       else
       {
-         $this->log( "max_cooldown ("
-            . ( is_scalar( $max_cooldown ) ? var_export( $max_cooldown, true ) : gettype( $max_cooldown ) )
-            . ") is not a valid ceiling (must be an int >= the {$this->cooldown}s base cooldown);"
-            . " using {$this->cooldown}s, i.e. no progressive backoff" );
-         $this->max_cooldown = $this->cooldown;
+         $normalized = is_int( $max_cooldown )
+                     ? $max_cooldown
+                     : ( is_string( $max_cooldown ) ? filter_var( $max_cooldown, FILTER_VALIDATE_INT ) : false );
+
+         if ( $normalized !== false && $normalized >= $this->cooldown
+              && $normalized <= self::MAX_COOLDOWN_CEILING_SECONDS )
+         {
+            $this->max_cooldown = $normalized;
+         }
+         else
+         {
+            $this->log( "max_cooldown ("
+               . ( is_scalar( $max_cooldown ) ? var_export( $max_cooldown, true ) : gettype( $max_cooldown ) )
+               . ") is not a valid ceiling (must be an int, or a numeric string, from"
+               . " {$this->cooldown} through " . self::MAX_COOLDOWN_CEILING_SECONDS . "s);"
+               . " using {$this->cooldown}s, i.e. no progressive backoff" );
+            $this->max_cooldown = $this->cooldown;
+         }
       }
    }
 
@@ -91,17 +115,17 @@ class circuit_breaker
    /** Reset after any remote answer, including a command failure. */
    public function record_success( $cluster )
    {
-      $state = $this->read( $cluster );
+      $this->transact( $cluster, function ( $state ) use ( $cluster ) {
+         ## Avoid a write on the overwhelmingly common path where nothing is wrong.
+         if ( $state === null || ( $state[ 'failures' ] === 0 && $state[ 'open_until' ] === 0 ) )
+         {
+            return array( null, null );
+         }
 
-      ## Avoid a write on the overwhelmingly common path where nothing is wrong.
-      if ( $state === null || ( $state[ 'failures' ] === 0 && $state[ 'open_until' ] === 0 ) )
-      {
-         return;
-      }
+         $this->log( "$cluster answering again; breaker closed" );
 
-      $this->log( "$cluster answering again; breaker closed" );
-
-      $this->write( $cluster, array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => time() ) );
+         return array( array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => time() ), null );
+      } );
    }
 
    /**
@@ -118,6 +142,14 @@ class circuit_breaker
     * while open_until is still in the future is therefore just noise from
     * that same outage, not a new one: counted, but not re-tripped.
     *
+    * Goes through transact(), not a bare read()-then-write(): without the
+    * lock, a success and a late failure arriving at nearly the same moment
+    * could each read the OTHER's about-to-be-overwritten state and then
+    * write back-to-back, so the success's close either got silently
+    * reverted by the late failure's write landing second, or the failure's
+    * count got dropped by the success's write landing second -- confirmed
+    * losing the race in 4 of 8 concurrent runs before this fix.
+    *
     * @return bool true exactly on the call that opens the breaker (this
     *              failure crossed the threshold while not already open),
     *              false otherwise. Lets a caller mail an admin once per
@@ -126,47 +158,44 @@ class circuit_breaker
     */
    public function record_failure( $cluster )
    {
-      $state = $this->read( $cluster );
+      return $this->transact( $cluster, function ( $state ) use ( $cluster ) {
+         if ( $state === null )
+         {
+            $state = array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => 0 );
+         }
 
-      if ( $state === null )
-      {
-         $state = array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => 0 );
-      }
+         if ( $state[ 'open_until' ] > time() )
+         {
+            $this->log( "$cluster still open for "
+                        . ( $state[ 'open_until' ] - time() ) . "s; a late failure from an"
+                        . " in-flight call does not add another trip" );
 
-      if ( $state[ 'open_until' ] > time() )
-      {
-         $this->log( "$cluster still open for "
-                     . ( $state[ 'open_until' ] - time() ) . "s; a late failure from an"
-                     . " in-flight call does not add another trip" );
+            return array( array(
+               'failures' => $state[ 'failures' ] + 1, 'open_until' => $state[ 'open_until' ],
+               'trips' => $state[ 'trips' ], 'updated' => time()
+            ), false );
+         }
 
-         $this->write( $cluster, array(
-            'failures' => $state[ 'failures' ] + 1, 'open_until' => $state[ 'open_until' ],
-            'trips' => $state[ 'trips' ], 'updated' => time()
-         ) );
-         return false;
-      }
+         $failures = $state[ 'failures' ] + 1;
 
-      $failures = $state[ 'failures' ] + 1;
+         if ( $failures >= $this->threshold )
+         {
+            $trips      = $state[ 'trips' ] + 1;
+            $cooldown   = min( $this->max_cooldown, $this->cooldown * ( 2 ** ( $trips - 1 ) ) );
+            $open_until = time() + $cooldown;
 
-      if ( $failures >= $this->threshold )
-      {
-         $trips      = $state[ 'trips' ] + 1;
-         $cooldown   = min( $this->max_cooldown, $this->cooldown * ( 2 ** ( $trips - 1 ) ) );
-         $open_until = time() + $cooldown;
+            $this->log( "$cluster unreachable $failures time(s) in a row (trip $trips);"
+                        . " breaker open for {$cooldown}s -- further calls will fail fast" );
 
-         $this->log( "$cluster unreachable $failures time(s) in a row (trip $trips);"
-                     . " breaker open for {$cooldown}s -- further calls will fail fast" );
+            return array( array(
+               'failures' => $failures, 'open_until' => $open_until, 'trips' => $trips, 'updated' => time()
+            ), true );
+         }
 
-         $this->write( $cluster, array(
-            'failures' => $failures, 'open_until' => $open_until, 'trips' => $trips, 'updated' => time()
-         ) );
-         return true;
-      }
-
-      $this->write( $cluster, array(
-         'failures' => $failures, 'open_until' => 0, 'trips' => $state[ 'trips' ], 'updated' => time()
-      ) );
-      return false;
+         return array( array(
+            'failures' => $failures, 'open_until' => 0, 'trips' => $state[ 'trips' ], 'updated' => time()
+         ), false );
+      } );
    }
 
    ## Human-readable state, for the health probe and logs.
@@ -316,9 +345,13 @@ class circuit_breaker
          return null;
       }
 
-      $raw = @file_get_contents( $this->path( $cluster ) );
+      return $this->decode( @file_get_contents( $this->path( $cluster ) ) );
+   }
 
-      $state = $raw === false || $raw === '' ? null : json_decode( $raw, true );
+   /** Shared by read() and transact(): raw file contents -> validated state array, or null. */
+   private function decode( $raw )
+   {
+      $state = $raw === false || $raw === null || $raw === '' ? null : json_decode( $raw, true );
 
       if ( ! is_array( $state ) || ! isset( $state[ 'failures' ], $state[ 'open_until' ] ) )
       {
@@ -335,32 +368,77 @@ class circuit_breaker
    }
 
    /**
-    * Atomic replacement keeps readers from seeing partial JSON.
-    * Concurrent updates can overwrite each other's failure counts.
+    * Read-modify-write a cluster's state under an exclusive lock, so a
+    * success and a late failure arriving at nearly the same moment can
+    * never clobber each other's write by each reading the other's
+    * about-to-be-overwritten state and writing back-to-back.
+    * record_success()/record_failure() both go through this instead of a
+    * bare read() followed by write() with nothing serializing the two.
+    *
+    * $mutator receives the current state (same shape read() returns,
+    * already capped to max_cooldown; null if there is none yet) and must
+    * return [ $newStateOrNull, $returnValue ]: $newStateOrNull is written
+    * if not null, so a caller that decides nothing needs to change (e.g.
+    * record_success() on an already-closed breaker) can skip the write
+    * entirely while still holding the lock throughout the decision;
+    * $returnValue is handed back to transact()'s own caller unchanged.
     */
-   private function write( $cluster, $state )
+   private function transact( $cluster, callable $mutator )
    {
       if ( ! $this->usable() )
       {
-         return;
+         list( , $result ) = $mutator( null );
+         return $result;
       }
 
       $path = $this->path( $cluster );
-      $tmp  = @tempnam( $this->state_dir(), '.brk-' );   ## a new file: never follows a planted symlink
 
-      if ( $tmp === false || @file_put_contents( $tmp, json_encode( $state ) ) === false )
+      if ( is_link( $path ) )
       {
-         if ( $tmp !== false ) @unlink( $tmp );
-         return;
+         list( , $result ) = $mutator( null );
+         return $result;
       }
 
-      ## tempnam() already creates 0600; said explicitly because the mode is part
-      ## of the contract, not an incidental property of how the file was made.
-      @chmod( $tmp, 0600 );
+      ## 'c+': create if missing, read/write, never truncates on open -- this
+      ## process's own read below has to see whatever is already there.
+      $fh = @fopen( $path, 'c+' );
 
-      if ( ! @rename( $tmp, $path ) )
+      if ( $fh === false )
       {
-         @unlink( $tmp );
+         list( , $result ) = $mutator( null );
+         return $result;
+      }
+
+      try
+      {
+         if ( ! flock( $fh, LOCK_EX ) )
+         {
+            list( , $result ) = $mutator( null );
+            return $result;
+         }
+
+         $state = $this->decode( stream_get_contents( $fh ) );
+
+         list( $newState, $result ) = $mutator( $state );
+
+         if ( $newState !== null )
+         {
+            rewind( $fh );
+            ftruncate( $fh, 0 );
+            fwrite( $fh, json_encode( $newState ) );
+            fflush( $fh );
+            ## Explicit, not just relying on fopen()'s create mode: the mode is
+            ## part of this class's own contract (see the file docblock), not
+            ## an incidental property of how the file happened to be created.
+            @chmod( $path, 0600 );
+         }
+
+         return $result;
+      }
+      finally
+      {
+         flock( $fh, LOCK_UN );
+         fclose( $fh );
       }
    }
 

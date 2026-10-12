@@ -980,7 +980,22 @@ class remote_exec
       $stdout     = array();
       $exit_code  = 0;
 
-      $this->runExec( "$wrapped 2>$stderr_tmp", $stdout, $exit_code );
+      ## { ...; } wraps $wrapped in a brace group before the redirect, not
+      ## a bare "$wrapped 2>$stderr_tmp": when timeout(1)'s -k grace period
+      ## expires on a command that ignored SIGTERM (trap '' TERM, or a
+      ## child that inherited that disposition) and it is SIGKILLed, exec()'s
+      ## own /bin/sh reports "Killed <command line>" as a job-control
+      ## message -- but only AFTER a single-command redirect has already
+      ## been torn down, since that redirect was scoped to just the one
+      ## simple command, not to the shell's own reporting of it. That
+      ## message then leaks onto PHP's own stderr instead of into
+      ## $stderr_tmp. A brace group's redirect instead scopes the whole
+      ## group for the life of the shell invocation, which does capture it
+      ## -- confirmed empirically: a bare single-command redirect leaves
+      ## the "Killed" line outside the file every time; the brace-group
+      ## form captures it every time, with no change to stdout, the exit
+      ## code, or genuine stderr output for a command that isn't killed.
+      $this->runExec( "{ $wrapped ; } 2>$stderr_tmp", $stdout, $exit_code );
 
       $stderr = is_readable( $stderr_tmp ) ? trim( file_get_contents( $stderr_tmp ) ) : '';
       @unlink( $stderr_tmp );

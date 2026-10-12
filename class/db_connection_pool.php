@@ -127,6 +127,17 @@ class db_connection_pool
          return;
       }
 
+      ## Round-12 nit (common#32, moved here since #32 was closed in favor
+      ## of this branch): no current caller opens a transaction on a pooled
+      ## connection, so this is not yet exploited -- but without it, a
+      ## future caller that does (and then hits an exception before its own
+      ## COMMIT/ROLLBACK, bypassing $healthy=false) would hand the next
+      ## checkout() a connection mid-transaction, silently inheriting
+      ## whatever that transaction already changed. Rolled back and
+      ## returned to autocommit unconditionally before pooling -- a no-op
+      ## for the overwhelmingly common case where nothing was open.
+      try { @mysqli_rollback( $conn ); @mysqli_autocommit( $conn, true ); } catch ( \Throwable $e ) { }
+
       $this->idle[ $key ][] = $conn;
    }
 

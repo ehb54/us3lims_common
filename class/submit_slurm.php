@@ -488,7 +488,7 @@ class submit_slurm extends jobsubmit
       global $ID, $is_cli;
       global $org_name, $admin_email;
 
-      $autoflowID = ( $is_cli && $ID ) ? $ID : 0;
+      $autoflowID = ( $is_cli && $ID ) ? (int) $ID : 0;
       if ( $autoflowID <= 0 )
       {
          return;
@@ -504,7 +504,7 @@ class submit_slurm extends jobsubmit
       $query = "UPDATE autoflowAnalysis SET "
              . "status='SUBMIT_TIMEOUT', "
              . "statusMsg='Job submission failed: $qfmsg' "
-             . "WHERE requestID='$autoflowID'";
+             . "WHERE requestID=$autoflowID";
       $result = mysqli_query( $link, $query );
       if ( ! $result )
       {
@@ -518,7 +518,7 @@ class submit_slurm extends jobsubmit
       $investigator_email = null;
       $email_result = mysqli_query( $link,
          "SELECT p.email FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
-       . " WHERE a.requestID = '$autoflowID'" );
+       . " WHERE a.requestID = $autoflowID" );
       if ( $email_result && ( $row = mysqli_fetch_assoc( $email_result ) ) )
       {
          $investigator_email = $row[ 'email' ];

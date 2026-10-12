@@ -17,14 +17,28 @@ class remote_exec
    ## in-call retry is already covered by the next poll a few seconds later.
    ## Blocking a web/PHP worker for up to 35s (the old 5+10+20 backoff) to
    ## retry a call that the next poll would retry anyway bought nothing.
+   ##
+   ## This reasoning does NOT apply to a submission's staging (mkdir, then
+   ## the copy): those happen once, at submit time, with nothing that polls
+   ## again if they fail -- a dropped connection there fails the whole
+   ## submission, not just one poll of many. STAGING_RETRIES below gives
+   ## staging its own, larger budget instead of sharing this one.
    const TRANSPORT_RETRIES       = 1;
    const RETRY_WAIT_SECONDS      = 5;
+   ## Three retries (four attempts, waits 5+10+20=35s) is enough to ride out
+   ## two dropped connections in a row, or sshd briefly refusing new
+   ## connections (observed: held at MaxStartups for 9s) -- both real,
+   ## reproduced cases that a 1-retry budget failed outright.
+   const STAGING_RETRIES         = 3;
    const BREAKER_FAILURES        = 3;
    const BREAKER_COOLDOWN_SECONDS = 120;
    ## Doubles on each consecutive trip (120, 240, 480, ...) so a sustained
    ## outage backs off instead of re-probing the controller every 120s for
    ## its whole duration; caps so a resolved outage is still found within
-   ## one capped cooldown of it clearing.
+   ## one capped cooldown of it clearing. Override with
+   ## $global_circuit_breaker_max_cooldown_seconds; circuit_breaker's own
+   ## constructor validates whatever lands here and logs a warning instead
+   ## of silently granting "no backoff" if it isn't a usable value.
    const BREAKER_MAX_COOLDOWN_SECONDS = 1800;
 
    ## Use a shared path outside service-private /tmp directories.
@@ -161,20 +175,19 @@ class remote_exec
    ## The appliance's own node: the scheduler and LIMS run on the same host,
    ## so run() below bypasses ssh for this cluster entirely.
    ##
-   ## Also true for the cluster named by $default_local_cluster, PROVIDED
-   ## its own login host actually matches this machine (runsOnThisHost()):
-   ## that variable is global_config.php's own answer to "which cluster is
-   ## this host", already set by uslims_upgrade.php and used by
-   ## submitone.php/submitctl.php to resolve the literal cluster name
-   ## "localhost" -- the per-entry 'localhost' flag is a second, easy-to-
-   ## forget place to say the same thing, and a fresh install's template
-   ## set only this one, not that flag, which left every fresh appliance
-   ## polling over ssh at scale. But the name match alone is just "this is what CLI
-   ## 'localhost' resolves to", not a claim about where the entry actually
-   ## is -- pointed at a genuinely remote cluster, it was taken as local
-   ## regardless. An explicit 'localhost' => true on the entry itself is a
-   ## direct assertion instead, trusted without this extra check, and still
-   ## wins regardless of this variable.
+   ## Locality is decided ONLY by an explicit 'localhost' => true on the
+   ## entry itself -- a direct assertion from whoever wrote the config,
+   ## not inferred from $default_local_cluster or this machine's hostname.
+   ## An earlier version also took $default_local_cluster naming this
+   ## cluster as a hint, falling back to a gethostname() comparison against
+   ## the entry's login host; that meant a fresh install whose hostname
+   ## didn't match the template's login host exactly (no alias/FQDN/
+   ## loopback handling) silently lost the local path and polled over ssh
+   ## at scale, which is the same cost already flagged elsewhere. Any install
+   ## that wants the local path now has to set the flag, which the
+   ## template does for its appliance entry -- $default_local_cluster
+   ## itself should simply be set to whichever cluster carries the flag,
+   ## not the other way around.
    ##
    ## Marked local is not enough by itself: mkdir/scp still address
    ## us3@<self>, and the monitor it hands jobs to always runs as us3
@@ -182,18 +195,17 @@ class remote_exec
    ## account creates files one of those two can't reach -- a split-account
    ## host (web tier != us3, which dbutils#45 provisions for) gets a
    ## staging failure with no reason, a denied scp, or scancel refused by a
-   ## job it doesn't own, depending on where it is in the lifecycle (round
-   ## 9 should-fix). ssh is always correct regardless of which account asks
+   ## job it doesn't own, depending on where it is in the lifecycle. ssh is
+   ## always correct regardless of which account asks
    ## for it, so an unconfirmed match falls back to ssh rather than risking
    ## the wrong owner -- this only gives up the local path's speed, never
    ## correctness.
    public function is_local()
    {
       ## An explicit, present 'localhost' key is the admin directly saying
-      ## yes or no -- true is trusted as-is, no further host check; false
-      ## opts this entry out even when $default_local_cluster happens to
-      ## name it too, instead of (as before) being indistinguishable from
-      ## the key simply being absent.
+      ## yes or no -- true is trusted as-is; false opts this entry out even
+      ## when $default_local_cluster happens to name it too. Absent, the
+      ## entry is never local: there is no other signal for it.
       if ( isset( $this->details[ 'localhost' ] ) )
       {
          if ( ! $this->details[ 'localhost' ] )
@@ -202,59 +214,21 @@ class remote_exec
             return false;
          }
 
-         return $this->runsAsLoginUser();
-      }
-
-      ## $default_local_cluster matching $this->cluster is a weaker signal:
-      ## it only says "this is the name CLI 'localhost' submissions resolve
-      ## to", not that the entry is actually on this machine. Pointed at a
-      ## remote cluster whose login happens to use the same account name as
-      ## this host runs as (e.g. 'us3'), runsAsLoginUser() alone could not
-      ## tell the difference -- mkdir/sbatch ran locally against a cluster
-      ## with no Slurm installed, and the job was held forever.
-      ## runsOnThisHost() closes that: the shortcut is now
-      ## only taken when the entry's own login host actually matches this
-      ## machine's hostname, not just its account name.
-      if ( isset( $GLOBALS[ 'default_local_cluster' ] )
-         && $GLOBALS[ 'default_local_cluster' ] === $this->cluster )
-      {
-         if ( ! $this->runsOnThisHost() )
+         if ( ! $this->runsAsLoginUser() )
          {
-            $this->logf( "default_local_cluster names this cluster, but its login host"
-               . " does not match this machine; using ssh" );
+            ## The flip side of the 'localhost' => false log above: an
+            ## account mismatch used to fall back to ssh silently, with
+            ## nothing in the log naming why the local path, which the
+            ## config explicitly asked for, was not taken.
+            $this->logf( "'localhost' => true, but this process's account is not"
+               . " the entry's login user; using ssh" );
             return false;
          }
 
-         return $this->runsAsLoginUser();
+         return true;
       }
 
       return false;
-   }
-
-   /** Whether this entry's login host is actually this machine, not just a same-named account elsewhere. */
-   private function runsOnThisHost()
-   {
-      $login = $this->login();
-      $at = strpos( $login, '@' );
-      $loginHost = $at !== false ? substr( $login, $at + 1 ) : '';
-
-      $here = $this->currentHostName();
-
-      return $loginHost !== '' && $here !== '' && strcasecmp( $loginHost, $here ) === 0;
-   }
-
-   ## Seam: the test double scripts this instead of reading the real host
-   ## identity, the same way currentAccountName() is overridden.
-   protected function currentHostName()
-   {
-      if ( ! function_exists( 'gethostname' ) )
-      {
-         return '';
-      }
-
-      $name = gethostname();
-
-      return is_string( $name ) ? $name : '';
    }
 
    /** Whether this process's own account is the one the local exec() would run as. */
@@ -484,11 +458,28 @@ class remote_exec
 
    /**
     * Copy $remote_path (a path on the cluster) into the local $local_dest.
+    *
+    * A 'localhost' entry copies with /bin/cp, not scp: the appliance's own
+    * node has no ssh hop to make at all, and going through scp regardless
+    * means a submission or a finalizing fetch depends on sshd being up
+    * even for its own co-located cluster -- confirmed for real, both with
+    * sshd stopped outright (staging failed) and with it down only while a
+    * job ran (finalization waited for it to come back). run()'s local
+    * branch already makes the same exception for exec(); this mirrors it
+    * for the two copy directions.
     */
    public function copy_from( $remote_path, $local_dest, $opts = array() )
    {
       $timeout = $this->operationTimeout(
          $opts, 'copy_timeout_seconds', 'copy_timeout_seconds' );
+
+      if ( $this->is_local() )
+      {
+         $cmd = '/bin/cp ' . escapeshellarg( $remote_path ) . ' ' . escapeshellarg( $local_dest );
+
+         return $this->attempt( $cmd, $timeout, $opts,
+            isset( $opts['label'] ) ? $opts['label'] : 'copy_from', null );
+      }
 
       $multiplex = ! empty( $opts[ 'multiplex' ] );
 
@@ -509,6 +500,9 @@ class remote_exec
    /**
     * Copy local files to $remote_dest on the cluster. $local_paths may be a
     * single path or an array of them.
+    *
+    * See copy_from()'s comment: a 'localhost' entry uses /bin/cp instead of
+    * scp, for the same reason.
     */
    public function copy_to( $local_paths, $remote_dest, $opts = array() )
    {
@@ -517,6 +511,15 @@ class remote_exec
 
       $paths = is_array( $local_paths ) ? $local_paths : array( $local_paths );
       $srcs  = implode( ' ', array_map( 'escapeshellarg', $paths ) );
+
+      if ( $this->is_local() )
+      {
+         $cmd = '/bin/cp ' . $srcs . ' ' . escapeshellarg( $remote_dest );
+
+         return $this->attempt( $cmd, $timeout, $opts,
+            isset( $opts['label'] ) ? $opts['label'] : 'copy_to', null );
+      }
+
       $multiplex = ! empty( $opts[ 'multiplex' ] );
 
       $cmd = '/usr/bin/scp ' . $this->scpOpts( $multiplex ) . ' ' . $srcs
@@ -927,7 +930,7 @@ class remote_exec
          self::BREAKER_FAILURES,
          self::BREAKER_COOLDOWN_SECONDS,
          $this->log,
-         self::BREAKER_MAX_COOLDOWN_SECONDS
+         $GLOBALS[ 'global_circuit_breaker_max_cooldown_seconds' ] ?? self::BREAKER_MAX_COOLDOWN_SECONDS
       );
 
       return $this->breaker;

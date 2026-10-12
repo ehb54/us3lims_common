@@ -295,7 +295,19 @@ class submit_slurm extends jobsubmit
 
       for ( $attempt = 1; ; $attempt++ )
       {
-         $result = $this->sbatchOnce( $cluster, $workdir, $attempt );
+         ## The last attempt this submission will ever make bypasses the
+         ## breaker's open-gate check (still recording bookkeeping either
+         ## way -- see sbatchOnce()): without this, a breaker that opened
+         ## on this same submission's own earlier failures guarantees the
+         ## last attempt is refused outright with no real attempt at all,
+         ## turning a short, already-recovering outage into a hard failure
+         ## for no reason -- confirmed for real against a 90s outage, where
+         ## sbatch's own retry budget (3) exactly matches the breaker's
+         ## trip threshold (3), so the breaker always opens by this
+         ## submission's 3rd failure and always refuses its 4th. A real
+         ## attempt can still fail the normal way; this only stops a stale
+         ## gate decision from being the reason the last one never tried.
+         $result = $this->sbatchOnce( $cluster, $workdir, $attempt, $attempt > $retries );
 
          if ( $result[ 'ok' ] ) {
             return array( 'submit_ok' => true, 'job_id' => $result[ 'job_id' ], 'error' => '', 'attempt' => $attempt );
@@ -362,7 +374,7 @@ class submit_slurm extends jobsubmit
    ## Stdout and stderr are kept separate so --parsable's stdout is never
    ## contaminated by SSH warnings or sbatch error text.
    ## Returns ['ok' => bool, 'job_id' => string, 'error' => string].
-   private function sbatchOnce( $cluster, $workdir, $attempt )
+   private function sbatchOnce( $cluster, $workdir, $attempt, $lastAttempt = false )
    {
       $sbatch_cmd = "sbatch --parsable --get-user-env $workdir/us3.slurm";
       $rx         = $this->remote( $cluster );
@@ -414,9 +426,12 @@ class submit_slurm extends jobsubmit
       }
 
       $res = $rx->run( $sbatch_cmd, [
-         'retries'   => 0,
-         'timeout'   => $timeout,
-         'label'     => "sbatch attempt $attempt",
+         'retries'      => 0,
+         'timeout'      => $timeout,
+         'label'        => "sbatch attempt $attempt",
+         ## See attemptSubmit()'s own comment: the last attempt gets a real
+         ## try even with the breaker open, rather than a guaranteed refusal.
+         'breaker_gate' => ! $lastAttempt,
       ] );
 
       $stdout_lines = $res[ 'stdout' ];
@@ -820,15 +835,20 @@ class submit_slurm extends jobsubmit
    ## through remote_exec directly and so never set it either.
    private function ssh( $cluster, $remote_cmd, $opts = [] )
    {
-      $res = $this->remote( $cluster )->run( $remote_cmd, $opts + [ 'multiplex' => true ] );
+      $res = $this->remote( $cluster )->run( $remote_cmd,
+         $opts + [ 'multiplex' => true, 'retries' => remote_exec::STAGING_RETRIES ] );
       $this->recordRemote( 'exec', $res );
       return $res;
    }
 
-   ## Copy staged files to the cluster over SCP.
+   ## Copy staged files to the cluster over SCP. A larger retry budget than
+   ## the transport default: unlike a monitor poll, a dropped staging
+   ## connection fails the whole submission outright, with nothing that
+   ## retries it again on its own a few seconds later.
    private function scp( $cluster, $files, $dest, $opts = [] )
    {
-      $res = $this->remote( $cluster )->copy_to( $files, $dest, $opts + [ 'multiplex' => true ] );
+      $res = $this->remote( $cluster )->copy_to( $files, $dest,
+         $opts + [ 'multiplex' => true, 'retries' => remote_exec::STAGING_RETRIES ] );
       $this->recordRemote( 'copy', $res );
       return $res;
    }

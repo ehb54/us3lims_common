@@ -117,6 +117,12 @@ class circuit_breaker
     * cooldown K-ish times over instead of once. A failure that arrives
     * while open_until is still in the future is therefore just noise from
     * that same outage, not a new one: counted, but not re-tripped.
+    *
+    * @return bool true exactly on the call that opens the breaker (this
+    *              failure crossed the threshold while not already open),
+    *              false otherwise. Lets a caller mail an admin once per
+    *              outage instead of once per refused submission while the
+    *              breaker stays open.
     */
    public function record_failure( $cluster )
    {
@@ -137,7 +143,7 @@ class circuit_breaker
             'failures' => $state[ 'failures' ] + 1, 'open_until' => $state[ 'open_until' ],
             'trips' => $state[ 'trips' ], 'updated' => time()
          ) );
-         return;
+         return false;
       }
 
       $failures = $state[ 'failures' ] + 1;
@@ -154,12 +160,13 @@ class circuit_breaker
          $this->write( $cluster, array(
             'failures' => $failures, 'open_until' => $open_until, 'trips' => $trips, 'updated' => time()
          ) );
-         return;
+         return true;
       }
 
       $this->write( $cluster, array(
          'failures' => $failures, 'open_until' => 0, 'trips' => $state[ 'trips' ], 'updated' => time()
       ) );
+      return false;
    }
 
    ## Human-readable state, for the health probe and logs.

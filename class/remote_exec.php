@@ -712,7 +712,12 @@ class remote_exec
       {
          if ( remote_exec_infra_fault( $result ) )
          {
-            $breaker->record_failure( $this->cluster );
+            ## True only on the call whose failure actually opens the
+            ## breaker, not on every later call refused while it stays
+            ## open (those are refused above, at the is_open() gate, and
+            ## never reach record_failure() at all). Lets a caller mail an
+            ## admin once per outage instead of once per refused attempt.
+            $result[ 'breaker_just_tripped' ] = $breaker->record_failure( $this->cluster );
          }
          else
          {

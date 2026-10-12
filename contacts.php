@@ -29,13 +29,6 @@ include 'header.php';
       </td>
    </tr>
    <tr valign='top'>
-      <td><b>Website and Program Support:</b></td>
-      <td><a href='mailto:gegorbet@gmail.com'>Gary Gorbet</a><br/>
-          <a href='mailto:gegorbet@gmail.com'>gegorbet@gmail.com</a><br/>
-          832-466-9211 (<b>text only, please</b>)<br/>
-      </td>
-   </tr>
-   <tr valign='top'>
       <td><b>Mailing Address:</b></td>
       <td>
          <a href='http://hs.umt.edu/chemistry'>Department of Chemistry<br/>

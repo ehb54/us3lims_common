@@ -292,7 +292,8 @@ class submit_slurm extends jobsubmit
          $this->message[] = "ERROR: job submission failed after " . $submitResult[ 'attempt' ]
                            . " attempt(s): " . $submitResult[ 'error' ];
          elog2( "submit_job: FAILED after " . $submitResult[ 'attempt' ] . " attempts: " . $submitResult[ 'error' ] );
-         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ] );
+         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ], $submitResult[ 'infra_failure' ],
+                                           $submitResult[ 'breaker_just_tripped' ] );
          return;
       }
 
@@ -377,7 +378,22 @@ class submit_slurm extends jobsubmit
                      : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
                        . " outcome is unknown: reconcile on the cluster before resubmitting" ) ) ) );
 
-      return array( 'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt );
+      ## A cluster/transport problem the submitter can't fix, as opposed to a
+      ## rejection/busy verdict that's either the job's own fault or routine
+      ## contention -- round-11 should-fix (common#24): "a failed submission
+      ## mails no one". Lets markAutoflowSubmitFailed() decide whether the
+      ## admin is owed a mail, without re-deriving it from message text.
+      $infra_failure = $breaker_open || $never_started || $connect_failure;
+
+      return array(
+         'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt,
+         'infra_failure' => $infra_failure,
+         ## Only the call that actually opened the breaker reports true;
+         ## every later refusal while it stays open (breaker_open above)
+         ## never reaches record_failure() at all, so this is naturally
+         ## false for those -- see remote_exec::attempt()'s own comment.
+         'breaker_just_tripped' => ! empty( $result[ 'breaker_just_tripped' ] ),
+      );
    }
 
    protected function pause( $seconds )
@@ -496,13 +512,29 @@ class submit_slurm extends jobsubmit
       return array( 'ok' => true, 'job_id' => $job_id, 'error' => '' );
    }
 
-   ## Mark autoflow submission failed when no valid job ID was received.
-   protected function markAutoflowSubmitFailed( $statusMsg )
+   ## Mark autoflow submission failed when no valid job ID was received, and
+   ## notify -- round-11 should-fix (common#24): "a failed submission mails
+   ## no one". Every submission failure reaches this one function (staging,
+   ## invalid config, or sbatch itself -- the three callers below), so the
+   ## notification lives here rather than in each caller.
+   ##
+   ## $infraFailure/$breakerJustTripped are meaningful only for the sbatch
+   ## failure path (attemptSubmit()'s classification); the other two callers
+   ## pass neither, which defaults both to false -- staging/config failures
+   ## are never breaker-related, so they only ever mail the investigator,
+   ## never the admin.
+   ##
+   ## Autoflow only (gated on $is_cli/$ID below): the interactive web UI
+   ## already shows "job submission failed" live in the page it renders, so
+   ## mailing there too would just be a redundant second notice for someone
+   ## already looking at the answer.
+   protected function markAutoflowSubmitFailed( $statusMsg, $infraFailure = false, $breakerJustTripped = false )
    {
       global $dbusername, $dbpasswd, $dbhost, $dbname;
       global $ID, $is_cli;
+      global $org_name, $admin_email;
 
-      $autoflowID = ( $is_cli && $ID ) ? $ID : 0;
+      $autoflowID = ( $is_cli && $ID ) ? (int) $ID : 0;
       if ( $autoflowID <= 0 )
       {
          return;
@@ -520,16 +552,72 @@ class submit_slurm extends jobsubmit
          $query = "UPDATE autoflowAnalysis SET "
                 . "status='SUBMIT_TIMEOUT', "
                 . "statusMsg='Job submission failed: $qfmsg' "
-                . "WHERE requestID='$autoflowID'";
+                . "WHERE requestID=$autoflowID";
          $result = mysqli_query( $link, $query );
          if ( ! $result )
          {
             $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
          }
+
+         ## The investigator's address is looked up fresh here, not threaded in
+         ## from a caller, since every one of the five analysis-type pages that
+         ## reach submit_job() (2DSA_2.php, 2DSA-CG_2.php, DMGA_2.php, GA_3.php,
+         ## PCSA_2.php) would otherwise need its own copy of this lookup. Done
+         ## inside this try, before the pooled connection is released below --
+         ## not closed outright, since release() returns it to the pool for
+         ## reuse by the next caller.
+         $investigator_email = null;
+         $email_stmt = mysqli_prepare( $link,
+            "SELECT p.email FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
+          . " WHERE a.requestID = ?" );
+         if ( $email_stmt )
+         {
+            mysqli_stmt_bind_param( $email_stmt, 'i', $autoflowID );
+            mysqli_stmt_execute( $email_stmt );
+            mysqli_stmt_bind_result( $email_stmt, $investigator_email );
+            mysqli_stmt_fetch( $email_stmt );
+            mysqli_stmt_close( $email_stmt );
+         }
       }
       finally
       {
          db_connection_pool::shared()->release( $link );
+      }
+
+      if ( empty( $org_name ) || empty( $admin_email ) )
+      {
+         $this->message[] = "markAutoflowSubmitFailed: \$org_name/\$admin_email not configured; cannot mail anyone";
+         return;
+      }
+
+      $headers  = "From: $org_name Admin<$admin_email>" . "\n";
+      $headers .= "Reply-To: $org_name<$admin_email>"    . "\n";
+      $headers .= "X-Mailer: PHP v" . phpversion()        . "\n";
+      $headers .= "MIME-Version: 1.0"                     . "\n";
+      $headers .= "Content-Transfer-Encoding: 8bit"       . "\n";
+
+      if ( ! empty( $investigator_email ) )
+      {
+         mail( $investigator_email, "US3 job submission failed",
+            "Your job submission could not be completed (requestID=$ID):\n\n$statusMsg", $headers );
+      }
+      else
+      {
+         $this->message[] = "markAutoflowSubmitFailed: no investigator email on file for requestID=$ID";
+      }
+
+      ## A cluster/transport problem the investigator cannot fix is also
+      ## worth telling an admin about, but only once per outage, not once
+      ## per refused submission while the breaker stays open -- see
+      ## record_failure()'s own return value, threaded through
+      ## attemptSubmit()'s 'breaker_just_tripped'.
+      if ( $infraFailure && $breakerJustTripped )
+      {
+         mail( $admin_email, "US3 cluster unreachable notification",
+            "A LIMS job submission failed because its cluster's circuit breaker just opened"
+          . " (requestID=$ID):\n\n$statusMsg\n\nFurther submissions to this cluster will fail"
+          . " the same way until the breaker's cooldown expires; this is sent once per outage,"
+          . " not once per refused submission.", $headers );
       }
    }
 

@@ -16,20 +16,50 @@ class circuit_breaker
    private $dir;
    private $threshold;
    private $cooldown;
+   private $max_cooldown;
    private $log;
    private $usable = null;
 
    /**
     * $dir       directory for state files. Created if absent.
     * $threshold consecutive transport faults before the breaker opens.
-    * $cooldown  seconds to stay open before allowing a probe through.
+    * $cooldown  seconds to stay open before allowing a probe through, the
+    *            first time the breaker opens.
+    * $max_cooldown
+    *            ceiling on the cooldown once it has doubled on consecutive
+    *            trips (a trip the probe immediately fails again). Omitted
+    *            (null) means $cooldown itself, i.e. no progressive
+    *            backoff, so an existing caller that doesn't pass this
+    *            keeps today's behavior exactly. Anything else that isn't a
+    *            positive int at least $cooldown is a caller mistake, not a
+    *            request for "no backoff" -- that case now logs a warning
+    *            and falls back the same way, instead of silently doing the
+    *            same thing a genuine 0 or a typo'd non-numeric value would
+    *            have done with no way to tell them apart.
     */
-   public function __construct( $dir, $threshold = 3, $cooldown = 120, $log = null )
+   public function __construct( $dir, $threshold = 3, $cooldown = 120, $log = null, $max_cooldown = null )
    {
       $this->dir       = rtrim( (string) $dir, '/' );
       $this->threshold = max( 1, (int) $threshold );
       $this->cooldown  = max( 1, (int) $cooldown );
       $this->log       = is_callable( $log ) ? $log : function ( $m ) { error_log( "circuit_breaker: $m" ); };
+
+      if ( $max_cooldown === null )
+      {
+         $this->max_cooldown = $this->cooldown;
+      }
+      elseif ( is_int( $max_cooldown ) && $max_cooldown >= $this->cooldown )
+      {
+         $this->max_cooldown = $max_cooldown;
+      }
+      else
+      {
+         $this->log( "max_cooldown ("
+            . ( is_scalar( $max_cooldown ) ? var_export( $max_cooldown, true ) : gettype( $max_cooldown ) )
+            . ") is not a valid ceiling (must be an int >= the {$this->cooldown}s base cooldown);"
+            . " using {$this->cooldown}s, i.e. no progressive backoff" );
+         $this->max_cooldown = $this->cooldown;
+      }
    }
 
    /** Fail open when the state directory or file is unavailable. */
@@ -71,12 +101,28 @@ class circuit_breaker
 
       $this->log( "$cluster answering again; breaker closed" );
 
-      $this->write( $cluster, array( 'failures' => 0, 'open_until' => 0, 'updated' => time() ) );
+      $this->write( $cluster, array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => time() ) );
    }
 
    /**
     * A call failed at the transport layer. Count it, and open the breaker once
     * the threshold is reached.
+    *
+    * is_open()'s gate protects a call that CHECKS before it starts, but it
+    * does not protect one already in flight when another process's call
+    * trips the breaker: that call still finishes, late, and still reaches
+    * here. Without the open_until check below, each such late arrival read
+    * $failures already at or past threshold and counted itself as its own
+    * fresh trip, so K callers failing within one outage could double the
+    * cooldown K-ish times over instead of once. A failure that arrives
+    * while open_until is still in the future is therefore just noise from
+    * that same outage, not a new one: counted, but not re-tripped.
+    *
+    * @return bool true exactly on the call that opens the breaker (this
+    *              failure crossed the threshold while not already open),
+    *              false otherwise. Lets a caller mail an admin once per
+    *              outage instead of once per refused submission while the
+    *              breaker stays open.
     */
    public function record_failure( $cluster )
    {
@@ -84,27 +130,43 @@ class circuit_breaker
 
       if ( $state === null )
       {
-         $state = array( 'failures' => 0, 'open_until' => 0, 'updated' => 0 );
+         $state = array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => 0 );
+      }
+
+      if ( $state[ 'open_until' ] > time() )
+      {
+         $this->log( "$cluster still open for "
+                     . ( $state[ 'open_until' ] - time() ) . "s; a late failure from an"
+                     . " in-flight call does not add another trip" );
+
+         $this->write( $cluster, array(
+            'failures' => $state[ 'failures' ] + 1, 'open_until' => $state[ 'open_until' ],
+            'trips' => $state[ 'trips' ], 'updated' => time()
+         ) );
+         return false;
       }
 
       $failures = $state[ 'failures' ] + 1;
 
       if ( $failures >= $this->threshold )
       {
-         $open_until = time() + $this->cooldown;
+         $trips      = $state[ 'trips' ] + 1;
+         $cooldown   = min( $this->max_cooldown, $this->cooldown * ( 2 ** ( $trips - 1 ) ) );
+         $open_until = time() + $cooldown;
 
-         ## Only announce the transition, not every failure while already open.
-         if ( $state[ 'open_until' ] <= time() )
-         {
-            $this->log( "$cluster unreachable $failures time(s) in a row;"
-                        . " breaker open for {$this->cooldown}s -- further calls will fail fast" );
-         }
+         $this->log( "$cluster unreachable $failures time(s) in a row (trip $trips);"
+                     . " breaker open for {$cooldown}s -- further calls will fail fast" );
 
-         $this->write( $cluster, array( 'failures' => $failures, 'open_until' => $open_until, 'updated' => time() ) );
-         return;
+         $this->write( $cluster, array(
+            'failures' => $failures, 'open_until' => $open_until, 'trips' => $trips, 'updated' => time()
+         ) );
+         return true;
       }
 
-      $this->write( $cluster, array( 'failures' => $failures, 'open_until' => 0, 'updated' => time() ) );
+      $this->write( $cluster, array(
+         'failures' => $failures, 'open_until' => 0, 'trips' => $state[ 'trips' ], 'updated' => time()
+      ) );
+      return false;
    }
 
    ## Human-readable state, for the health probe and logs.
@@ -120,8 +182,14 @@ class circuit_breaker
       $description = 'closed';
       if ( $state[ 'open_until' ] > time() )
       {
+         ## max(1, ...): a state file written before this field existed (or
+         ## otherwise missing it) reads 'trips' as 0 via read()'s own
+         ## fallback, but the breaker being open at all means at least one
+         ## trip happened -- showing "trip 0" for an open breaker is simply
+         ## wrong, not merely uninformative.
          $description = 'open (' . ( $state[ 'open_until' ] - time() ) . 's remaining, '
-                        . $state[ 'failures' ] . ' consecutive failures)';
+                        . $state[ 'failures' ] . ' consecutive failures, trip '
+                        . max( 1, $state[ 'trips' ] ) . ')';
       }
       elseif ( $state[ 'failures' ] >= $this->threshold )
       {
@@ -257,10 +325,11 @@ class circuit_breaker
          return null;
       }   ## torn or corrupt write: treat as closed and let it be overwritten
 
-      ## Never open for longer than one cooldown, whatever the file says.
+      ## Never open for longer than the progressive ceiling, whatever the file says.
       return array(
          'failures'   => (int) $state[ 'failures' ],
-         'open_until' => min( (int) $state[ 'open_until' ], time() + $this->cooldown ),
+         'open_until' => min( (int) $state[ 'open_until' ], time() + $this->max_cooldown ),
+         'trips'      => (int) ( $state[ 'trips' ] ?? 0 ),
          'updated'    => (int) ( $state[ 'updated' ] ?? 0 ),
       );
    }

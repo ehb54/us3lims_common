@@ -261,7 +261,8 @@ class submit_slurm extends jobsubmit
          $this->message[] = "ERROR: job submission failed after " . $submitResult[ 'attempt' ]
                            . " attempt(s): " . $submitResult[ 'error' ];
          elog2( "submit_job: FAILED after " . $submitResult[ 'attempt' ] . " attempts: " . $submitResult[ 'error' ] );
-         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ] );
+         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ], $submitResult[ 'infra_failure' ],
+                                           $submitResult[ 'breaker_just_tripped' ] );
          return;
       }
 
@@ -274,12 +275,17 @@ class submit_slurm extends jobsubmit
       elog2( "submit_job: slurm_job_id=$slurm_job_id confirmed after " . $submitResult[ 'attempt' ] . " attempt(s)" );
    }
 
-   ## Run sbatch via SSH and validate its result. Retried when it provably
-   ## never started (the begin marker never came back) or when it started and
-   ## the controller definitely rejected it (no job created either way). Once
-   ## it has begun and the controller's answer was merely lost, a retry could
-   ## create a duplicate of a job Slurm already accepted, so that case is left
-   ## to fail with an "outcome unknown" message instead.
+   ## Run sbatch via SSH and validate its result. Retried only when it
+   ## provably never started (the begin marker never came back) or when its
+   ## own final line says it never reached the controller at all (a pre-send
+   ## connect failure -- see remote_exec::is_scheduler_rejection()). Every
+   ## other definite verdict (an explicit rejection reason, or
+   ## sbatch's own busy/EAGAIN give-up) is reported without a retry of ours:
+   ## sbatch itself already tried for its full internal budget before
+   ## printing a busy verdict, and a real rejection reason does not change on
+   ## retry. Once it has begun and the controller's answer was merely lost,
+   ## a retry could create a duplicate of a job Slurm already accepted, so
+   ## that case is left to fail with an "outcome unknown" message instead.
    private function attemptSubmit( $cluster, $workdir )
    {
       $retries = (int) ( $this->grid[ $cluster ][ 'submit_retries' ]
@@ -289,16 +295,28 @@ class submit_slurm extends jobsubmit
 
       for ( $attempt = 1; ; $attempt++ )
       {
-         $result = $this->sbatchOnce( $cluster, $workdir, $attempt );
+         ## The last attempt this submission will ever make bypasses the
+         ## breaker's open-gate check (still recording bookkeeping either
+         ## way -- see sbatchOnce()): without this, a breaker that opened
+         ## on this same submission's own earlier failures guarantees the
+         ## last attempt is refused outright with no real attempt at all,
+         ## turning a short, already-recovering outage into a hard failure
+         ## for no reason -- confirmed for real against a 90s outage, where
+         ## sbatch's own retry budget (3) exactly matches the breaker's
+         ## trip threshold (3), so the breaker always opens by this
+         ## submission's 3rd failure and always refuses its 4th. A real
+         ## attempt can still fail the normal way; this only stops a stale
+         ## gate decision from being the reason the last one never tried.
+         $result = $this->sbatchOnce( $cluster, $workdir, $attempt, $attempt > $retries );
 
          if ( $result[ 'ok' ] ) {
             return array( 'submit_ok' => true, 'job_id' => $result[ 'job_id' ], 'error' => '', 'attempt' => $attempt );
          }
 
-         $unreachable   = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE;
-         $never_started = $unreachable && empty( $result[ 'began' ] );
-         $rejected      = $unreachable && ! empty( $result[ 'began' ] ) && ! empty( $result[ 'rejected' ] );
-         $retryable     = $never_started || $rejected;
+         $unreachable      = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE;
+         $never_started    = $unreachable && empty( $result[ 'began' ] );
+         $connect_failure  = ! empty( $result[ 'connect_failure' ] );
+         $retryable        = $never_started || $connect_failure;
 
          if ( ! $retryable || $attempt > $retries ) {
             break;
@@ -308,14 +326,43 @@ class submit_slurm extends jobsubmit
          $wait *= 2;
       }
 
-      $error = $never_started
-             ? $result[ 'error' ] . "; sbatch never started, so nothing was submitted"
-             : ( $rejected
-               ? $result[ 'error' ] . "; the controller rejected the job outright, so nothing was submitted"
-               : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
-                 . " outcome is unknown: reconcile on the cluster before resubmitting" );
+      ## Checked ahead of $never_started: a breaker-open
+      ## refusal is itself always "never started" (attempt() short-circuits
+      ## before the command runs at all), which otherwise swallows the
+      ## genuine connect failures that opened the breaker in the first
+      ## place -- the operator saw "sbatch never started" with no mention
+      ## that this cluster could not be reached, when that is exactly why.
+      $breaker_open = ! empty( $result[ 'breaker_open' ] );
 
-      return array( 'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt );
+      $error = $breaker_open
+             ? $result[ 'error' ] . "; sbatch could not reach the controller, so nothing was submitted"
+             : ( $never_started
+               ? $result[ 'error' ] . "; sbatch never started, so nothing was submitted"
+               : ( $connect_failure
+                 ? $result[ 'error' ] . "; sbatch could not reach the controller, so nothing was submitted"
+                 : ( ! empty( $result[ 'definite_rejection' ] )
+                   ? $result[ 'error' ] . "; the controller rejected the job outright, so nothing was submitted"
+                   : ( ! empty( $result[ 'busy' ] )
+                     ? $result[ 'error' ] . "; cluster busy or queue full, so nothing was submitted"
+                     : $result[ 'error' ] . "; sbatch started but its result was lost, so the submission"
+                       . " outcome is unknown: reconcile on the cluster before resubmitting" ) ) ) );
+
+      ## A cluster/transport problem the submitter can't fix, as opposed to a
+      ## rejection/busy verdict that's either the job's own fault or routine
+      ## contention -- round-11 should-fix (common#24): "a failed submission
+      ## mails no one". Lets markAutoflowSubmitFailed() decide whether the
+      ## admin is owed a mail, without re-deriving it from message text.
+      $infra_failure = $breaker_open || $never_started || $connect_failure;
+
+      return array(
+         'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt,
+         'infra_failure' => $infra_failure,
+         ## Only the call that actually opened the breaker reports true;
+         ## every later refusal while it stays open (breaker_open above)
+         ## never reaches record_failure() at all, so this is naturally
+         ## false for those -- see remote_exec::attempt()'s own comment.
+         'breaker_just_tripped' => ! empty( $result[ 'breaker_just_tripped' ] ),
+      );
    }
 
    protected function pause( $seconds )
@@ -327,17 +374,64 @@ class submit_slurm extends jobsubmit
    ## Stdout and stderr are kept separate so --parsable's stdout is never
    ## contaminated by SSH warnings or sbatch error text.
    ## Returns ['ok' => bool, 'job_id' => string, 'error' => string].
-   private function sbatchOnce( $cluster, $workdir, $attempt )
+   private function sbatchOnce( $cluster, $workdir, $attempt, $lastAttempt = false )
    {
       $sbatch_cmd = "sbatch --parsable --get-user-env $workdir/us3.slurm";
       $rx         = $this->remote( $cluster );
 
       ## retries => 0 deliberately. Neither remote_exec nor submit_slurm may
       ## repeat this non-idempotent operation without first reconciling it.
+      ##
+      ## No 'multiplex' here, unlike staging and the scontrol confirm: an
+      ## OpenSSH mux master that dies after sending the exec request but
+      ## before replying to this client re-runs the command over a fresh
+      ## connection (mux.c's own fallback, not remote_exec's) -- for a read
+      ## like a confirm that is harmless, but for sbatch it means two jobs
+      ## from one call. A plain connection per attempt costs one extra
+      ## connection per job and removes the window entirely.
+      ##
+      ## Timeout above remote_exec's own default: sbatch answers
+      ## EAGAIN by retrying internally for up to ~120s/15 attempts before
+      ## printing its own busy verdict (measured at ~121.4s). The default
+      ## 120s command timeout used to kill it a fraction of a second before
+      ## that verdict printed, so the caller saw "cluster unreachable
+      ## (TIMED_OUT) ... outcome unknown" for a call that was about to give
+      ## a clean, definite answer. 150s leaves room for sbatch's own budget
+      ## to finish and still bounds the call.
+      ## Validated the same way remote_exec validates its own timeouts:
+      ## left unvalidated, 0 would remove the bound entirely, '2m' would
+      ## become 2 seconds via the (int) cast, and 99999 would be accepted outright.
+      $configured = $this->grid[ $cluster ][ 'sbatch_timeout_seconds' ]
+                  ?? $GLOBALS[ 'global_sbatch_timeout_seconds' ] ?? null;
+
+      if ( $configured !== null && ( ! is_int( $configured ) || $configured < 1 || $configured > 3600 ) )
+      {
+         throw new InvalidArgumentException(
+            "submit_slurm: cluster '$cluster' sbatch_timeout_seconds must be an integer from 1 through 3600" );
+      }
+
+      $timeout = $configured ?? 150;
+
+      ## Never silently shorten a cluster's own remote_exec_overrides
+      ## command_timeout_seconds exception: that is a
+      ## demonstrated timeout need for this specific login node, and
+      ## sbatch_timeout_seconds's job is only to guarantee a FLOOR high
+      ## enough for sbatch's own ~120s internal retry budget above, not to
+      ## cap a cluster that already needs more than that for every call.
+      $clusterOverride = $this->grid[ $cluster ][ 'remote_exec_overrides' ][ 'command_timeout_seconds' ] ?? null;
+
+      if ( is_int( $clusterOverride ) && $clusterOverride > $timeout )
+      {
+         $timeout = $clusterOverride;
+      }
+
       $res = $rx->run( $sbatch_cmd, [
-         'retries'   => 0,
-         'label'     => "sbatch attempt $attempt",
-         'multiplex' => true,
+         'retries'      => 0,
+         'timeout'      => $timeout,
+         'label'        => "sbatch attempt $attempt",
+         ## See attemptSubmit()'s own comment: the last attempt gets a real
+         ## try even with the breaker open, rather than a guaranteed refusal.
+         'breaker_gate' => ! $lastAttempt,
       ] );
 
       $stdout_lines = $res[ 'stdout' ];
@@ -354,7 +448,12 @@ class submit_slurm extends jobsubmit
          $this->message[] = "sbatchOnce (attempt $attempt): stderr=$stderr_text";
       }
 
-      elog2( "sbatchOnce (attempt $attempt): exit=$exit_code class={$res['class']} stdout=$stdout_text stderr=$stderr_text" );
+      ## Single-line: $stdout_text/$stderr_text can each hold several lines
+      ## of real output, which otherwise breaks this one log entry across
+      ## several lines in the log file.
+      elog2( "sbatchOnce (attempt $attempt): exit=$exit_code class={$res['class']}"
+           . " stdout=" . str_replace( "\n", ' / ', $stdout_text )
+           . " stderr=" . str_replace( "\n", ' / ', $stderr_text ) );
 
       ## Require a successful command before trusting its job ID.
       if ( ! $res[ 'ok' ] ) {
@@ -364,8 +463,11 @@ class submit_slurm extends jobsubmit
                  : "sbatch exited $exit_code: $detail";
 
          return array( 'ok' => false, 'job_id' => '', 'error' => $error, 'class' => $res[ 'class' ],
-                       'began' => ! empty( $res[ 'began' ] ),
-                       'rejected' => $rx->is_scheduler_rejection( $stderr_text ) );
+                       'began'              => ! empty( $res[ 'began' ] ),
+                       'breaker_open'       => ! empty( $res[ 'breaker_open' ] ),
+                       'connect_failure'    => $rx->is_scheduler_rejection( $stderr_text ),
+                       'definite_rejection' => $rx->is_scheduler_definite_rejection( $stderr_text ),
+                       'busy'               => $rx->is_scheduler_busy( $stderr_text ) );
       }
 
       ## Parse --parsable output: "12345" or "12345;clustername"
@@ -379,13 +481,29 @@ class submit_slurm extends jobsubmit
       return array( 'ok' => true, 'job_id' => $job_id, 'error' => '' );
    }
 
-   ## Mark autoflow submission failed when no valid job ID was received.
-   protected function markAutoflowSubmitFailed( $statusMsg )
+   ## Mark autoflow submission failed when no valid job ID was received, and
+   ## notify -- round-11 should-fix (common#24): "a failed submission mails
+   ## no one". Every submission failure reaches this one function (staging,
+   ## invalid config, or sbatch itself -- the three callers below), so the
+   ## notification lives here rather than in each caller.
+   ##
+   ## $infraFailure/$breakerJustTripped are meaningful only for the sbatch
+   ## failure path (attemptSubmit()'s classification); the other two callers
+   ## pass neither, which defaults both to false -- staging/config failures
+   ## are never breaker-related, so they only ever mail the investigator,
+   ## never the admin.
+   ##
+   ## Autoflow only (gated on $is_cli/$ID below): the interactive web UI
+   ## already shows "job submission failed" live in the page it renders, so
+   ## mailing there too would just be a redundant second notice for someone
+   ## already looking at the answer.
+   protected function markAutoflowSubmitFailed( $statusMsg, $infraFailure = false, $breakerJustTripped = false )
    {
       global $dbusername, $dbpasswd, $dbhost, $dbname;
       global $ID, $is_cli;
+      global $org_name, $admin_email;
 
-      $autoflowID = ( $is_cli && $ID ) ? $ID : 0;
+      $autoflowID = ( $is_cli && $ID ) ? (int) $ID : 0;
       if ( $autoflowID <= 0 )
       {
          return;
@@ -401,14 +519,67 @@ class submit_slurm extends jobsubmit
       $query = "UPDATE autoflowAnalysis SET "
              . "status='SUBMIT_TIMEOUT', "
              . "statusMsg='Job submission failed: $qfmsg' "
-             . "WHERE requestID='$autoflowID'";
+             . "WHERE requestID=$autoflowID";
       $result = mysqli_query( $link, $query );
       if ( ! $result )
       {
          $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
       }
 
+      ## The investigator's address is looked up fresh here, not threaded in
+      ## from a caller, since every one of the five analysis-type pages that
+      ## reach submit_job() (2DSA_2.php, 2DSA-CG_2.php, DMGA_2.php, GA_3.php,
+      ## PCSA_2.php) would otherwise need its own copy of this lookup.
+      $investigator_email = null;
+      $email_stmt = mysqli_prepare( $link,
+         "SELECT p.email FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
+       . " WHERE a.requestID = ?" );
+      if ( $email_stmt )
+      {
+         mysqli_stmt_bind_param( $email_stmt, 'i', $autoflowID );
+         mysqli_stmt_execute( $email_stmt );
+         mysqli_stmt_bind_result( $email_stmt, $investigator_email );
+         mysqli_stmt_fetch( $email_stmt );
+         mysqli_stmt_close( $email_stmt );
+      }
+
       mysqli_close( $link );
+
+      if ( empty( $org_name ) || empty( $admin_email ) )
+      {
+         $this->message[] = "markAutoflowSubmitFailed: \$org_name/\$admin_email not configured; cannot mail anyone";
+         return;
+      }
+
+      $headers  = "From: $org_name Admin<$admin_email>" . "\n";
+      $headers .= "Reply-To: $org_name<$admin_email>"    . "\n";
+      $headers .= "X-Mailer: PHP v" . phpversion()        . "\n";
+      $headers .= "MIME-Version: 1.0"                     . "\n";
+      $headers .= "Content-Transfer-Encoding: 8bit"       . "\n";
+
+      if ( ! empty( $investigator_email ) )
+      {
+         mail( $investigator_email, "US3 job submission failed",
+            "Your job submission could not be completed (requestID=$ID):\n\n$statusMsg", $headers );
+      }
+      else
+      {
+         $this->message[] = "markAutoflowSubmitFailed: no investigator email on file for requestID=$ID";
+      }
+
+      ## A cluster/transport problem the investigator cannot fix is also
+      ## worth telling an admin about, but only once per outage, not once
+      ## per refused submission while the breaker stays open -- see
+      ## record_failure()'s own return value, threaded through
+      ## attemptSubmit()'s 'breaker_just_tripped'.
+      if ( $infraFailure && $breakerJustTripped )
+      {
+         mail( $admin_email, "US3 cluster unreachable notification",
+            "A LIMS job submission failed because its cluster's circuit breaker just opened"
+          . " (requestID=$ID):\n\n$statusMsg\n\nFurther submissions to this cluster will fail"
+          . " the same way until the breaker's cooldown expires; this is sent once per outage,"
+          . " not once per refused submission.", $headers );
+      }
    }
 
    ## Record the job in both databases and launch jobmonitor.
@@ -629,33 +800,55 @@ class submit_slurm extends jobsubmit
    }
 
 
+   ## One remote_exec instance per cluster, reused for every call this
+   ## submit_slurm object makes to that cluster: remote() used
+   ## to build a fresh instance every call -- 5 per submission (login(),
+   ## sbatchOnce(), ssh(), scp(), confirmSlurmJob()) -- so remote_exec's own
+   ## per-instance "mux unusable"/"control directory warned" memory never
+   ## survived from one call to the next within the same submission, and
+   ## every multiplexed call after a denied bind()/link() paid the same
+   ## wasted connect again. isset(), not ??=, for PHP 7.2 compatibility.
+   private $rx_cache = [];
+
    /** Build the cluster transport using this object's executor. */
    protected function remote( $cluster )
    {
-      $rx = new remote_exec( $cluster, $this->grid, 'elog2' );
+      if ( ! isset( $this->rx_cache[ $cluster ] ) )
+      {
+         $rx = new remote_exec( $cluster, $this->grid, 'elog2' );
+         $rx->set_executor( function ( $cmd, &$output, &$exit_code ) {
+            $this->runExec( $cmd, $output, $exit_code );
+         } );
+         $this->rx_cache[ $cluster ] = $rx;
+      }
 
-      return $rx->set_executor( function ( $cmd, &$output, &$exit_code ) {
-         $this->runExec( $cmd, $output, $exit_code );
-      } );
+      return $this->rx_cache[ $cluster ];
    }
 
    ## Run a command on the cluster. Returns remote_exec's classified result.
    ## multiplex: true unless the caller overrides it, since this and scp()
-   ## below are the staging+sbatch calls a submission makes to the same
-   ## login one after another -- the one case the shared ssh connection is
-   ## actually meant for. Other callers (gridctl's probes, results fetch,
-   ## queue viewer) go through remote_exec directly and so never set it.
+   ## below are the staging calls (mkdir, then the copy) a submission makes
+   ## to the same login one after another -- the one case the shared ssh
+   ## connection is actually meant for. sbatch itself does not go through
+   ## this helper and deliberately does not multiplex (see sbatchOnce()).
+   ## Other callers (gridctl's probes, results fetch, queue viewer) go
+   ## through remote_exec directly and so never set it either.
    private function ssh( $cluster, $remote_cmd, $opts = [] )
    {
-      $res = $this->remote( $cluster )->run( $remote_cmd, $opts + [ 'multiplex' => true ] );
+      $res = $this->remote( $cluster )->run( $remote_cmd,
+         $opts + [ 'multiplex' => true, 'retries' => remote_exec::STAGING_RETRIES ] );
       $this->recordRemote( 'exec', $res );
       return $res;
    }
 
-   ## Copy staged files to the cluster over SCP.
+   ## Copy staged files to the cluster over SCP. A larger retry budget than
+   ## the transport default: unlike a monitor poll, a dropped staging
+   ## connection fails the whole submission outright, with nothing that
+   ## retries it again on its own a few seconds later.
    private function scp( $cluster, $files, $dest, $opts = [] )
    {
-      $res = $this->remote( $cluster )->copy_to( $files, $dest, $opts + [ 'multiplex' => true ] );
+      $res = $this->remote( $cluster )->copy_to( $files, $dest,
+         $opts + [ 'multiplex' => true, 'retries' => remote_exec::STAGING_RETRIES ] );
       $this->recordRemote( 'copy', $res );
       return $res;
    }

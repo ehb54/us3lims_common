@@ -184,12 +184,54 @@ class jobsubmit
            ## candidate list it is handed and has no way to tell "this name
            ## was never configured anywhere" from "this real cluster just
            ## happens to be inactive right now".
+           ##
+           ## Round-12 nit (common#32, moved here since #32 was closed in
+           ## favor of this branch): this validation accepted a 'clusters'
+           ## value that was not an array at all (foreach on a string warns
+           ## and iterates zero times, so the pool entry was silently kept
+           ## with an unusable member list), an empty array (a pool with
+           ## nothing to ever choose from), a pool naming itself as its own
+           ## member, another pool nested inside this one's member list
+           ## (pick_cluster() expects real clusters only), and a member that
+           ## exists in $cluster_details but is not actually enabled for
+           ## this instance (the same active/present checks already run
+           ## for the pool entry itself above, never run per-member).
            if ( array_key_exists( "clusters", $v ) ) {
-               foreach ( $v[ 'clusters' ] as $member ) {
-                   if ( !array_key_exists( $member, $cluster_details ) ) {
-                       $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', "
-                                 . "but no such cluster exists in \$cluster_details" );
-                       $ok = false;
+               if ( !is_array( $v[ 'clusters' ] ) ) {
+                   $error_msg( "metascheduler '$k' has a 'clusters' value that is not an array" );
+                   $ok = false;
+               } elseif ( count( $v[ 'clusters' ] ) === 0 ) {
+                   $error_msg( "metascheduler '$k' has an empty 'clusters' list" );
+                   $ok = false;
+               } else {
+                   foreach ( $v[ 'clusters' ] as $member ) {
+                       if ( $member === $k ) {
+                           $error_msg( "metascheduler '$k' lists itself in its own 'clusters'" );
+                           $ok = false;
+                           continue;
+                       }
+                       if ( !array_key_exists( $member, $cluster_details ) ) {
+                           $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', "
+                                     . "but no such cluster exists in \$cluster_details" );
+                           $ok = false;
+                           continue;
+                       }
+                       if ( is_array( $cluster_details[ $member ] )
+                            && array_key_exists( 'clusters', $cluster_details[ $member ] ) ) {
+                           $error_msg( "metascheduler '$k' lists another pool ('$member') in its"
+                                     . " 'clusters', not a real cluster" );
+                           $ok = false;
+                           continue;
+                       }
+                       if ( !array_key_exists( $member, $cluster_configuration )
+                            || !is_array( $cluster_configuration[ $member ] )
+                            || empty( $cluster_configuration[ $member ][ 'active' ] ) ) {
+                           $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', but it"
+                                     . " is not enabled for this instance (missing or inactive in"
+                                     . " \$cluster_configuration)" );
+                           $ok = false;
+                           continue;
+                       }
                    }
                }
                if ( !$ok ) {
@@ -565,7 +607,14 @@ class jobsubmit
    function maxwall()
    {
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
-      $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
+      ## execution_cluster(), not cluster_shortname directly: a metascheduler
+      ## pool submission resolves to a real cluster whose maxtime/ppn/maxproc
+      ## can differ sharply from the pool's own pseudo-entry -- reading
+      ## cluster_shortname here instead used the pool's own (often
+      ## unconfigured/default) wall-time limit, confirmed giving a CG job 44
+      ## minutes instead of the real cluster's 176 (round-12 should-fix,
+      ## common#32, moved here since #32 was closed in favor of this branch).
+      $cluster    = $this->execution_cluster();
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
       $ti_noise   = isset( $parameters[ 'tinoise_option' ] )

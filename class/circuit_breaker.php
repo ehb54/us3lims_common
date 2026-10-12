@@ -16,20 +16,29 @@ class circuit_breaker
    private $dir;
    private $threshold;
    private $cooldown;
+   private $max_cooldown;
    private $log;
    private $usable = null;
 
    /**
     * $dir       directory for state files. Created if absent.
     * $threshold consecutive transport faults before the breaker opens.
-    * $cooldown  seconds to stay open before allowing a probe through.
+    * $cooldown  seconds to stay open before allowing a probe through, the
+    *            first time the breaker opens.
+    * $max_cooldown
+    *            ceiling on the cooldown once it has doubled on consecutive
+    *            trips (a trip the probe immediately fails again). Defaults
+    *            to $cooldown itself, i.e. no progressive backoff, so an
+    *            existing caller that doesn't pass this keeps today's
+    *            behavior exactly.
     */
-   public function __construct( $dir, $threshold = 3, $cooldown = 120, $log = null )
+   public function __construct( $dir, $threshold = 3, $cooldown = 120, $log = null, $max_cooldown = null )
    {
-      $this->dir       = rtrim( (string) $dir, '/' );
-      $this->threshold = max( 1, (int) $threshold );
-      $this->cooldown  = max( 1, (int) $cooldown );
-      $this->log       = is_callable( $log ) ? $log : function ( $m ) { error_log( "circuit_breaker: $m" ); };
+      $this->dir          = rtrim( (string) $dir, '/' );
+      $this->threshold    = max( 1, (int) $threshold );
+      $this->cooldown     = max( 1, (int) $cooldown );
+      $this->max_cooldown = max( $this->cooldown, (int) ( $max_cooldown ?? $this->cooldown ) );
+      $this->log          = is_callable( $log ) ? $log : function ( $m ) { error_log( "circuit_breaker: $m" ); };
    }
 
    /** Fail open when the state directory or file is unavailable. */
@@ -71,12 +80,19 @@ class circuit_breaker
 
       $this->log( "$cluster answering again; breaker closed" );
 
-      $this->write( $cluster, array( 'failures' => 0, 'open_until' => 0, 'updated' => time() ) );
+      $this->write( $cluster, array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => time() ) );
    }
 
    /**
     * A call failed at the transport layer. Count it, and open the breaker once
     * the threshold is reached.
+    *
+    * is_open()'s gate means this is only ever reached for a cluster that is
+    * NOT currently open (a fast-failed call never gets here): either it has
+    * never tripped, or its cooldown already expired and this failure is the
+    * half-open probe failing again. Either way, "about to open" here always
+    * means a fresh trip, so $trips can be incremented unconditionally
+    * whenever $failures crosses the threshold.
     */
    public function record_failure( $cluster )
    {
@@ -84,27 +100,29 @@ class circuit_breaker
 
       if ( $state === null )
       {
-         $state = array( 'failures' => 0, 'open_until' => 0, 'updated' => 0 );
+         $state = array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => 0 );
       }
 
       $failures = $state[ 'failures' ] + 1;
 
       if ( $failures >= $this->threshold )
       {
-         $open_until = time() + $this->cooldown;
+         $trips      = $state[ 'trips' ] + 1;
+         $cooldown   = min( $this->max_cooldown, $this->cooldown * ( 2 ** ( $trips - 1 ) ) );
+         $open_until = time() + $cooldown;
 
-         ## Only announce the transition, not every failure while already open.
-         if ( $state[ 'open_until' ] <= time() )
-         {
-            $this->log( "$cluster unreachable $failures time(s) in a row;"
-                        . " breaker open for {$this->cooldown}s -- further calls will fail fast" );
-         }
+         $this->log( "$cluster unreachable $failures time(s) in a row (trip $trips);"
+                     . " breaker open for {$cooldown}s -- further calls will fail fast" );
 
-         $this->write( $cluster, array( 'failures' => $failures, 'open_until' => $open_until, 'updated' => time() ) );
+         $this->write( $cluster, array(
+            'failures' => $failures, 'open_until' => $open_until, 'trips' => $trips, 'updated' => time()
+         ) );
          return;
       }
 
-      $this->write( $cluster, array( 'failures' => $failures, 'open_until' => 0, 'updated' => time() ) );
+      $this->write( $cluster, array(
+         'failures' => $failures, 'open_until' => 0, 'trips' => $state[ 'trips' ], 'updated' => time()
+      ) );
    }
 
    ## Human-readable state, for the health probe and logs.
@@ -121,7 +139,7 @@ class circuit_breaker
       if ( $state[ 'open_until' ] > time() )
       {
          $description = 'open (' . ( $state[ 'open_until' ] - time() ) . 's remaining, '
-                        . $state[ 'failures' ] . ' consecutive failures)';
+                        . $state[ 'failures' ] . ' consecutive failures, trip ' . $state[ 'trips' ] . ')';
       }
       elseif ( $state[ 'failures' ] >= $this->threshold )
       {
@@ -257,10 +275,11 @@ class circuit_breaker
          return null;
       }   ## torn or corrupt write: treat as closed and let it be overwritten
 
-      ## Never open for longer than one cooldown, whatever the file says.
+      ## Never open for longer than the progressive ceiling, whatever the file says.
       return array(
          'failures'   => (int) $state[ 'failures' ],
-         'open_until' => min( (int) $state[ 'open_until' ], time() + $this->cooldown ),
+         'open_until' => min( (int) $state[ 'open_until' ], time() + $this->max_cooldown ),
+         'trips'      => (int) ( $state[ 'trips' ] ?? 0 ),
          'updated'    => (int) ( $state[ 'updated' ] ?? 0 ),
       );
    }

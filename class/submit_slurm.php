@@ -278,7 +278,7 @@ class submit_slurm extends jobsubmit
    ## provably never started (the begin marker never came back) or when its
    ## own final line says it never reached the controller at all (a pre-send
    ## connect failure -- see remote_exec::is_scheduler_rejection()). Every
-   ## other definite verdict (round 8: an explicit rejection reason, or
+   ## other definite verdict (an explicit rejection reason, or
    ## sbatch's own busy/EAGAIN give-up) is reported without a retry of ours:
    ## sbatch itself already tried for its full internal budget before
    ## printing a busy verdict, and a real rejection reason does not change on
@@ -313,7 +313,7 @@ class submit_slurm extends jobsubmit
          $wait *= 2;
       }
 
-      ## Checked ahead of $never_started (round 9 nit): a breaker-open
+      ## Checked ahead of $never_started: a breaker-open
       ## refusal is itself always "never started" (attempt() short-circuits
       ## before the command runs at all), which otherwise swallows the
       ## genuine connect failures that opened the breaker in the first
@@ -362,7 +362,7 @@ class submit_slurm extends jobsubmit
       ## from one call. A plain connection per attempt costs one extra
       ## connection per job and removes the window entirely.
       ##
-      ## Timeout above remote_exec's own default (round 8): sbatch answers
+      ## Timeout above remote_exec's own default: sbatch answers
       ## EAGAIN by retrying internally for up to ~120s/15 attempts before
       ## printing its own busy verdict (measured at ~121.4s). The default
       ## 120s command timeout used to kill it a fraction of a second before
@@ -370,9 +370,9 @@ class submit_slurm extends jobsubmit
       ## (TIMED_OUT) ... outcome unknown" for a call that was about to give
       ## a clean, definite answer. 150s leaves room for sbatch's own budget
       ## to finish and still bounds the call.
-      ## Validated the same way remote_exec validates its own timeouts
-      ## (round 9 nit): unvalidated, 0 removed the bound entirely, '2m'
-      ## became 2 seconds via the (int) cast, and 99999 was accepted outright.
+      ## Validated the same way remote_exec validates its own timeouts:
+      ## left unvalidated, 0 would remove the bound entirely, '2m' would
+      ## become 2 seconds via the (int) cast, and 99999 would be accepted outright.
       $configured = $this->grid[ $cluster ][ 'sbatch_timeout_seconds' ]
                   ?? $GLOBALS[ 'global_sbatch_timeout_seconds' ] ?? null;
 
@@ -385,7 +385,7 @@ class submit_slurm extends jobsubmit
       $timeout = $configured ?? 150;
 
       ## Never silently shorten a cluster's own remote_exec_overrides
-      ## command_timeout_seconds exception (round 9 nit): that is a
+      ## command_timeout_seconds exception: that is a
       ## demonstrated timeout need for this specific login node, and
       ## sbatch_timeout_seconds's job is only to guarantee a FLOOR high
       ## enough for sbatch's own ~120s internal retry budget above, not to
@@ -701,7 +701,7 @@ class submit_slurm extends jobsubmit
 
 
    ## One remote_exec instance per cluster, reused for every call this
-   ## submit_slurm object makes to that cluster (round 8 nit): remote() used
+   ## submit_slurm object makes to that cluster: remote() used
    ## to build a fresh instance every call -- 5 per submission (login(),
    ## sbatchOnce(), ssh(), scp(), confirmSlurmJob()) -- so remote_exec's own
    ## per-instance "mux unusable"/"control directory warned" memory never

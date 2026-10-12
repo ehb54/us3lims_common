@@ -15,7 +15,7 @@
 body {
   margin                : 0px;
   padding               : 0px;
-  background-color      : #4E4E4E;      /* Outer frame color */
+  background-color      : #5A5A5A;      /* Outer frame color */
   font-family           : Georgia, "Times New Roman", Times, serif;
   font-size             : 13px;
 }
@@ -72,6 +72,8 @@ table.style1 {
   border                : 5px groove #2B4E72;
   width                 : 98%;
   margin                : 2em 1em;
+  border-radius         : 4px;
+  overflow              : hidden;
 }
 
 table.style1 thead th {
@@ -92,6 +94,11 @@ table.style1 tbody th {
   text-align            : left;
 }
 
+/* Zebra striping for readability on dense tables. */
+table.style1 tbody tr:nth-child(even) {
+  background-color      : #F2F2F2;
+}
+
 table.noborder td {
   border                : 0px;
 }
@@ -100,6 +107,7 @@ a  {
   text-decoration       : none;
   color                 : #000099;
   font-weight           : bold;
+  transition            : background-color 0.15s ease, color 0.15s ease;
 }
 
 a:hover {
@@ -153,6 +161,7 @@ a.block:hover {
   border                : solid black;
   border-width          : 10px 2px 0px 2px;
   border-width          : 5px 0px 5px 0px;
+  box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 #header img, #header table, #header td {
@@ -211,6 +220,7 @@ a.block:hover {
   font-weight           : bold;
   text-decoration       : none;
   height                : 37px;
+  transition            : background-color 0.15s ease, color 0.15s ease;
 }
 
 #globalnav li.separator {
@@ -268,6 +278,7 @@ a.block:hover {
   background            : #FFFFFF  url(../images/links_background.gif) repeat-y;
   border                : solid black;
   border-width          : 0px 0px 0px 0px;
+  box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 #search_page {
@@ -309,6 +320,8 @@ div#sidebar a {
   font-size             : 13px;
   font-weight           : bold;
   text-decoration       : none;
+  border-radius         : 3px;
+  transition            : background-color 0.15s ease, color 0.15s ease;
 }
 
 #sidebar a:hover {
@@ -395,6 +408,7 @@ fieldset.option_value {
   font-size             : 85%;
   text-align            : center;
   background            : #FFFFFF  url(../images/links_background.gif) repeat-y;
+  box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 #info {

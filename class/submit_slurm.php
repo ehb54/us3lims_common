@@ -516,12 +516,16 @@ class submit_slurm extends jobsubmit
       ## reach submit_job() (2DSA_2.php, 2DSA-CG_2.php, DMGA_2.php, GA_3.php,
       ## PCSA_2.php) would otherwise need its own copy of this lookup.
       $investigator_email = null;
-      $email_result = mysqli_query( $link,
+      $email_stmt = mysqli_prepare( $link,
          "SELECT p.email FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
-       . " WHERE a.requestID = $autoflowID" );
-      if ( $email_result && ( $row = mysqli_fetch_assoc( $email_result ) ) )
+       . " WHERE a.requestID = ?" );
+      if ( $email_stmt )
       {
-         $investigator_email = $row[ 'email' ];
+         mysqli_stmt_bind_param( $email_stmt, 'i', $autoflowID );
+         mysqli_stmt_execute( $email_stmt );
+         mysqli_stmt_bind_result( $email_stmt, $investigator_email );
+         mysqli_stmt_fetch( $email_stmt );
+         mysqli_stmt_close( $email_stmt );
       }
 
       mysqli_close( $link );

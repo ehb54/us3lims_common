@@ -23,15 +23,22 @@ class db_connection_pool
 
    private $idle = array();   ## signature => array of idle mysqli connections
 
-   /** @var \WeakMap<mysqli,string> connection => signature, while checked out.
-    *  A WeakMap, not spl_object_id() => signature: PHP recycles object ids once
-    *  an object is garbage collected, so a plain array keyed by id could, after
-    *  a leaked checkout() (one never returned to release()), hand a LATER,
-    *  unrelated connection's release() the stale entry an earlier connection
-    *  left behind -- pooling it under the wrong signature with no error, a
-    *  false positive indistinguishable from a race condition. A WeakMap keys
-    *  by the object itself, so this can't happen regardless of id reuse. */
-   private \WeakMap $owner;
+   /** @var \SplObjectStorage connection => signature, while checked out.
+    *  An SplObjectStorage, not spl_object_id() => signature: PHP recycles
+    *  object ids once an object is garbage collected, so a plain array
+    *  keyed by id could, after a leaked checkout() (one never returned to
+    *  release()), hand a LATER, unrelated connection's release() the stale
+    *  entry an earlier connection left behind -- pooling it under the wrong
+    *  signature with no error, a false positive indistinguishable from a
+    *  race condition. SplObjectStorage keys by the object itself (available
+    *  since PHP 5.3, unlike WeakMap, which needs 8.0 and isn't an option on
+    *  this stack's PHP 7.2 target), so this can't happen regardless of id
+    *  reuse. It holds a strong reference to each key while tracked, which
+    *  is harmless here: a connection is only ever untracked by this class's
+    *  own release()/close_all(), so a caller that leaks a checkout (never
+    *  releases it) just keeps that connection alive and un-pooled, not
+    *  silently corrupted. */
+   private $owner;
 
    public static function shared()
    {
@@ -45,7 +52,7 @@ class db_connection_pool
 
    public function __construct()
    {
-      $this->owner = new \WeakMap();
+      $this->owner = new \SplObjectStorage();
    }
 
    /**
@@ -135,7 +142,7 @@ class db_connection_pool
       }
 
       $this->idle  = array();
-      $this->owner = new \WeakMap();
+      $this->owner = new \SplObjectStorage();
    }
 
    ## ---------------------------------------------------------------- internals

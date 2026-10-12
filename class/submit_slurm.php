@@ -42,7 +42,7 @@ class submit_slurm extends jobsubmit
          if ( ! $this->stage_files() ) {
             ## Persist staging failure for autoflow requests.
             $this->message[] = "ERROR: stage_files failed - submission aborted";
-            $this->markAutoflowSubmitFailed( $this->stage_error !== '' ? $this->stage_error : 'staging failed' );
+            $this->markAutoflowSubmitFailed( $this->stage_error !== '' ? $this->stage_error : 'staging failed', 'staging' );
             return;
          }
 
@@ -65,7 +65,7 @@ class submit_slurm extends jobsubmit
          if ( empty( $this->data[ 'eprfile' ] ) )
          {
             $this->message[] = "ERROR: submission configuration invalid: " . $error->getMessage();
-            $this->markAutoflowSubmitFailed( $error->getMessage() );
+            $this->markAutoflowSubmitFailed( $error->getMessage(), 'configuration' );
          }
          else
          {
@@ -261,7 +261,7 @@ class submit_slurm extends jobsubmit
          $this->message[] = "ERROR: job submission failed after " . $submitResult[ 'attempt' ]
                            . " attempt(s): " . $submitResult[ 'error' ];
          elog2( "submit_job: FAILED after " . $submitResult[ 'attempt' ] . " attempts: " . $submitResult[ 'error' ] );
-         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ], $submitResult[ 'infra_failure' ],
+         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ], 'sbatch', $submitResult[ 'infra_failure' ],
                                            $submitResult[ 'breaker_just_tripped' ] );
          return;
       }
@@ -293,6 +293,16 @@ class submit_slurm extends jobsubmit
       $wait    = (int) ( $this->grid[ $cluster ][ 'submit_retry_wait' ]
                          ?? $GLOBALS[ 'global_sbatch_submit_retry_wait_seconds' ] ?? 5 );
 
+      ## The breaker's trip can happen on any attempt in this loop, not
+      ## necessarily the last one -- sbatch's own retry budget (3) matches
+      ## the breaker's trip threshold (3) in the common case, so the trip
+      ## lands on attempt 3 while a 4th, final attempt (which always runs
+      ## for real, see below) then overwrites $result with its own,
+      ## untripped outcome. Accumulated across every attempt instead of
+      ## read off $result alone, so the admin mail this is for doesn't
+      ## silently depend on which attempt happened to be last.
+      $breakerJustTripped = false;
+
       for ( $attempt = 1; ; $attempt++ )
       {
          ## The last attempt this submission will ever make bypasses the
@@ -313,6 +323,8 @@ class submit_slurm extends jobsubmit
             return array( 'submit_ok' => true, 'job_id' => $result[ 'job_id' ], 'error' => '', 'attempt' => $attempt );
          }
 
+         $breakerJustTripped = $breakerJustTripped || ! empty( $result[ 'breaker_just_tripped' ] );
+
          $unreachable      = ( $result[ 'class' ] ?? '' ) === remote_exec::UNREACHABLE;
          $never_started    = $unreachable && empty( $result[ 'began' ] );
          $connect_failure  = ! empty( $result[ 'connect_failure' ] );
@@ -322,8 +334,16 @@ class submit_slurm extends jobsubmit
             break;
          }
 
-         $this->pause( $wait );
-         $wait *= 2;
+         ## The next attempt, once $attempt reaches $retries, is the forced,
+         ## always-real last one above -- it runs no matter what the gate or
+         ## breaker says, so a backoff wait here protects nothing: it was
+         ## always going to be tried. Waiting anyway only adds dead latency
+         ## to a submission whose outcome this wait cannot change.
+         if ( $attempt < $retries )
+         {
+            $this->pause( $wait );
+            $wait *= 2;
+         }
       }
 
       ## Checked ahead of $never_started: a breaker-open
@@ -349,19 +369,16 @@ class submit_slurm extends jobsubmit
 
       ## A cluster/transport problem the submitter can't fix, as opposed to a
       ## rejection/busy verdict that's either the job's own fault or routine
-      ## contention -- round-11 should-fix (common#24): "a failed submission
-      ## mails no one". Lets markAutoflowSubmitFailed() decide whether the
+      ## contention. Lets markAutoflowSubmitFailed() decide whether the
       ## admin is owed a mail, without re-deriving it from message text.
       $infra_failure = $breaker_open || $never_started || $connect_failure;
 
       return array(
          'submit_ok' => false, 'job_id' => '', 'error' => $error, 'attempt' => $attempt,
          'infra_failure' => $infra_failure,
-         ## Only the call that actually opened the breaker reports true;
-         ## every later refusal while it stays open (breaker_open above)
-         ## never reaches record_failure() at all, so this is naturally
-         ## false for those -- see remote_exec::attempt()'s own comment.
-         'breaker_just_tripped' => ! empty( $result[ 'breaker_just_tripped' ] ),
+         ## Accumulated across every attempt above, not read off $result
+         ## alone -- see the loop's own comment.
+         'breaker_just_tripped' => $breakerJustTripped,
       );
    }
 
@@ -467,7 +484,17 @@ class submit_slurm extends jobsubmit
                        'breaker_open'       => ! empty( $res[ 'breaker_open' ] ),
                        'connect_failure'    => $rx->is_scheduler_rejection( $stderr_text ),
                        'definite_rejection' => $rx->is_scheduler_definite_rejection( $stderr_text ),
-                       'busy'               => $rx->is_scheduler_busy( $stderr_text ) );
+                       'busy'               => $rx->is_scheduler_busy( $stderr_text ),
+                       ## attemptSubmit() reads this across every attempt, not
+                       ## just the last one's result -- the breaker's own trip
+                       ## happens on whichever attempt crosses its threshold,
+                       ## never necessarily the last one sbatchOnce() tries
+                       ## (the last attempt always runs for real regardless of
+                       ## gate state, see attemptSubmit()'s own comment).
+                       ## Without this key at all, that attempt's trip was
+                       ## silently dropped on the floor and the admin was
+                       ## never mailed.
+                       'breaker_just_tripped' => ! empty( $res[ 'breaker_just_tripped' ] ) );
       }
 
       ## Parse --parsable output: "12345" or "12345;clustername"
@@ -482,22 +509,37 @@ class submit_slurm extends jobsubmit
    }
 
    ## Mark autoflow submission failed when no valid job ID was received, and
-   ## notify -- round-11 should-fix (common#24): "a failed submission mails
-   ## no one". Every submission failure reaches this one function (staging,
-   ## invalid config, or sbatch itself -- the three callers below), so the
-   ## notification lives here rather than in each caller.
+   ## notify. Every submission failure reaches this one function (staging,
+   ## invalid config, or sbatch itself -- the three callers below, each
+   ## naming its own $stage), so the notification lives here rather than in
+   ## each caller.
    ##
    ## $infraFailure/$breakerJustTripped are meaningful only for the sbatch
    ## failure path (attemptSubmit()'s classification); the other two callers
-   ## pass neither, which defaults both to false -- staging/config failures
-   ## are never breaker-related, so they only ever mail the investigator,
-   ## never the admin.
+   ## pass neither, which defaults both to false.
+   ##
+   ## Mail policy:
+   ## - The investigator always gets a plain notice naming the run, never
+   ##   $statusMsg's raw internal detail (ssh errors, breaker internals,
+   ##   config keys, Slurm partition names) -- that detail is an admin's
+   ##   to read, not something an investigator can act on, and the live
+   ##   detail is already in this->message/elog2's log either way.
+   ## - The admin gets $statusMsg's full detail, but only when there is a
+   ##   reason beyond "a submission failed" to tell them: either the
+   ##   breaker just tripped (once per outage, not once per refused
+   ##   submission while it stays open -- see record_failure()'s own return
+   ##   value, threaded through attemptSubmit()'s 'breaker_just_tripped'),
+   ##   or nobody else could be told at all (no investigator address on
+   ##   file, or the instance database itself was unreachable) -- otherwise
+   ##   a routine, investigator-fixable failure (a rejected sbatch
+   ##   directive, a bad resource request) would page an admin for no
+   ##   reason.
    ##
    ## Autoflow only (gated on $is_cli/$ID below): the interactive web UI
    ## already shows "job submission failed" live in the page it renders, so
    ## mailing there too would just be a redundant second notice for someone
    ## already looking at the answer.
-   protected function markAutoflowSubmitFailed( $statusMsg, $infraFailure = false, $breakerJustTripped = false )
+   protected function markAutoflowSubmitFailed( $statusMsg, $stage, $infraFailure = false, $breakerJustTripped = false )
    {
       global $dbusername, $dbpasswd, $dbhost, $dbname;
       global $ID, $is_cli;
@@ -509,41 +551,60 @@ class submit_slurm extends jobsubmit
          return;
       }
 
-      $link = mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
-      if ( ! $link ) {
-         $this->message[] = "markAutoflowSubmitFailed: cannot connect to $dbhost:$dbname";
-         return;
-      }
-
-      $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
-      $query = "UPDATE autoflowAnalysis SET "
-             . "status='SUBMIT_TIMEOUT', "
-             . "statusMsg='Job submission failed: $qfmsg' "
-             . "WHERE requestID=$autoflowID";
-      $result = mysqli_query( $link, $query );
-      if ( ! $result )
+      ## @ + catch, not a bare call: PHP 8.1+'s mysqli defaults to throwing
+      ## on a connect failure instead of returning false, which would have
+      ## left the "instance database unreachable" admin-mail fallback below
+      ## unreachable code -- the exact failure case it exists for would
+      ## throw straight past it instead of being handled.
+      try
       {
-         $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
+         $link = @mysqli_connect( $dbhost, $dbusername, $dbpasswd, $dbname );
+      }
+      catch ( \Throwable $e )
+      {
+         $link = false;
       }
 
-      ## The investigator's address is looked up fresh here, not threaded in
-      ## from a caller, since every one of the five analysis-type pages that
-      ## reach submit_job() (2DSA_2.php, 2DSA-CG_2.php, DMGA_2.php, GA_3.php,
-      ## PCSA_2.php) would otherwise need its own copy of this lookup.
       $investigator_email = null;
-      $email_stmt = mysqli_prepare( $link,
-         "SELECT p.email FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
-       . " WHERE a.requestID = ?" );
-      if ( $email_stmt )
-      {
-         mysqli_stmt_bind_param( $email_stmt, 'i', $autoflowID );
-         mysqli_stmt_execute( $email_stmt );
-         mysqli_stmt_bind_result( $email_stmt, $investigator_email );
-         mysqli_stmt_fetch( $email_stmt );
-         mysqli_stmt_close( $email_stmt );
-      }
+      $tripleName         = null;
+      $dbUnreachable      = ! $link;
 
-      mysqli_close( $link );
+      if ( $link )
+      {
+         $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
+         $query = "UPDATE autoflowAnalysis SET "
+                . "status='SUBMIT_TIMEOUT', "
+                . "statusMsg='Job submission failed: $qfmsg' "
+                . "WHERE requestID=$autoflowID";
+         $result = mysqli_query( $link, $query );
+         if ( ! $result )
+         {
+            $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
+         }
+
+         ## The investigator's address and the run's own tripleName are
+         ## looked up fresh here, not threaded in from a caller, since every
+         ## one of the five analysis-type pages that reach submit_job()
+         ## (2DSA_2.php, 2DSA-CG_2.php, DMGA_2.php, GA_3.php, PCSA_2.php)
+         ## would otherwise need its own copy of this lookup.
+         $lookup_stmt = mysqli_prepare( $link,
+            "SELECT p.email, a.tripleName FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
+          . " WHERE a.requestID = ?" );
+         if ( $lookup_stmt )
+         {
+            mysqli_stmt_bind_param( $lookup_stmt, 'i', $autoflowID );
+            mysqli_stmt_execute( $lookup_stmt );
+            mysqli_stmt_bind_result( $lookup_stmt, $investigator_email, $tripleName );
+            mysqli_stmt_fetch( $lookup_stmt );
+            mysqli_stmt_close( $lookup_stmt );
+         }
+
+         mysqli_close( $link );
+      }
+      else
+      {
+         $this->message[] = "markAutoflowSubmitFailed: cannot connect to $dbhost:$dbname";
+      }
 
       if ( empty( $org_name ) || empty( $admin_email ) )
       {
@@ -557,28 +618,43 @@ class submit_slurm extends jobsubmit
       $headers .= "MIME-Version: 1.0"                     . "\n";
       $headers .= "Content-Transfer-Encoding: 8bit"       . "\n";
 
+      $runDescription = "requestID=$autoflowID"
+                       . ( ! empty( $tripleName ) ? ", $tripleName" : '' )
+                       . " ($stage)";
+
       if ( ! empty( $investigator_email ) )
       {
          mail( $investigator_email, "US3 job submission failed",
-            "Your job submission could not be completed (requestID=$ID):\n\n$statusMsg", $headers );
+            "Your job submission ($runDescription) could not be completed. The system"
+          . " administrator has been notified and will follow up if further action is"
+          . " needed.", $headers );
       }
       else
       {
          $this->message[] = "markAutoflowSubmitFailed: no investigator email on file for requestID=$ID";
       }
 
-      ## A cluster/transport problem the investigator cannot fix is also
-      ## worth telling an admin about, but only once per outage, not once
-      ## per refused submission while the breaker stays open -- see
-      ## record_failure()'s own return value, threaded through
-      ## attemptSubmit()'s 'breaker_just_tripped'.
       if ( $infraFailure && $breakerJustTripped )
       {
          mail( $admin_email, "US3 cluster unreachable notification",
-            "A LIMS job submission failed because its cluster's circuit breaker just opened"
-          . " (requestID=$ID):\n\n$statusMsg\n\nFurther submissions to this cluster will fail"
-          . " the same way until the breaker's cooldown expires; this is sent once per outage,"
-          . " not once per refused submission.", $headers );
+            "A LIMS job submission ($runDescription) failed because its cluster's circuit"
+          . " breaker just opened:\n\n$statusMsg\n\nFurther submissions to this cluster will"
+          . " fail the same way until the breaker's cooldown expires; this is sent once per"
+          . " outage, not once per refused submission.", $headers );
+      }
+      elseif ( empty( $investigator_email ) || $dbUnreachable )
+      {
+         ## Neither the breaker-outage notice above nor the investigator
+         ## mail above reached anyone -- without this, a submission failure
+         ## with no investigator on file (or hit while the instance
+         ## database itself was down) notified nobody at all.
+         mail( $admin_email, "US3 job submission failed ($runDescription)",
+            "A LIMS job submission ($runDescription) failed and no investigator could be"
+          . " notified ("
+          . ( $dbUnreachable
+            ? "the instance database could not be reached to look one up"
+            : "no investigator e-mail on file" )
+          . "):\n\n$statusMsg", $headers );
       }
    }
 

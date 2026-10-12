@@ -629,7 +629,23 @@ class remote_exec
       $skip_gate = $breaker !== null && array_key_exists( 'breaker_gate', $opts )
                  && $opts[ 'breaker_gate' ] === false;
 
-      if ( $breaker !== null && ! $skip_gate && $breaker->is_open( $this->cluster ) )
+      ## A 'localhost' => true entry runs this command via exec(), never
+      ## ssh (see run()'s own comment) -- the breaker's whole reason to
+      ## refuse outright is to stop hammering an unreachable REMOTE login
+      ## with repeated ssh connections while it recovers; a local command
+      ## costs nothing like that, so there is nothing here for the gate to
+      ## protect. Without this, one earlier local failure (e.g. squeue
+      ## catching slurmctld mid-restart) trips the breaker and then refuses
+      ## every later LOCAL command for this cluster -- including plain
+      ## filesystem operations like mkdir/cp that never touch slurmctld at
+      ## all -- for the full cooldown, turning a transient local hiccup into
+      ## a stage that 4.2.0 would have run ending FAILED instead. Bookkeeping
+      ## (record_success()/record_failure() below) still runs for a local
+      ## command, so describe()/monitoring continue to reflect real health;
+      ## only the outright refusal is skipped.
+      $gate_applies = $breaker !== null && ! $skip_gate && ! $this->is_local();
+
+      if ( $gate_applies && $breaker->is_open( $this->cluster ) )
       {
          $wait = $breaker->seconds_remaining( $this->cluster );
          $this->logf( "$label: skipped, breaker open for {$wait}s more" );

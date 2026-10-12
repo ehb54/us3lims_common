@@ -20,4 +20,4 @@ include 'header.php';
 </div>
 
 
-<?php include 'footer.php'; ?>
+<?php include $common_dir . 'footer.php'; ?>

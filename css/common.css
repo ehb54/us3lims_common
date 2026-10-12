@@ -64,7 +64,7 @@ input[type="submit"], input[type="button"], input[type="reset"] {
 }
 
 input[type="submit"]:hover, input[type="button"]:hover, input[type="reset"]:hover {
-  background            : linear-gradient(#AFD2EC, #94BA65);
+  background            : linear-gradient(#AFD2EC, #2790B0);
 }
 
 ul {

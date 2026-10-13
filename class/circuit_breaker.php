@@ -340,12 +340,40 @@ class circuit_breaker
          return null;
       }
 
-      if ( is_link( $this->path( $cluster ) ) )
+      $path = $this->path( $cluster );
+
+      if ( is_link( $path ) )
       {
          return null;
       }
 
-      return $this->decode( @file_get_contents( $this->path( $cluster ) ) );
+      ## A bare file_get_contents() here raced transact()'s own write
+      ## (round-13 nit, common#33): ftruncate(0) then fwrite() is two
+      ## separate syscalls, so an unlocked reader landing between them saw
+      ## a momentarily empty file and decoded it as "no state", reporting
+      ## a genuinely open breaker as closed. A shared lock blocks only for
+      ## the instant transact()'s own exclusive lock is held, never against
+      ## another concurrent reader.
+      $fh = @fopen( $path, 'r' );
+
+      if ( $fh === false )
+      {
+         return null;
+      }
+
+      try
+      {
+         if ( ! flock( $fh, LOCK_SH ) )
+         {
+            return null;
+         }
+
+         return $this->decode( stream_get_contents( $fh ) );
+      }
+      finally
+      {
+         fclose( $fh );
+      }
    }
 
    /** Shared by read() and transact(): raw file contents -> validated state array, or null. */

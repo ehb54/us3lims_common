@@ -409,6 +409,18 @@ class circuit_breaker
          return $result;
       }
 
+      ## 'c+' creates the file right here if it was missing, at this
+      ## process's default (umask-derived, often 0644) mode -- before any
+      ## write ever happens. The explicit chmod used to run only after a
+      ## real write below, so a no-op mutator (record_success() on a
+      ## cluster with no prior breaker file: never tripped, nothing to
+      ## reset) still left an empty file at the wrong mode, just from
+      ## opening it (round-13 nit, common#33). Applied here instead,
+      ## unconditionally, so the file's mode matches this class's own
+      ## 0600 contract (see the file docblock) the moment it exists at
+      ## all, written to or not.
+      @chmod( $path, 0600 );
+
       try
       {
          if ( ! flock( $fh, LOCK_EX ) )
@@ -427,10 +439,6 @@ class circuit_breaker
             ftruncate( $fh, 0 );
             fwrite( $fh, json_encode( $newState ) );
             fflush( $fh );
-            ## Explicit, not just relying on fopen()'s create mode: the mode is
-            ## part of this class's own contract (see the file docblock), not
-            ## an incidental property of how the file happened to be created.
-            @chmod( $path, 0600 );
          }
 
          return $result;

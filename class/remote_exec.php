@@ -121,6 +121,13 @@ class remote_exec
    ## multiplexOpts() to choose the right log wording.
    private $controlDirExplicitlyDisabled = false;
 
+   ## is_local() is called from several places per submission (the gate
+   ## check, then mkdir, then copy, ...) against the same cached instance
+   ## (submit_slurm's $rx_cache) -- without this, a genuine account
+   ## mismatch logged the identical warning once per call instead of once
+   ## per instance (round-13 nit, common#33).
+   private $loggedAccountMismatch = false;
+
    ## Resolved lazily by timeout_bin(); '' means "not available on this host".
    protected $timeout_bin = null;
 
@@ -208,7 +215,17 @@ class remote_exec
       ## entry is never local: there is no other signal for it.
       if ( isset( $this->details[ 'localhost' ] ) )
       {
-         if ( ! $this->details[ 'localhost' ] )
+         ## A bare PHP bool is trusted as-is; a string is parsed the same
+         ## way a human reads it (round-13 nit, common#33) -- plain `!`
+         ## treats the STRING 'false' as truthy (PHP only empty strings/'0'
+         ## are falsy), so a config written as 'localhost' => 'false' (an
+         ## easy mistake: every other boolean-ish setting in this template
+         ## is a bare true/false, not a quoted one) was silently read as
+         ## local.
+         $localhost = $this->details[ 'localhost' ];
+         $isLocal   = is_string( $localhost ) ? filter_var( $localhost, FILTER_VALIDATE_BOOLEAN ) : (bool) $localhost;
+
+         if ( ! $isLocal )
          {
             $this->logf( "explicit 'localhost' => false; using ssh" );
             return false;
@@ -219,9 +236,14 @@ class remote_exec
             ## The flip side of the 'localhost' => false log above: an
             ## account mismatch used to fall back to ssh silently, with
             ## nothing in the log naming why the local path, which the
-            ## config explicitly asked for, was not taken.
-            $this->logf( "'localhost' => true, but this process's account is not"
-               . " the entry's login user; using ssh" );
+            ## config explicitly asked for, was not taken. Logged once per
+            ## instance, not once per call -- see $loggedAccountMismatch.
+            if ( ! $this->loggedAccountMismatch )
+            {
+               $this->logf( "'localhost' => true, but this process's account is not"
+                  . " the entry's login user; using ssh" );
+               $this->loggedAccountMismatch = true;
+            }
             return false;
          }
 

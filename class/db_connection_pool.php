@@ -127,9 +127,8 @@ class db_connection_pool
          return;
       }
 
-      ## Round-12 nit (common#32, moved here since #32 was closed in favor
-      ## of this branch): no current caller opens a transaction on a pooled
-      ## connection, so this is not yet exploited -- but without it, a
+      ## No current caller opens a transaction on a pooled connection, so
+      ## this is not yet exploited -- but without it, a
       ## future caller that does (and then hits an exception before its own
       ## COMMIT/ROLLBACK, bypassing $healthy=false) would hand the next
       ## checkout() a connection mid-transaction, silently inheriting

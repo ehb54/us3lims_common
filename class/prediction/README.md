@@ -36,8 +36,13 @@ those names belongs to that family, so `2DSA-CG` is 2DSA and `GA-MC` is GA.
        /home/us3/lims/etc/runtime_advisory_GA.json
        /home/us3/lims/etc/runtime_advisory_PCSA.json
 
-   A family with no artifact installed is simply not served, and its
-   submissions record `unsupported`. That is how a family is left out.
+   A family with no artifact installed still resolves to this default path (it
+   is the installed layout's whole point: nothing else needs configuring), so
+   its submissions record `artifact_error` -- the load failing on a file that
+   is not there -- not `unsupported`. To leave a family out deliberately
+   without that error, configure `$global_runtime_advisory_artifact` as an
+   array and omit the family's key from it: that is the one case this really
+   does record `unsupported`, per `artifact_path()`'s own docblock.
 
 3. Set the switch:
 

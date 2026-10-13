@@ -185,8 +185,7 @@ class jobsubmit
            ## was never configured anywhere" from "this real cluster just
            ## happens to be inactive right now".
            ##
-           ## Round-12 nit (common#32, moved here since #32 was closed in
-           ## favor of this branch): this validation accepted a 'clusters'
+           ## This validation accepted a 'clusters'
            ## value that was not an array at all (foreach on a string warns
            ## and iterates zero times, so the pool entry was silently kept
            ## with an unusable member list), an empty array (a pool with
@@ -220,6 +219,19 @@ class jobsubmit
                             && array_key_exists( 'clusters', $cluster_details[ $member ] ) ) {
                            $error_msg( "metascheduler '$k' lists another pool ('$member') in its"
                                      . " 'clusters', not a real cluster" );
+                           $ok = false;
+                           continue;
+                       }
+                       ## The per-instance check below (cluster_configuration) is not
+                       ## the same thing as this host-level one (round-13 nit,
+                       ## common#33): a cluster the upgrade retired ($cluster_details
+                       ## ['active'] => false, e.g. a dead Airavata entry) can still
+                       ## be enabled in a given instance's own cluster_configuration,
+                       ## which never gets revisited once a cluster is retired.
+                       if ( !is_array( $cluster_details[ $member ] )
+                            || empty( $cluster_details[ $member ][ 'active' ] ) ) {
+                           $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', but it"
+                                     . " is not active in \$cluster_details" );
                            $ok = false;
                            continue;
                        }
@@ -612,8 +624,7 @@ class jobsubmit
       ## can differ sharply from the pool's own pseudo-entry -- reading
       ## cluster_shortname here instead used the pool's own (often
       ## unconfigured/default) wall-time limit, confirmed giving a CG job 44
-      ## minutes instead of the real cluster's 176 (round-12 should-fix,
-      ## common#32, moved here since #32 was closed in favor of this branch).
+      ## minutes instead of the real cluster's 176.
       $cluster    = $this->execution_cluster();
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];

@@ -685,9 +685,21 @@ class submit_slurm extends jobsubmit
       $headers .= "MIME-Version: 1.0"                     . "\n";
       $headers .= "Content-Transfer-Encoding: 8bit"       . "\n";
 
+      ## Round-13 should-fix (common#33): the mail used to name the
+      ## requestID, the triple and the submission step ($stage: 'staging'/
+      ## 'configuration'/'sbatch'), but not the run's own working directory
+      ## name or its analysis method (2DSA/PCSA/GA/...) -- both already
+      ## parsed from the analysis-profile XML by jobsubmit.php and
+      ## available on $this->data by the time any of this class's three
+      ## call sites run, just never read here.
+      $runName = $this->data[ 'job' ][ 'directory' ] ?? null;
+      $method  = $this->data[ 'method' ] ?? '';
+
       $runDescription = ( $autoflowID > 0
                          ? "requestID=$autoflowID" . ( ! empty( $tripleName ) ? ", $tripleName" : '' )
                          : 'web submission' )
+                       . ( ! empty( $runName ) ? ", run $runName" : '' )
+                       . ( $method !== '' ? ", $method" : '' )
                        . " ($stage)";
 
       if ( $autoflowID > 0 )

@@ -26,6 +26,15 @@ class submit_slurm extends jobsubmit
    ## specific reason rather than a generic "submission aborted".
    protected $stage_error = '';
 
+   ## Set alongside $stage_error by stageFailure(), so submit()'s call to
+   ## markAutoflowSubmitFailed() can tell admin about a breaker trip hit
+   ## during staging the same way it already does for one hit during
+   ## sbatch (round-13 should-fix, common#33): staging's own mkdir/scp
+   ## results carry 'breaker_just_tripped' exactly like sbatch's result
+   ## does, but nothing used to read it off a staging failure, so a real
+   ## outage caught at staging (remote sshd down) never reached the admin.
+   protected $stage_breaker_just_tripped = false;
+
    ## Captured by write_slurm_script() for observe_runtime_advisory(), which
    ## submit() calls later, after sbatch and update_db() have both succeeded.
    protected $advisoryPlan = null;
@@ -47,7 +56,8 @@ class submit_slurm extends jobsubmit
          if ( ! $this->stage_files() ) {
             ## Persist staging failure for autoflow requests.
             $this->message[] = "ERROR: stage_files failed - submission aborted";
-            $this->markAutoflowSubmitFailed( $this->stage_error !== '' ? $this->stage_error : 'staging failed', 'staging' );
+            $this->markAutoflowSubmitFailed( $this->stage_error !== '' ? $this->stage_error : 'staging failed',
+               'staging', $this->stage_breaker_just_tripped, $this->stage_breaker_just_tripped );
             return;
          }
 
@@ -149,6 +159,8 @@ class submit_slurm extends jobsubmit
 
       $this->message[] = "ERROR: stage_files: $msg [$subject]";
       elog2( "stage_files: $msg [$subject]" );
+
+      $this->stage_breaker_just_tripped = ! empty( $res[ 'breaker_just_tripped' ] );
 
       return $msg;
    }
@@ -571,10 +583,16 @@ class submit_slurm extends jobsubmit
    ##   directive, a bad resource request) would page an admin for no
    ##   reason.
    ##
-   ## Autoflow only (gated on $is_cli/$ID below): the interactive web UI
-   ## already shows "job submission failed" live in the page it renders, so
-   ## mailing there too would just be a redundant second notice for someone
-   ## already looking at the answer.
+   ## The autoflowAnalysis row update, the investigator lookup/mail, and the
+   ## "nobody else notified" fallback are autoflow only (gated on
+   ## $is_cli/$ID below): the interactive web UI already shows "job
+   ## submission failed" live in the page it renders, so mailing the
+   ## submitter there too would just be a redundant second notice for
+   ## someone already looking at the answer. The breaker-trip admin notice
+   ## is NOT gated on that (round-13 should-fix, common#33): a web
+   ## submission failing because the cluster is down is exactly the kind of
+   ## thing the admin needs to hear about too, and nothing about the web UI
+   ## already showing the user their own failure tells the admin that.
    protected function markAutoflowSubmitFailed( $statusMsg, $stage, $infraFailure = false, $breakerJustTripped = false )
    {
       global $dbusername, $dbpasswd, $dbhost, $dbname;
@@ -582,20 +600,32 @@ class submit_slurm extends jobsubmit
       global $org_name, $admin_email;
 
       $autoflowID = ( $is_cli && $ID ) ? (int) $ID : 0;
-      if ( $autoflowID <= 0 )
-      {
-         return;
-      }
 
+      $investigator_email = null;
+      $tripleName         = null;
+      $dbUnreachable      = false;
+
+      ## Below this point is autoflow-only: there is no autoflowAnalysis row
+      ## to update or look an investigator up against for a web submission,
+      ## and the web UI already shows "job submission failed" live in the
+      ## page it renders, so mailing the submitter there would just be a
+      ## redundant second notice for someone already looking at the answer.
+      ## That reasoning never applied to telling the ADMIN about a breaker
+      ## trip, though (round-13 should-fix, common#33): the admin does not
+      ## already know the cluster just went down merely because some web
+      ## user's own page said their job failed. The breaker-trip mail below
+      ## is reachable either way; only the DB update, the investigator
+      ## lookup/mail, and the "nobody else notified" fallback stay gated on
+      ## actually having an autoflow row to work from.
+      if ( $autoflowID > 0 )
+      {
       ## Pooled, not a direct mysqli_connect()/mysqli_close() pair
       ## (common#31): a connect failure here returns null rather than
       ## throwing, so $dbUnreachable below still reflects it correctly
       ## without needing the try/catch a direct connect call used to need.
       $link = db_connection_pool::shared()->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
 
-      $investigator_email = null;
-      $tripleName         = null;
-      $dbUnreachable      = ! $link;
+      $dbUnreachable = ! $link;
 
       if ( $link )
       {
@@ -641,7 +671,7 @@ class submit_slurm extends jobsubmit
       {
          $this->message[] = "markAutoflowSubmitFailed: cannot connect to $dbhost:$dbname";
       }
-
+      } ## end autoflow-only ($autoflowID > 0)
 
       if ( empty( $org_name ) || empty( $admin_email ) )
       {
@@ -655,20 +685,24 @@ class submit_slurm extends jobsubmit
       $headers .= "MIME-Version: 1.0"                     . "\n";
       $headers .= "Content-Transfer-Encoding: 8bit"       . "\n";
 
-      $runDescription = "requestID=$autoflowID"
-                       . ( ! empty( $tripleName ) ? ", $tripleName" : '' )
+      $runDescription = ( $autoflowID > 0
+                         ? "requestID=$autoflowID" . ( ! empty( $tripleName ) ? ", $tripleName" : '' )
+                         : 'web submission' )
                        . " ($stage)";
 
-      if ( ! empty( $investigator_email ) )
+      if ( $autoflowID > 0 )
       {
-         mail( $investigator_email, "US3 job submission failed",
-            "Your job submission ($runDescription) could not be completed. The system"
-          . " administrator has been notified and will follow up if further action is"
-          . " needed.", $headers );
-      }
-      else
-      {
-         $this->message[] = "markAutoflowSubmitFailed: no investigator email on file for requestID=$ID";
+         if ( ! empty( $investigator_email ) )
+         {
+            mail( $investigator_email, "US3 job submission failed",
+               "Your job submission ($runDescription) could not be completed. The system"
+             . " administrator has been notified and will follow up if further action is"
+             . " needed.", $headers );
+         }
+         else
+         {
+            $this->message[] = "markAutoflowSubmitFailed: no investigator email on file for requestID=$ID";
+         }
       }
 
       if ( $infraFailure && $breakerJustTripped )
@@ -679,7 +713,7 @@ class submit_slurm extends jobsubmit
           . " fail the same way until the breaker's cooldown expires; this is sent once per"
           . " outage, not once per refused submission.", $headers );
       }
-      elseif ( empty( $investigator_email ) || $dbUnreachable )
+      elseif ( $autoflowID > 0 && ( empty( $investigator_email ) || $dbUnreachable ) )
       {
          ## Neither the breaker-outage notice above nor the investigator
          ## mail above reached anyone -- without this, a submission failure

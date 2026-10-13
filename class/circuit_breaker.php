@@ -1,0 +1,485 @@
+<?php
+/*
+ * Per-cluster transport failure counts, shared across the processes of one
+ * account. Calls fail fast after the threshold until the cooldown expires.
+ *
+ * State is kept per account, in a subdirectory of $dir owned by the account that
+ * writes it, with files at 0600. The web tier and the us3 daemons therefore each
+ * keep their own counts rather than sharing one group-writable file: a state file
+ * that decides whether a cluster is contacted should not be writable by another
+ * account. The cost is that a breaker tripped by the web tier does not back off
+ * the daemons, and the other way round; each still backs itself off.
+ */
+
+class circuit_breaker
+{
+   private $dir;
+   private $threshold;
+   private $cooldown;
+   private $max_cooldown;
+   private $log;
+   private $usable = null;
+
+   ## An outer bound on $max_cooldown itself: without one, a caller mistake
+   ## (or a hand-edited config many zeros too many) could lock a cluster
+   ## out for longer than any reasonable outage, with no way to recover
+   ## before someone notices and edits the file. 24h is generous enough
+   ## that no legitimate doubling schedule would ever reach it by accident,
+   ## while still being a real ceiling rather than no ceiling at all.
+   const MAX_COOLDOWN_CEILING_SECONDS = 86400;
+
+   /**
+    * $dir       directory for state files. Created if absent.
+    * $threshold consecutive transport faults before the breaker opens.
+    * $cooldown  seconds to stay open before allowing a probe through, the
+    *            first time the breaker opens.
+    * $max_cooldown
+    *            ceiling on the cooldown once it has doubled on consecutive
+    *            trips (a trip the probe immediately fails again). Omitted
+    *            (null) means $cooldown itself, i.e. no progressive
+    *            backoff, so an existing caller that doesn't pass this
+    *            keeps today's behavior exactly. An int, or a clean numeric
+    *            string (a hand-edited config value quoted by mistake, e.g.
+    *            '1800', is still an unambiguous request for that ceiling,
+    *            not a request for "no backoff" -- silently falling back to
+    *            no-backoff for a typo this easy to make is a worse failure
+    *            mode than being lenient about the type), from $cooldown
+    *            through self::MAX_COOLDOWN_CEILING_SECONDS, is accepted.
+    *            Anything else -- too small, too large, non-numeric -- is a
+    *            caller mistake, not a request for "no backoff": that case
+    *            now logs a warning and falls back the same way, instead of
+    *            silently doing the same thing a genuine 0 or a typo'd
+    *            non-numeric value would have done with no way to tell them
+    *            apart.
+    */
+   public function __construct( $dir, $threshold = 3, $cooldown = 120, $log = null, $max_cooldown = null )
+   {
+      $this->dir       = rtrim( (string) $dir, '/' );
+      $this->threshold = max( 1, (int) $threshold );
+      $this->cooldown  = max( 1, (int) $cooldown );
+      $this->log       = is_callable( $log ) ? $log : function ( $m ) { error_log( "circuit_breaker: $m" ); };
+
+      if ( $max_cooldown === null )
+      {
+         $this->max_cooldown = $this->cooldown;
+      }
+      else
+      {
+         $normalized = is_int( $max_cooldown )
+                     ? $max_cooldown
+                     : ( is_string( $max_cooldown ) ? filter_var( $max_cooldown, FILTER_VALIDATE_INT ) : false );
+
+         if ( $normalized !== false && $normalized >= $this->cooldown
+              && $normalized <= self::MAX_COOLDOWN_CEILING_SECONDS )
+         {
+            $this->max_cooldown = $normalized;
+         }
+         else
+         {
+            $this->log( "max_cooldown ("
+               . ( is_scalar( $max_cooldown ) ? var_export( $max_cooldown, true ) : gettype( $max_cooldown ) )
+               . ") is not a valid ceiling (must be an int, or a numeric string, from"
+               . " {$this->cooldown} through " . self::MAX_COOLDOWN_CEILING_SECONDS . "s);"
+               . " using {$this->cooldown}s, i.e. no progressive backoff" );
+            $this->max_cooldown = $this->cooldown;
+         }
+      }
+   }
+
+   /** Fail open when the state directory or file is unavailable. */
+   public function is_open( $cluster )
+   {
+      $state = $this->read( $cluster );
+
+      if ( $state === null )
+      {
+         return false;
+      }
+
+      return $state[ 'open_until' ] > time();
+   }
+
+   ## Seconds remaining before a probe is allowed through. 0 when closed.
+   public function seconds_remaining( $cluster )
+   {
+      $state = $this->read( $cluster );
+
+      if ( $state === null )
+      {
+         return 0;
+      }
+
+      return max( 0, $state[ 'open_until' ] - time() );
+   }
+
+   /** Reset after any remote answer, including a command failure. */
+   public function record_success( $cluster )
+   {
+      $this->transact( $cluster, function ( $state ) use ( $cluster ) {
+         ## Avoid a write on the overwhelmingly common path where nothing is wrong.
+         if ( $state === null || ( $state[ 'failures' ] === 0 && $state[ 'open_until' ] === 0 ) )
+         {
+            return array( null, null );
+         }
+
+         $this->log( "$cluster answering again; breaker closed" );
+
+         return array( array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => time() ), null );
+      } );
+   }
+
+   /**
+    * A call failed at the transport layer. Count it, and open the breaker once
+    * the threshold is reached.
+    *
+    * is_open()'s gate protects a call that CHECKS before it starts, but it
+    * does not protect one already in flight when another process's call
+    * trips the breaker: that call still finishes, late, and still reaches
+    * here. Without the open_until check below, each such late arrival read
+    * $failures already at or past threshold and counted itself as its own
+    * fresh trip, so K callers failing within one outage could double the
+    * cooldown K-ish times over instead of once. A failure that arrives
+    * while open_until is still in the future is therefore just noise from
+    * that same outage, not a new one: counted, but not re-tripped.
+    *
+    * Goes through transact(), not a bare read()-then-write(): without the
+    * lock, a success and a late failure arriving at nearly the same moment
+    * could each read the OTHER's about-to-be-overwritten state and then
+    * write back-to-back, so the success's close either got silently
+    * reverted by the late failure's write landing second, or the failure's
+    * count got dropped by the success's write landing second -- confirmed
+    * losing the race in 4 of 8 concurrent runs before this fix.
+    *
+    * @return bool true exactly on the call that opens the breaker (this
+    *              failure crossed the threshold while not already open),
+    *              false otherwise. Lets a caller mail an admin once per
+    *              outage instead of once per refused submission while the
+    *              breaker stays open.
+    */
+   public function record_failure( $cluster )
+   {
+      return $this->transact( $cluster, function ( $state ) use ( $cluster ) {
+         if ( $state === null )
+         {
+            $state = array( 'failures' => 0, 'open_until' => 0, 'trips' => 0, 'updated' => 0 );
+         }
+
+         if ( $state[ 'open_until' ] > time() )
+         {
+            $this->log( "$cluster still open for "
+                        . ( $state[ 'open_until' ] - time() ) . "s; a late failure from an"
+                        . " in-flight call does not add another trip" );
+
+            return array( array(
+               'failures' => $state[ 'failures' ] + 1, 'open_until' => $state[ 'open_until' ],
+               'trips' => $state[ 'trips' ], 'updated' => time()
+            ), false );
+         }
+
+         $failures = $state[ 'failures' ] + 1;
+
+         if ( $failures >= $this->threshold )
+         {
+            $trips      = $state[ 'trips' ] + 1;
+            $cooldown   = min( $this->max_cooldown, $this->cooldown * ( 2 ** ( $trips - 1 ) ) );
+            $open_until = time() + $cooldown;
+
+            $this->log( "$cluster unreachable $failures time(s) in a row (trip $trips);"
+                        . " breaker open for {$cooldown}s -- further calls will fail fast" );
+
+            return array( array(
+               'failures' => $failures, 'open_until' => $open_until, 'trips' => $trips, 'updated' => time()
+            ), true );
+         }
+
+         return array( array(
+            'failures' => $failures, 'open_until' => 0, 'trips' => $state[ 'trips' ], 'updated' => time()
+         ), false );
+      } );
+   }
+
+   ## Human-readable state, for the health probe and logs.
+   public function describe( $cluster )
+   {
+      $state = $this->read( $cluster );
+
+      if ( $state === null )
+      {
+         return 'closed';
+      }
+
+      $description = 'closed';
+      if ( $state[ 'open_until' ] > time() )
+      {
+         ## max(1, ...): a state file written before this field existed (or
+         ## otherwise missing it) reads 'trips' as 0 via read()'s own
+         ## fallback, but the breaker being open at all means at least one
+         ## trip happened -- showing "trip 0" for an open breaker is simply
+         ## wrong, not merely uninformative.
+         $description = 'open (' . ( $state[ 'open_until' ] - time() ) . 's remaining, '
+                        . $state[ 'failures' ] . ' consecutive failures, trip '
+                        . max( 1, $state[ 'trips' ] ) . ')';
+      }
+      elseif ( $state[ 'failures' ] >= $this->threshold )
+      {
+         $description = 'half-open (next call is a probe)';
+      }
+      elseif ( $state[ 'failures' ] > 0 )
+      {
+         $description = 'closed (' . $state[ 'failures' ] . ' consecutive failures)';
+      }
+
+      return $description;
+   }
+
+   ## ---------------------------------------------------------------- internals
+
+   ## The account this process runs as, for the state subdirectory. The name when
+   ## it can be read, else the uid: both are stable and filename-safe.
+   private function account()
+   {
+      $uid = function_exists( 'posix_geteuid' ) ? posix_geteuid() : null;
+
+      if ( $uid !== null && function_exists( 'posix_getpwuid' ) )
+      {
+         $pw = @posix_getpwuid( $uid );
+         if ( is_array( $pw ) && isset( $pw[ 'name' ] ) && $pw[ 'name' ] !== '' )
+         {
+            return preg_replace( '/[^A-Za-z0-9._-]/', '_', $pw[ 'name' ] );
+         }
+      }
+
+      return $uid === null ? 'unknown' : (string) $uid;
+   }
+
+   /** Where this account's state files live. Public so an installer check and the
+    *  tests can look at the real location rather than rebuild the rule. */
+   public function state_directory()
+   {
+      return $this->dir . '/' . $this->account();
+   }
+
+   private function state_dir()
+   {
+      return $this->state_directory();
+   }
+
+   private function path( $cluster )
+   {
+      ## Restrict cluster names to filename-safe characters.
+      $safe = preg_replace( '/[^A-Za-z0-9._-]/', '_', (string) $cluster );
+
+      return $this->state_dir() . '/' . $safe . '.brk';
+   }
+
+   private function usable()
+   {
+      if ( $this->usable !== null )
+      {
+         return $this->usable;
+      }
+
+      if ( $this->dir === '' )
+      {
+         return $this->usable = false;
+      }
+
+      if ( ! is_dir( $this->dir ) )
+      {
+         @mkdir( $this->dir, 0770, true );
+      }
+
+      ## State that decides whether a cluster is contacted: refuse a symlinked
+      ## parent or one owned by anyone but us3 or root. The parent is shared
+      ## ground, so another account could otherwise plant something in it.
+      $us3   = function_exists( 'posix_getpwnam' ) ? posix_getpwnam( 'us3' ) : false;
+      $owner = @fileowner( $this->dir );
+      if ( is_link( $this->dir ) || ( $us3 && $owner !== $us3[ 'uid' ] && $owner !== 0 ) )
+      {
+         $this->log( "state directory {$this->dir} is a symlink or not owned by us3; breaker disabled" );
+         return $this->usable = false;
+      }
+
+      ## This account's own subdirectory, 0700: nothing another account writes can
+      ## change what this one believes about a cluster.
+      $mine = $this->state_dir();
+
+      if ( ! is_dir( $mine ) && ! @mkdir( $mine, 0700, true ) && ! is_dir( $mine ) )
+      {
+         ## The second is_dir() catches two processes racing the first use:
+         ## the loser's mkdir() fails with EEXIST once the winner's mkdir()
+         ## has already landed, which is success, not the permission problem
+         ## this message describes.
+         ##
+         ## Distinct from the symlink/ownership check below: this account
+         ## could not even create its own subdirectory, almost always
+         ## because $this->dir's group does not include it. The generic
+         ## "symlink or not owned" message used to fire here too, naming a
+         ## cause this account had no way to have caused.
+         $this->log( "could not create $mine under {$this->dir}, which this account"
+                     . " may lack permission to write into; breaker disabled" );
+         return $this->usable = false;
+      }
+
+      $euid = function_exists( 'posix_geteuid' ) ? posix_geteuid() : null;
+      $own  = @fileowner( $mine );
+      if ( is_link( $mine ) || ( $euid !== null && $own !== $euid && $own !== 0 ) )
+      {
+         $this->log( "state directory $mine is a symlink or not owned by this account; breaker disabled" );
+         return $this->usable = false;
+      }
+
+      return $this->usable = ( is_dir( $mine ) && is_writable( $mine ) );
+   }
+
+   /** Returns null when there is no usable state, which callers read as "closed". */
+   private function read( $cluster )
+   {
+      if ( ! $this->usable() )
+      {
+         return null;
+      }
+
+      $path = $this->path( $cluster );
+
+      if ( is_link( $path ) )
+      {
+         return null;
+      }
+
+      ## A bare file_get_contents() here raced transact()'s own write
+      ## (round-13 nit, common#33): ftruncate(0) then fwrite() is two
+      ## separate syscalls, so an unlocked reader landing between them saw
+      ## a momentarily empty file and decoded it as "no state", reporting
+      ## a genuinely open breaker as closed. A shared lock blocks only for
+      ## the instant transact()'s own exclusive lock is held, never against
+      ## another concurrent reader.
+      $fh = @fopen( $path, 'r' );
+
+      if ( $fh === false )
+      {
+         return null;
+      }
+
+      try
+      {
+         if ( ! flock( $fh, LOCK_SH ) )
+         {
+            return null;
+         }
+
+         return $this->decode( stream_get_contents( $fh ) );
+      }
+      finally
+      {
+         fclose( $fh );
+      }
+   }
+
+   /** Shared by read() and transact(): raw file contents -> validated state array, or null. */
+   private function decode( $raw )
+   {
+      $state = $raw === false || $raw === null || $raw === '' ? null : json_decode( $raw, true );
+
+      if ( ! is_array( $state ) || ! isset( $state[ 'failures' ], $state[ 'open_until' ] ) )
+      {
+         return null;
+      }   ## torn or corrupt write: treat as closed and let it be overwritten
+
+      ## Never open for longer than the progressive ceiling, whatever the file says.
+      return array(
+         'failures'   => (int) $state[ 'failures' ],
+         'open_until' => min( (int) $state[ 'open_until' ], time() + $this->max_cooldown ),
+         'trips'      => (int) ( $state[ 'trips' ] ?? 0 ),
+         'updated'    => (int) ( $state[ 'updated' ] ?? 0 ),
+      );
+   }
+
+   /**
+    * Read-modify-write a cluster's state under an exclusive lock, so a
+    * success and a late failure arriving at nearly the same moment can
+    * never clobber each other's write by each reading the other's
+    * about-to-be-overwritten state and writing back-to-back.
+    * record_success()/record_failure() both go through this instead of a
+    * bare read() followed by write() with nothing serializing the two.
+    *
+    * $mutator receives the current state (same shape read() returns,
+    * already capped to max_cooldown; null if there is none yet) and must
+    * return [ $newStateOrNull, $returnValue ]: $newStateOrNull is written
+    * if not null, so a caller that decides nothing needs to change (e.g.
+    * record_success() on an already-closed breaker) can skip the write
+    * entirely while still holding the lock throughout the decision;
+    * $returnValue is handed back to transact()'s own caller unchanged.
+    */
+   private function transact( $cluster, callable $mutator )
+   {
+      if ( ! $this->usable() )
+      {
+         list( , $result ) = $mutator( null );
+         return $result;
+      }
+
+      $path = $this->path( $cluster );
+
+      if ( is_link( $path ) )
+      {
+         list( , $result ) = $mutator( null );
+         return $result;
+      }
+
+      ## 'c+': create if missing, read/write, never truncates on open -- this
+      ## process's own read below has to see whatever is already there.
+      $fh = @fopen( $path, 'c+' );
+
+      if ( $fh === false )
+      {
+         list( , $result ) = $mutator( null );
+         return $result;
+      }
+
+      ## 'c+' creates the file right here if it was missing, at this
+      ## process's default (umask-derived, often 0644) mode -- before any
+      ## write ever happens. The explicit chmod used to run only after a
+      ## real write below, so a no-op mutator (record_success() on a
+      ## cluster with no prior breaker file: never tripped, nothing to
+      ## reset) still left an empty file at the wrong mode, just from
+      ## opening it (round-13 nit, common#33). Applied here instead,
+      ## unconditionally, so the file's mode matches this class's own
+      ## 0600 contract (see the file docblock) the moment it exists at
+      ## all, written to or not.
+      @chmod( $path, 0600 );
+
+      try
+      {
+         if ( ! flock( $fh, LOCK_EX ) )
+         {
+            list( , $result ) = $mutator( null );
+            return $result;
+         }
+
+         $state = $this->decode( stream_get_contents( $fh ) );
+
+         list( $newState, $result ) = $mutator( $state );
+
+         if ( $newState !== null )
+         {
+            rewind( $fh );
+            ftruncate( $fh, 0 );
+            fwrite( $fh, json_encode( $newState ) );
+            fflush( $fh );
+         }
+
+         return $result;
+      }
+      finally
+      {
+         flock( $fh, LOCK_UN );
+         fclose( $fh );
+      }
+   }
+
+   private function log( $msg )
+   {
+      call_user_func( $this->log, $msg );
+   }
+}

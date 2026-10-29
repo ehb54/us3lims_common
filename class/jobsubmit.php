@@ -28,6 +28,14 @@ class jobsubmit
            error_log( $emsg );
        };
 
+       ## A pool-definition finding, not a refusal of this submission: callers that scan the output
+       ## (gridctl) fail a stage on ERROR: only.
+       $warning_msg = function( $msg ) {
+           $wmsg = "WARNING: class/jobsubmit.php : $msg";
+           echo "$wmsg<br>";
+           error_log( $wmsg );
+       };
+
        ## anonymous info message function - local in scope
 
        $debug_msg = function( $msg, $debug ) {
@@ -197,27 +205,27 @@ class jobsubmit
            ## for the pool entry itself above, never run per-member).
            if ( array_key_exists( "clusters", $v ) ) {
                if ( !is_array( $v[ 'clusters' ] ) ) {
-                   $error_msg( "metascheduler '$k' has a 'clusters' value that is not an array" );
+                   $warning_msg( "metascheduler '$k' has a 'clusters' value that is not an array" );
                    $ok = false;
                } elseif ( count( $v[ 'clusters' ] ) === 0 ) {
-                   $error_msg( "metascheduler '$k' has an empty 'clusters' list" );
+                   $warning_msg( "metascheduler '$k' has an empty 'clusters' list" );
                    $ok = false;
                } else {
                    foreach ( $v[ 'clusters' ] as $member ) {
                        if ( $member === $k ) {
-                           $error_msg( "metascheduler '$k' lists itself in its own 'clusters'" );
+                           $warning_msg( "metascheduler '$k' lists itself in its own 'clusters'" );
                            $ok = false;
                            continue;
                        }
                        if ( !array_key_exists( $member, $cluster_details ) ) {
-                           $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', "
+                           $warning_msg( "metascheduler '$k' lists '$member' in its 'clusters', "
                                      . "but no such cluster exists in \$cluster_details" );
                            $ok = false;
                            continue;
                        }
                        if ( is_array( $cluster_details[ $member ] )
                             && array_key_exists( 'clusters', $cluster_details[ $member ] ) ) {
-                           $error_msg( "metascheduler '$k' lists another pool ('$member') in its"
+                           $warning_msg( "metascheduler '$k' lists another pool ('$member') in its"
                                      . " 'clusters', not a real cluster" );
                            $ok = false;
                            continue;
@@ -230,7 +238,7 @@ class jobsubmit
                        ## which never gets revisited once a cluster is retired.
                        if ( !is_array( $cluster_details[ $member ] )
                             || empty( $cluster_details[ $member ][ 'active' ] ) ) {
-                           $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', but it"
+                           $warning_msg( "metascheduler '$k' lists '$member' in its 'clusters', but it"
                                      . " is not active in \$cluster_details" );
                            $ok = false;
                            continue;
@@ -238,7 +246,7 @@ class jobsubmit
                        if ( !array_key_exists( $member, $cluster_configuration )
                             || !is_array( $cluster_configuration[ $member ] )
                             || empty( $cluster_configuration[ $member ][ 'active' ] ) ) {
-                           $error_msg( "metascheduler '$k' lists '$member' in its 'clusters', but it"
+                           $warning_msg( "metascheduler '$k' lists '$member' in its 'clusters', but it"
                                      . " is not enabled for this instance (missing or inactive in"
                                      . " \$cluster_configuration)" );
                            $ok = false;

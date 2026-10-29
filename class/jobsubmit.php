@@ -231,8 +231,8 @@ class jobsubmit
                            continue;
                        }
                        ## The per-instance check below (cluster_configuration) is not
-                       ## the same thing as this host-level one (round-13 nit,
-                       ## common#33): a cluster the upgrade retired ($cluster_details
+                       ## the same thing as this host-level one: a cluster the
+                       ## upgrade retired ($cluster_details
                        ## ['active'] => false, e.g. a dead Airavata entry) can still
                        ## be enabled in a given instance's own cluster_configuration,
                        ## which never gets revisited once a cluster is retired.

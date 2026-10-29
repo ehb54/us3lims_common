@@ -125,7 +125,7 @@ class remote_exec
    ## check, then mkdir, then copy, ...) against the same cached instance
    ## (submit_slurm's $rx_cache) -- without this, a genuine account
    ## mismatch logged the identical warning once per call instead of once
-   ## per instance (round-13 nit, common#33).
+   ## per instance.
    private $loggedAccountMismatch = false;
 
    ## Resolved lazily by timeout_bin(); '' means "not available on this host".
@@ -200,7 +200,7 @@ class remote_exec
    ## us3@<self>, and the monitor it hands jobs to always runs as us3
    ## (submit_slurm's launch_monitor path), so a local exec() as any other
    ## account creates files one of those two can't reach -- a split-account
-   ## host (web tier != us3, which dbutils#45 provisions for) gets a
+   ## host (web tier != us3, which uslims_upgrade.php provisions for) gets a
    ## staging failure with no reason, a denied scp, or scancel refused by a
    ## job it doesn't own, depending on where it is in the lifecycle. ssh is
    ## always correct regardless of which account asks

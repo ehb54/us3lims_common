@@ -28,11 +28,10 @@ class submit_slurm extends jobsubmit
 
    ## Set alongside $stage_error by stageFailure(), so submit()'s call to
    ## markAutoflowSubmitFailed() can tell admin about a breaker trip hit
-   ## during staging the same way it already does for one hit during
-   ## sbatch (round-13 should-fix, common#33): staging's own mkdir/scp
-   ## results carry 'breaker_just_tripped' exactly like sbatch's result
-   ## does, but nothing used to read it off a staging failure, so a real
-   ## outage caught at staging (remote sshd down) never reached the admin.
+   ## during staging the same way it does for one hit during sbatch:
+   ## staging's own mkdir/scp results carry 'breaker_just_tripped' exactly
+   ## like sbatch's result does, so a real outage caught at staging (remote
+   ## sshd down) still reaches the admin.
    protected $stage_breaker_just_tripped = false;
 
    ## Captured by write_slurm_script() for observe_runtime_advisory(), which
@@ -377,19 +376,14 @@ class submit_slurm extends jobsubmit
             break;
          }
 
-         ## Round 12 skipped this wait once the next attempt is the forced,
-         ## always-real last one above, reasoning that a wait "protects
-         ## nothing" since that attempt was always going to run regardless
-         ## of gate/breaker state. That reasoning missed what the wait
-         ## actually buys: time for a transient outage to recover before
-         ## the forced attempt fires. Confirmed against a ~90s outage
-         ## (stops 25s before submission, recovers at +91s): skipping this
-         ## wait made the forced 4th attempt land at +68s, before recovery,
-         ## failing with no job ever created; waiting the full schedule
-         ## lands it at +87-88s, after recovery, succeeding -- matching
-         ## 4.2.0 and round 11's (common#24 / 040a3dc) behavior. The forced
-         ## attempt still always runs for real either way; only its timing
-         ## changes.
+         ## Still wait before the forced, always-real last attempt above:
+         ## the wait gives a transient outage time to recover before that
+         ## attempt fires. Against a ~90s outage (stops 25s before
+         ## submission, recovers at +91s), skipping this wait lands the
+         ## forced 4th attempt at +68s, before recovery, failing with no job
+         ## ever created; waiting the full schedule lands it at +87-88s,
+         ## after recovery, succeeding, matching 4.2.0. The forced attempt
+         ## always runs for real either way; only its timing changes.
          $this->pause( $wait );
          $wait *= 2;
       }
@@ -589,7 +583,7 @@ class submit_slurm extends jobsubmit
    ## submission failed" live in the page it renders, so mailing the
    ## submitter there too would just be a redundant second notice for
    ## someone already looking at the answer. The breaker-trip admin notice
-   ## is NOT gated on that (round-13 should-fix, common#33): a web
+   ## is NOT gated on that: a web
    ## submission failing because the cluster is down is exactly the kind of
    ## thing the admin needs to hear about too, and nothing about the web UI
    ## already showing the user their own failure tells the admin that.
@@ -619,7 +613,7 @@ class submit_slurm extends jobsubmit
       ## page it renders, so mailing the submitter there would just be a
       ## redundant second notice for someone already looking at the answer.
       ## That reasoning never applied to telling the ADMIN about a breaker
-      ## trip, though (round-13 should-fix, common#33): the admin does not
+      ## trip, though: the admin does not
       ## already know the cluster just went down merely because some web
       ## user's own page said their job failed. The breaker-trip mail below
       ## is reachable either way; only the DB update, the investigator
@@ -627,10 +621,9 @@ class submit_slurm extends jobsubmit
       ## actually having an autoflow row to work from.
       if ( $autoflowID > 0 )
       {
-      ## Pooled, not a direct mysqli_connect()/mysqli_close() pair
-      ## (common#31): a connect failure here returns null rather than
-      ## throwing, so $dbUnreachable below still reflects it correctly
-      ## without needing the try/catch a direct connect call used to need.
+      ## Pooled, not a direct mysqli_connect()/mysqli_close() pair: a
+      ## connect failure here returns null rather than throwing, so
+      ## $dbUnreachable below reflects it without a try/catch.
       $link = db_connection_pool::shared()->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
 
       $dbUnreachable = ! $link;
@@ -693,13 +686,10 @@ class submit_slurm extends jobsubmit
       $headers .= "MIME-Version: 1.0"                     . "\n";
       $headers .= "Content-Transfer-Encoding: 8bit"       . "\n";
 
-      ## Round-13 should-fix (common#33): the mail used to name the
-      ## requestID, the triple and the submission step ($stage: 'staging'/
-      ## 'configuration'/'sbatch'), but not the run's own working directory
-      ## name or its analysis method (2DSA/PCSA/GA/...) -- both already
-      ## parsed from the analysis-profile XML by jobsubmit.php and
-      ## available on $this->data by the time any of this class's three
-      ## call sites run, just never read here.
+      ## Besides the requestID, the triple and the submission step, the
+      ## mail names the run's working directory and analysis method
+      ## (2DSA/PCSA/GA/...), both parsed from the analysis-profile XML by
+      ## jobsubmit.php and available on $this->data at all three call sites.
       $runName = $this->data[ 'job' ][ 'directory' ] ?? null;
       $method  = $this->data[ 'method' ] ?? '';
 
@@ -937,11 +927,10 @@ class submit_slurm extends jobsubmit
    {
       $details = isset( $this->grid[ $cluster ] ) ? $this->grid[ $cluster ] : array();
 
-      ## is_string(): round 10 fixed this same "Array" conversion for
-      ## 'edit_filename' (a dataset file list that can genuinely be an
-      ## array), but missed that prediction_cluster_name -- an admin-set
-      ## cluster_details value, not user input -- has the identical
-      ## failure mode if it is ever mistakenly configured as one. (string)
+      ## is_string(): like 'edit_filename' (a dataset file list that can
+      ## genuinely be an array), prediction_cluster_name -- an admin-set
+      ## cluster_details value, not user input -- converts to "Array" if
+      ## it is ever mistakenly configured as one. (string)
       ## alone does not protect against that: casting an array to string
       ## produces the literal string "Array" (PHP Notice/Warning), not a
       ## usable identity. Falls through to the next tier below instead,

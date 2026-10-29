@@ -159,7 +159,7 @@ $global_metascheduler_decision_retention_seconds = 31536000;
 ## (the mkdir, the scp, and the scontrol check -- not sbatch itself; see
 ## class/remote_exec.php's CONTROL_DIR comment for why sbatch is never
 ## multiplexed). Same per-account subdirectory reasoning as the
-## breaker directory above. dbutils#45 step 5 provisions this directory
+## breaker directory above. uslims_upgrade.php provisions this directory
 ## 3770 us3:<web group> (the sticky bit so an account's own subdirectory,
 ## once created, cannot be renamed or removed by the other account). Set to
 ## '' to turn multiplexing off outright and have every call connect plainly,

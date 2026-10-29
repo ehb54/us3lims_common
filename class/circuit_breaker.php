@@ -347,11 +347,11 @@ class circuit_breaker
          return null;
       }
 
-      ## A bare file_get_contents() here raced transact()'s own write
-      ## (round-13 nit, common#33): ftruncate(0) then fwrite() is two
-      ## separate syscalls, so an unlocked reader landing between them saw
-      ## a momentarily empty file and decoded it as "no state", reporting
-      ## a genuinely open breaker as closed. A shared lock blocks only for
+      ## A bare file_get_contents() here would race transact()'s own write:
+      ## ftruncate(0) then fwrite() is two separate syscalls, so an unlocked
+      ## reader landing between them sees a momentarily empty file and
+      ## decodes it as "no state", reporting a genuinely open breaker as
+      ## closed. A shared lock blocks only for
       ## the instant transact()'s own exclusive lock is held, never against
       ## another concurrent reader.
       $fh = @fopen( $path, 'r' );
@@ -439,12 +439,10 @@ class circuit_breaker
 
       ## 'c+' creates the file right here if it was missing, at this
       ## process's default (umask-derived, often 0644) mode -- before any
-      ## write ever happens. The explicit chmod used to run only after a
-      ## real write below, so a no-op mutator (record_success() on a
+      ## write ever happens. A no-op mutator (record_success() on a
       ## cluster with no prior breaker file: never tripped, nothing to
-      ## reset) still left an empty file at the wrong mode, just from
-      ## opening it (round-13 nit, common#33). Applied here instead,
-      ## unconditionally, so the file's mode matches this class's own
+      ## reset) would leave that empty file at the wrong mode, so the
+      ## chmod runs here, unconditionally: the file matches this class's
       ## 0600 contract (see the file docblock) the moment it exists at
       ## all, written to or not.
       @chmod( $path, 0600 );

@@ -11,6 +11,11 @@ $admin_list = [
     ,'emre.brookes@umontana.edu'
     ];
 
+## The host's site administrator, who gets submission-failure and outage notices. An instance's
+## own $admin_email is its contact, not this. uslims_upgrade.php sets it from listen-config.php's
+## $admin_email.
+$global_site_admin_email = '';
+
 ## maximum queue times and run times
 ## these times are in hours *since last status update*
 ## status updates generally happen somewhat frequently

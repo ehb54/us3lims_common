@@ -597,9 +597,17 @@ class submit_slurm extends jobsubmit
    {
       global $dbusername, $dbpasswd, $dbhost, $dbname;
       global $ID, $is_cli;
-      global $org_name, $admin_email;
+      global $org_name, $admin_email, $global_site_admin_email;
 
       $autoflowID = ( $is_cli && $ID ) ? (int) $ID : 0;
+
+      ## Admin notices go to the host's site admin (global_config.php); in an instance page
+      ## $admin_email is that instance's contact. It remains the fallback on a host whose
+      ## global_config.php predates the setting.
+      $siteAdmin = ! empty( $global_site_admin_email ) ? $global_site_admin_email : $admin_email;
+      ## gridctl sends the one admin notice for a submission it drives (from this page's ERROR:
+      ## output), so common mailing too sent the same failure twice.
+      $gridctlNotifiesAdmin = defined( 'US3_GRIDCTL_SUBMISSION' );
 
       $investigator_email = null;
       $tripleName         = null;
@@ -717,21 +725,26 @@ class submit_slurm extends jobsubmit
          }
       }
 
-      if ( $infraFailure && $breakerJustTripped )
+      if ( $infraFailure && $breakerJustTripped && $gridctlNotifiesAdmin )
       {
-         mail( $admin_email, "US3 cluster unreachable notification",
+         $this->message[] = "ERROR: the cluster's circuit breaker just opened; further submissions to it"
+                          . " fail until its cooldown expires";
+      }
+      elseif ( $infraFailure && $breakerJustTripped )
+      {
+         mail( $siteAdmin, "US3 cluster unreachable notification",
             "A LIMS job submission ($runDescription) failed because its cluster's circuit"
           . " breaker just opened:\n\n$statusMsg\n\nFurther submissions to this cluster will"
           . " fail the same way until the breaker's cooldown expires; this is sent once per"
           . " outage, not once per refused submission.", $headers );
       }
-      elseif ( $autoflowID > 0 && ( empty( $investigator_email ) || $dbUnreachable ) )
+      elseif ( ! $gridctlNotifiesAdmin && $autoflowID > 0 && ( empty( $investigator_email ) || $dbUnreachable ) )
       {
          ## Neither the breaker-outage notice above nor the investigator
          ## mail above reached anyone -- without this, a submission failure
          ## with no investigator on file (or hit while the instance
          ## database itself was down) notified nobody at all.
-         mail( $admin_email, "US3 job submission failed ($runDescription)",
+         mail( $siteAdmin, "US3 job submission failed ($runDescription)",
             "A LIMS job submission ($runDescription) failed and no investigator could be"
           . " notified ("
           . ( $dbUnreachable

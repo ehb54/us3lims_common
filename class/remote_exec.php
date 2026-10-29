@@ -207,6 +207,13 @@ class remote_exec
    ## for it, so an unconfirmed match falls back to ssh rather than risking
    ## the wrong owner -- this only gives up the local path's speed, never
    ## correctness.
+   ## A cluster entry's 'localhost' flag: a bool as-is, a string read the way a person reads it,
+   ## so 'false' is not local. dbinst reads the flag through this too.
+   public static function localhost_flag( $value )
+   {
+      return is_string( $value ) ? filter_var( $value, FILTER_VALIDATE_BOOLEAN ) : (bool) $value;
+   }
+
    public function is_local()
    {
       ## An explicit, present 'localhost' key is the admin directly saying
@@ -215,15 +222,7 @@ class remote_exec
       ## entry is never local: there is no other signal for it.
       if ( isset( $this->details[ 'localhost' ] ) )
       {
-         ## A bare PHP bool is trusted as-is; a string is parsed the same
-         ## way a human reads it (round-13 nit, common#33) -- plain `!`
-         ## treats the STRING 'false' as truthy (PHP only empty strings/'0'
-         ## are falsy), so a config written as 'localhost' => 'false' (an
-         ## easy mistake: every other boolean-ish setting in this template
-         ## is a bare true/false, not a quoted one) was silently read as
-         ## local.
-         $localhost = $this->details[ 'localhost' ];
-         $isLocal   = is_string( $localhost ) ? filter_var( $localhost, FILTER_VALIDATE_BOOLEAN ) : (bool) $localhost;
+         $isLocal = self::localhost_flag( $this->details[ 'localhost' ] );
 
          if ( ! $isLocal )
          {

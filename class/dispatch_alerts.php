@@ -1,0 +1,270 @@
+<?php
+/* Dispatch operations: operator alert items, the wait notification, the
+ * worker heartbeat, operational metrics and operator actions. Alert items live
+ * in gfac; the open item is the system of record and email is an optional
+ * delivery on top. Needs dispatch_ledger.php. PHP 7.2 compatible. */
+
+include_once __DIR__ . '/dispatch_ledger.php';
+
+## A worker heartbeat older than this is reported as lost.
+const DISPATCH_HEARTBEAT_STALE_SECONDS = 300;
+## An accepted job still untracked after this long is an operator alert.
+const DISPATCH_UNTRACKED_ALERT_SECONDS = 900;
+
+/**
+ * Open the item for a condition, or note that it is still occurring. One open
+ * item per $key; $requests (instance => IDs) are listed under it. Returns the
+ * alert ID.
+ */
+function dispatch_alert_raise( $link, $gdb, $key, $kind, $urgency, $destination, $instance, $detail, array $requests = array() )
+{
+   dispatch_affected( $link, "INSERT INTO `$gdb`.dispatch_alert
+         (dedupKey, kind, urgency, destination, instanceDb, detail, firstAt, lastAt)
+      VALUES (?,?,?,?,?,?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+      ON DUPLICATE KEY UPDATE lastAt = UTC_TIMESTAMP(), detail = VALUES(detail)",
+      'ssssss', array( $key, $kind, $urgency, $destination, $instance, $detail ) );
+   $rows = dispatch_rows( $link, "SELECT alertID FROM `$gdb`.dispatch_alert WHERE dedupKey = ? AND openFlag = 1",
+                          's', array( $key ) );
+   if ( ! $rows ) {
+      return 0;
+   }
+   $alert = (int) $rows[ 0 ][ 'alertID' ];
+   foreach ( $requests as $db => $ids ) {
+      foreach ( $ids as $id ) {
+         dispatch_affected( $link, "INSERT IGNORE INTO `$gdb`.dispatch_alert_request VALUES (?,?,?)",
+                            'isi', array( $alert, $db, (int) $id ) );
+      }
+   }
+   return $alert;
+}
+
+## Close the open item for a condition that no longer holds.
+function dispatch_alert_resolve( $link, $gdb, $key, $resolution )
+{
+   return dispatch_affected( $link, "UPDATE `$gdb`.dispatch_alert SET resolvedAt = UTC_TIMESTAMP(), resolution = ?,
+         openFlag = NULL WHERE dedupKey = ? AND openFlag = 1", 'ss', array( $resolution, $key ) ) === 1;
+}
+
+## Close an item by ID, as an operator does once the fault is handled.
+function dispatch_alert_close( $link, $gdb, $alert_id, $resolution )
+{
+   return dispatch_affected( $link, "UPDATE `$gdb`.dispatch_alert SET resolvedAt = UTC_TIMESTAMP(), resolution = ?,
+         openFlag = NULL WHERE alertID = ? AND openFlag = 1", 'si', array( $resolution, (int) $alert_id ) ) === 1;
+}
+
+/** Open item keys of a kind, for resolving the ones whose condition has ended. */
+function dispatch_alert_open_keys( $link, $gdb, $kind, $instance = null )
+{
+   $sql = "SELECT dedupKey FROM `$gdb`.dispatch_alert WHERE kind = ? AND openFlag = 1";
+   $rows = $instance === null ? dispatch_rows( $link, $sql, 's', array( $kind ) )
+                              : dispatch_rows( $link, "$sql AND instanceDb = ?", 'ss', array( $kind, $instance ) );
+   return array_column( $rows, 'dedupKey' );
+}
+
+/**
+ * Raise and resolve alert items from the ledger, deduplicated by condition:
+ *   unresolved_submission (urgent)  acceptance still unknown after the automatic checks
+ *   untracked_acceptance (urgent)   an accepted job whose tracking has not been restored
+ *   destination_unreachable         requests waiting because a destination could not be
+ *                                   reached; controller-level, closed only by later
+ *                                   evidence that the destination works, never by expiry
+ *   configuration                   requests blocked by pool configuration, fit or permission
+ * Routine capacity waiting raises nothing.
+ */
+function dispatch_alert_scan( $link, $gdb, array $dbs )
+{
+   foreach ( $dbs as $db ) {
+      $seen = array( 'unresolved_submission' => array(), 'untracked_acceptance' => array(), 'configuration' => array() );
+
+      $held = dispatch_rows( $link, "SELECT r.dispatchRequestID, r.selectedCluster, r.reason,
+            (SELECT COUNT(*) FROM `$db`.dispatch_event e WHERE e.dispatchRequestID = r.dispatchRequestID
+              AND e.fromState = 'SUBMISSION_UNKNOWN' AND e.toState = 'SUBMISSION_UNKNOWN') AS checks
+         FROM `$db`.dispatch_request r WHERE r.state = 'SUBMISSION_UNKNOWN'" );
+      foreach ( $held as $r ) {
+         if ( (int) $r[ 'checks' ] >= DISPATCH_RECONCILE_ALERT_AFTER ) {
+            $key = "unresolved_submission|$db|{$r['dispatchRequestID']}";
+            $seen[ 'unresolved_submission' ][ $key ] = true;
+            dispatch_alert_raise( $link, $gdb, $key, 'unresolved_submission', 'urgent', $r[ 'selectedCluster' ], $db,
+               "acceptance of request {$r['dispatchRequestID']} at {$r['selectedCluster']} is unresolved: {$r['reason']}",
+               array( $db => array( $r[ 'dispatchRequestID' ] ) ) );
+         }
+      }
+
+      $untracked = dispatch_rows( $link, "SELECT dispatchRequestID, selectedCluster, reason FROM `$db`.dispatch_request
+         WHERE state = 'ACCEPTED' AND updatedAt < UTC_TIMESTAMP() - INTERVAL ? SECOND",
+         'i', array( DISPATCH_UNTRACKED_ALERT_SECONDS ) );
+      foreach ( $untracked as $r ) {
+         $key = "untracked_acceptance|$db|{$r['dispatchRequestID']}";
+         $seen[ 'untracked_acceptance' ][ $key ] = true;
+         dispatch_alert_raise( $link, $gdb, $key, 'untracked_acceptance', 'urgent', $r[ 'selectedCluster' ], $db,
+            "request {$r['dispatchRequestID']} was accepted but is not tracked: {$r['reason']}",
+            array( $db => array( $r[ 'dispatchRequestID' ] ) ) );
+      }
+
+      $blocked = dispatch_rows( $link, "SELECT pool, reasonCode, GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
+         FROM `$db`.dispatch_request WHERE state = 'BLOCKED' AND reasonCode IN ('configuration','no_fit','no_permission')
+         GROUP BY pool, reasonCode" );
+      foreach ( $blocked as $r ) {
+         $key = "configuration|$db|{$r['pool']}|{$r['reasonCode']}";
+         $seen[ 'configuration' ][ $key ] = true;
+         dispatch_alert_raise( $link, $gdb, $key, 'configuration', 'normal', $r[ 'pool' ], $db,
+            "requests for '{$r['pool']}' are blocked ({$r['reasonCode']}): {$r['reason']}",
+            array( $db => explode( ',', $r[ 'ids' ] ) ) );
+      }
+
+      foreach ( $seen as $kind => $keys ) {
+         foreach ( dispatch_alert_open_keys( $link, $gdb, $kind, $db ) as $key ) {
+            if ( ! isset( $keys[ $key ] ) ) {
+               dispatch_alert_resolve( $link, $gdb, $key, 'condition cleared' );
+            }
+         }
+      }
+
+      $unreachable = dispatch_rows( $link, "SELECT COALESCE(selectedCluster, pool) destination,
+            GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
+         FROM `$db`.dispatch_request WHERE state = 'WAITING' AND reasonCode = 'unreachable'
+         GROUP BY COALESCE(selectedCluster, pool)" );
+      foreach ( $unreachable as $r ) {
+         dispatch_alert_raise( $link, $gdb, "destination_unreachable|{$r['destination']}", 'destination_unreachable',
+            'normal', $r[ 'destination' ], null, "{$r['destination']} could not be reached: {$r['reason']}",
+            array( $db => explode( ',', $r[ 'ids' ] ) ) );
+      }
+   }
+
+   ## An unreachable destination is resolved by a later acceptance there.
+   foreach ( dispatch_rows( $link, "SELECT alertID, dedupKey, destination, lastAt FROM `$gdb`.dispatch_alert
+         WHERE kind = 'destination_unreachable' AND openFlag = 1" ) as $a ) {
+      foreach ( $dbs as $db ) {
+         $worked = dispatch_rows( $link, "SELECT 1 FROM `$db`.dispatch_attempt t JOIN `$db`.dispatch_request r USING (dispatchRequestID)
+            WHERE t.phase = 'ACCEPTED' AND t.resolvedAt > ? AND (t.cluster = ? OR r.pool = ?) LIMIT 1",
+            'sss', array( $a[ 'lastAt' ], $a[ 'destination' ], $a[ 'destination' ] ) );
+         if ( $worked ) {
+            dispatch_alert_resolve( $link, $gdb, $a[ 'dedupKey' ], 'a later submission there was accepted' );
+            break;
+         }
+      }
+   }
+}
+
+/**
+ * Email urgent open items once each, when the installation enables it
+ * ($global_dispatch_alert_email). $send( $subject, $body ) returns whether
+ * the mail was handed off. Returns the alert IDs mailed.
+ */
+function dispatch_alert_email_pending( $link, $gdb, $enabled, callable $send )
+{
+   if ( ! $enabled ) {
+      return array();
+   }
+   $mailed = array();
+   foreach ( dispatch_rows( $link, "SELECT alertID, kind, destination, instanceDb, detail, firstAt FROM `$gdb`.dispatch_alert
+         WHERE openFlag = 1 AND urgency = 'urgent' AND emailedAt IS NULL" ) as $a ) {
+      $subject = "UltraScan dispatch alert: {$a['kind']}" . ( $a[ 'destination' ] ? " at {$a['destination']}" : '' );
+      $body = "{$a['detail']}\n\nInstance: " . ( $a[ 'instanceDb' ] ?: 'all' ) . "\nFirst seen (UTC): {$a['firstAt']}\n"
+            . "This item stays open on the dispatch dashboard until the condition is resolved.\n";
+      if ( $send( $subject, $body )
+           && dispatch_affected( $link, "UPDATE `$gdb`.dispatch_alert SET emailedAt = UTC_TIMESTAMP()
+                 WHERE alertID = ? AND emailedAt IS NULL", 'i', array( (int) $a[ 'alertID' ] ) ) === 1 ) {
+         $mailed[] = (int) $a[ 'alertID' ];
+      }
+   }
+   return $mailed;
+}
+
+## Mark requests waiting past their notification time; shown to the submitter and on the dashboard.
+function dispatch_mark_waiting_notified( $link, $db )
+{
+   return max( 0, dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET notifiedAt = UTC_TIMESTAMP()
+      WHERE notifiedAt IS NULL AND notifyAt <= UTC_TIMESTAMP()
+        AND state IN ('PENDING','ASSESSING','WAITING','STAGING')" ) );
+}
+
+function dispatch_heartbeat_beat( $link, $gdb, $worker )
+{
+   return dispatch_affected( $link, "INSERT INTO `$gdb`.dispatch_heartbeat (worker, beatAt) VALUES (?, UTC_TIMESTAMP())
+      ON DUPLICATE KEY UPDATE beatAt = UTC_TIMESTAMP()", 's', array( $worker ) ) >= 0;
+}
+
+/**
+ * The independent heartbeat check: the worker cannot report its own death.
+ * Returns array( ok, age, worker ): ok when a worker beat within the limit;
+ * age in seconds since the newest beat, or null when none was ever recorded.
+ */
+function dispatch_heartbeat_status( $link, $gdb, $stale_seconds = DISPATCH_HEARTBEAT_STALE_SECONDS )
+{
+   $rows = dispatch_rows( $link, "SELECT worker, TIMESTAMPDIFF(SECOND, beatAt, UTC_TIMESTAMP()) age
+      FROM `$gdb`.dispatch_heartbeat ORDER BY beatAt DESC LIMIT 1" );
+   if ( ! $rows ) {
+      return array( 'ok' => false, 'age' => null, 'worker' => null );
+   }
+   return array( 'ok' => (int) $rows[ 0 ][ 'age' ] <= $stale_seconds, 'age' => (int) $rows[ 0 ][ 'age' ],
+                 'worker' => $rows[ 0 ][ 'worker' ] );
+}
+
+/**
+ * Operator action: send a waiting or blocked request back to assessment now.
+ * A blocked request past its deadline gets a renewed one ($renew_seconds).
+ */
+function dispatch_operator_retry( $link, $db, $id, $operator, $renew_seconds = 86400 )
+{
+   $req = dispatch_get( $link, $db, $id );
+   if ( ! $req || ! in_array( $req[ 'state' ], array( DISPATCH_WAITING, DISPATCH_BLOCKED ), true ) ) {
+      return false;
+   }
+   $why = "assessment retried by $operator";
+   return dispatch_tx( $link, function () use ( $link, $db, $id, $req, $why, $renew_seconds ) {
+      $n = dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET state = 'WAITING', reason = ?, reasonCode = NULL,
+            retryAt = UTC_TIMESTAMP(),
+            deadlineAt = IF(deadlineAt <= UTC_TIMESTAMP(), UTC_TIMESTAMP() + INTERVAL ? SECOND, deadlineAt),
+            updatedAt = UTC_TIMESTAMP()
+         WHERE dispatchRequestID = ? AND state = ? AND claimGeneration = ?",
+         'siisi', array( $why, (int) $renew_seconds, (int) $id, $req[ 'state' ], (int) $req[ 'claimGeneration' ] ) );
+      return $n === 1 && ( $req[ 'state' ] === DISPATCH_WAITING
+                           || dispatch_append_event( $link, $db, $id, $req[ 'state' ], DISPATCH_WAITING,
+                                                     (int) $req[ 'claimGeneration' ], $why ) );
+   } );
+}
+
+/**
+ * Operational metrics for one instance over the last $days: request-to-
+ * acceptance time, current waiting by reason and by destination, the share of
+ * UNKNOWN assessments and reconciliation outcomes.
+ */
+function dispatch_metrics( $link, $gdb, $db, $days = 7 )
+{
+   $since = "UTC_TIMESTAMP() - INTERVAL " . (int) $days . " DAY";
+   $accept = dispatch_rows( $link, "SELECT COUNT(*) n, AVG(TIMESTAMPDIFF(SECOND, r.createdAt, e.createdAt)) avg_s,
+         MAX(TIMESTAMPDIFF(SECOND, r.createdAt, e.createdAt)) max_s
+      FROM `$db`.dispatch_event e JOIN `$db`.dispatch_request r USING (dispatchRequestID)
+      WHERE e.toState = 'ACCEPTED' AND e.createdAt >= $since" );
+   $states = dispatch_rows( $link, "SELECT state, COALESCE(selectedCluster, pool) destination, COUNT(*) n
+      FROM `$db`.dispatch_request WHERE state IN ('PENDING','ASSESSING','WAITING','BLOCKED','STAGING','SUBMITTING',
+         'SUBMISSION_UNKNOWN','ACCEPTED') GROUP BY state, COALESCE(selectedCluster, pool) ORDER BY state, destination" );
+   $waiting = dispatch_rows( $link, "SELECT COALESCE(reasonCode, 'unspecified') reason, COUNT(*) n,
+         AVG(TIMESTAMPDIFF(SECOND, createdAt, UTC_TIMESTAMP())) avg_age_s
+      FROM `$db`.dispatch_request WHERE state = 'WAITING' GROUP BY COALESCE(reasonCode, 'unspecified')" );
+   $verdicts = array( 'READY' => 0, 'DELAYED' => 0, 'REJECTED' => 0, 'UNKNOWN' => 0 );
+   foreach ( dispatch_rows( $link, "SELECT candidatesJson FROM `$gdb`.dispatch_decision WHERE instanceDb = ? AND createdAt >= $since",
+                            's', array( $db ) ) as $d ) {
+      foreach ( (array) json_decode( $d[ 'candidatesJson' ], true ) as $c ) {
+         if ( isset( $c[ 'verdict' ] ) && isset( $verdicts[ $c[ 'verdict' ] ] ) ) {
+            $verdicts[ $c[ 'verdict' ] ]++;
+         }
+      }
+   }
+   $assessed = array_sum( $verdicts );
+   $reconciled = dispatch_rows( $link, "SELECT
+         SUM(e.toState = 'ACCEPTED' AND e.fromState = 'SUBMISSION_UNKNOWN') accepted,
+         SUM(e.fromState = 'SUBMISSION_UNKNOWN' AND e.toState = 'WAITING') not_accepted,
+         SUM(e.fromState = 'SUBMISSION_UNKNOWN' AND e.toState = 'SUBMISSION_UNKNOWN') unresolved_checks
+      FROM `$db`.dispatch_event e WHERE e.createdAt >= $since" );
+   return array(
+      'acceptance' => array( 'count' => (int) $accept[ 0 ][ 'n' ], 'avg_seconds' => $accept[ 0 ][ 'avg_s' ] !== null
+                             ? (int) round( $accept[ 0 ][ 'avg_s' ] ) : null,
+                             'max_seconds' => $accept[ 0 ][ 'max_s' ] !== null ? (int) $accept[ 0 ][ 'max_s' ] : null ),
+      'open_by_state_and_destination' => $states,
+      'waiting_by_reason' => $waiting,
+      'assessments' => $verdicts + array( 'unknown_share' => $assessed ? round( $verdicts[ 'UNKNOWN' ] / $assessed, 3 ) : null ),
+      'reconciliation' => array_map( 'intval', $reconciled[ 0 ] ),
+   );
+}

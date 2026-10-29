@@ -99,34 +99,68 @@ $global_complete_max_seconds   = 21600;
 ## code uses 1800, which is what this matches.
 $global_cluster_status_max_age_seconds = 1800;
 
-## Metascheduler pick_cluster() tunables.
+## Metascheduler dispatch retention.
 ##
-## queued+running at/above this on every local candidate in a pool means
-## "local is busy enough to try national instead". 0 disables local overflow
-## entirely (every job goes national), which is never the intended default;
-## a deployment that wants that should say so explicitly. Unset, the code
-## uses 20, which is what this matches.
-$global_cluster_saturation_threshold = 20;
-##
-## How long, in seconds, a pick_cluster_reserve() load nudge (gfac.
-## cluster_status_nudge) counts toward a candidate's load after being
-## written, before pick_cluster_status_snapshot() stops counting it. Long
-## enough to bridge a burst of decisions made moments apart -- the nudge's
-## only job -- short enough that it never stands in for a real probe
-## (cluster_status.php runs every 12 minutes by default) for long: set this
-## too high and a large burst can read as "every candidate saturated" for
-## real jobs submitted well after the burst that caused it has already
-## finished and drained. Unset, the code uses 90, which is what this
-## matches.
-$global_cluster_nudge_ttl_seconds = 90;
-##
-## How long, in seconds, a gfac.metascheduler_decision row is kept before an
-## opportunistic purge. That table is an audit trail, not a correctness
-## ledger like cluster_status_nudge above -- this exists only to bound its
-## growth, not to serve any decision logic, so the default is deliberately
-## long (a year) rather than tuned like the nudge TTL. 0 disables the purge
-## entirely. Unset, the code uses 31536000, which is what this matches.
+## How long, in seconds, a gfac.metascheduler_decision row from the retired
+## job-count selector is kept as history before the dispatch daemon purges it.
+## 0 disables the purge. Unset, the code uses 31536000, which is what this matches.
+## ($global_cluster_saturation_threshold and $global_cluster_nudge_ttl_seconds
+## are retired with that selector; uslims_upgrade.php reports them if still set.)
 $global_metascheduler_decision_retention_seconds = 31536000;
+##
+## How long, in seconds, a finished dispatch request (CLOSED, FAILED, EXPIRED
+## or CANCELLED) and its attempts and events are kept. Requests that are still
+## waiting, submitting or unresolved are never purged. 0 disables the purge.
+$global_dispatch_retention_seconds = 7776000;
+##
+## How long, in seconds, a gfac.dispatch_decision row is kept. 0 disables the purge.
+$global_dispatch_decision_retention_seconds = 31536000;
+##
+## How many submissions submitctl.php runs at once (autoflow stages and
+## dispatch attempts together). Unset, the code uses 4.
+$global_dispatch_worker_children = 4;
+##
+## Where a submission outcome is kept when the database cannot record it after
+## sbatch ran; replayed by submitctl.php. Readable by the service account only.
+## Unset, the code uses lims/etc/dispatch-spool under the us3 home directory.
+# $global_dispatch_spool_dir = '/home/us3/lims/etc/dispatch-spool';
+##
+## How long, in seconds, a metascheduler request may wait for dispatch before
+## its submitter's status says it has been waiting longer than usual, and
+## before it expires as not submitted. Unset, the code uses 1 hour and 24 hours.
+## Work already queued in Slurm is never expired.
+$global_dispatch_notify_seconds = 3600;
+$global_dispatch_max_wait_seconds = 86400;
+##
+## Whether urgent dispatch alert items (uncertain submission, accepted job
+## without tracking, worker heartbeat lost) are also emailed to the site
+## admin address in listen-config.php, once per open item. The dispatch
+## dashboard is the record either way. Unset or false: no email.
+$global_dispatch_alert_email = false;
+
+## Metascheduler pool dispatch settings.
+##
+## A pool is a $cluster_details entry with a "clusters" member list. Each
+## member needs 'tier' => 'local' or 'national'. Without a 'dispatch' key a
+## pool rotates new work across its local members and never overflows to
+## national members; a national-only pool stays inactive until 'dispatch'
+## names its primary group. Optional settings on the pool entry:
+##
+##   'dispatch' => [
+##       'primary'  => [ 'members' => [ 'uleth', 'nrch' ],
+##                       'strategy' => 'ordered',   # or round_robin, weighted_round_robin
+##                       'weights'  => [ 'uleth' => 4, 'nrch' => 3 ] ],  # weighted only, positive integers
+##       'overflow' => [ 'members' => [ 'anvil' ], 'strategy' => 'ordered', 'enabled' => true ],
+##       'admission' => 'queue',                    # or start_within_allowance
+##       'wait_allowance_seconds' => 0,
+##       'fallback' => 'queue_preferred',           # or wait_for_dispatch
+##       'overflow_on_assessment_unknown' => false,
+##   ]
+##
+## Members are matched to physical schedulers by 'controller' (default: the
+## login host 'name') plus 'queue'; two members that resolve to the same
+## pair are aliases and keep the pool inactive. Check the effective policy
+## with: php ~us3/lims/bin/gridctl/dispatch_policy_check.php
 
 
 ## Optional breaker directory; defaults to ~us3/lims/etc/circuit-breaker.
@@ -270,6 +304,9 @@ $default_local_cluster = 'us3iab-node0';
 ##   mpi_launcher         string  mpirun (default), srun, or ibrun
 ##   sbatch_directives    array   complete single-line "#SBATCH " directives
 ##                               mempercore supplies --mem-per-cpu if this is empty
+##   sharing              string  shared (jobs share nodes; a memory request from
+##                               mempercore or a --mem directive is then required)
+##                               or exclusive (whole nodes); unset keeps today's behavior
 ##   usemaxtime           bool    use maxtime directly (0 emits 00:00:00)
 ##                               local clusters use maxtime 0 with usemaxtime: no limit;
 ##                               only national HPC entries request a walltime

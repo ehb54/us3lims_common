@@ -43,4 +43,4 @@ include 'header.php';
 </div>
 
 <p/>
-<?php include $common_dir . 'footer.php'; ?>
+<?php include_once $common_dir . 'footer.php'; ?>

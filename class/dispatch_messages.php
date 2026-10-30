@@ -27,6 +27,7 @@ function dispatch_public_message( array $r )
             'unreachable'          => 'The destination could not be reached. No job was submitted; another attempt is scheduled.',
             'availability_unknown' => 'Resource availability could not be checked. Your analysis is waiting; the next check is scheduled.',
             'occupied'             => 'No permitted resource can start this analysis now. Your analysis is waiting for one.',
+            'operator'             => 'The permitted resources are taken out of service by the site operator. Your analysis is waiting for one to return.',
             'site_blocked'         => 'Job submission is paused at this site. Your analysis is submitted when it reopens.',
             'busy_deciding'        => 'Another analysis is being placed; yours is next.',
             'no_permission'        => 'Your permitted destinations changed; checking them again.',

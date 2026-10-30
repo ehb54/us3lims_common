@@ -12,9 +12,9 @@
  * db_connection_pool::shared(), so nothing else in LIMS is affected by it.
  *
  * Not used for any connection whose correctness depends on a guaranteed,
- * non-reused session -- e.g. pick_cluster_reserve()'s GET_LOCK()/
- * RELEASE_LOCK() connection, which must close (and so release the advisory
- * lock) exactly when the caller is done with it, not linger idle for reuse.
+ * non-reused session, such as one holding a GET_LOCK() advisory lock, which
+ * must close (and so release the lock) exactly when the caller is done with
+ * it, not linger idle for reuse.
  */
 
 class db_connection_pool

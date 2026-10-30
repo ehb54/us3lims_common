@@ -652,6 +652,17 @@ class submit_slurm extends jobsubmit
       );
    }
 
+   ## Whether $sql, with each ? bound to the matching string in $args, returns a row.
+   private function row_exists( $link, $sql, array $args )
+   {
+      $stmt = mysqli_prepare( $link, $sql );
+      return $stmt
+          && mysqli_stmt_bind_param( $stmt, str_repeat( 's', count( $args ) ), ...$args )
+          && mysqli_stmt_execute( $stmt )
+          && mysqli_stmt_store_result( $stmt )
+          && mysqli_stmt_num_rows( $stmt ) > 0;
+   }
+
    protected function pause( $seconds )
    {
       sleep( $seconds );
@@ -1010,9 +1021,8 @@ class submit_slurm extends jobsubmit
       {
          $jobfile = mysqli_real_escape_string( $link, $this->data[ 'jobfile' ] );
          ## Replay-safe: a repeated call for the same accepted job keeps its row.
-         $exists = mysqli_query( $link, "SELECT 1 FROM HPCAnalysisResult WHERE "
-                                      . "HPCAnalysisRequestID='$requestID' AND gfacID='$slurm_id' LIMIT 1" );
-         $result = $exists && mysqli_num_rows( $exists ) > 0;
+         $result = $this->row_exists( $link, "SELECT 1 FROM HPCAnalysisResult WHERE "
+                                    . "HPCAnalysisRequestID=? AND gfacID=? LIMIT 1", array( $requestID, $slurm_id ) );
          if ( ! $result ) {
             $query = "INSERT INTO HPCAnalysisResult SET "
                    . "HPCAnalysisRequestID='$requestID', "
@@ -1077,10 +1087,10 @@ class submit_slurm extends jobsubmit
                     : "" )
                 . "us3_db='$dbname'";
          ## Replay-safe: the same job at the same execution cluster is one row.
-         $where = "gfacID='$slurm_id' AND us3_db='$dbname' AND COALESCE(NULLIF(metaschedulerClusterExecuting,''),cluster)='"
-                . mysqli_real_escape_string( $gfac_link, $metaCluster !== null ? $metaCluster : $cluster ) . "'";
-         $exists = mysqli_query( $gfac_link, "SELECT 1 FROM analysis WHERE $where LIMIT 1" );
-         $result = ( $exists && mysqli_num_rows( $exists ) > 0 ) || mysqli_query( $gfac_link, $query );
+         $result = $this->row_exists( $gfac_link, "SELECT 1 FROM analysis WHERE gfacID=? AND us3_db=? "
+                                    . "AND COALESCE(NULLIF(metaschedulerClusterExecuting,''),cluster)=? LIMIT 1",
+                                    array( $slurm_id, $dbname, $metaCluster !== null ? $metaCluster : $cluster ) )
+                || mysqli_query( $gfac_link, $query );
          if ( ! $result ) {
             $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "
                              . "cleaned up: " . mysqli_error( $gfac_link );

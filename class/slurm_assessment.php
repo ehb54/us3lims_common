@@ -277,7 +277,7 @@ function slurm_assess_candidates( callable $run, array $plans, array $opts = arr
          continue;
       }
       $command = slurm_assessment_command( $plan );
-      $memo_key = $cluster . "\0" . sha1( $command );
+      $memo_key = $cluster . "\0" . hash( 'sha256', $command );
       if ( ! isset( $memo[ $memo_key ] ) ) {
          $memo[ $memo_key ] = $run( $cluster, $command,
             array( 'timeout' => min( $per_call, $remaining ), 'retries' => 0, 'label' => "assess $cluster" ) );

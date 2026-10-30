@@ -710,7 +710,7 @@ function dispatch_lane_controller( $controller )
 
 function dispatch_lane_rotation( $db, $pool, $policy_version )
 {
-   return 'rotation:' . sha1( "$db|$pool|$policy_version" );
+   return 'rotation:' . hash( 'sha256', "$db|$pool|$policy_version" );
 }
 
 ## $policy: the strategy, admission and weights the decision applied, for the operator's history.

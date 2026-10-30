@@ -626,7 +626,7 @@ class jobsubmit
 
    ## Estimated wall minutes for one candidate. $cluster and $mgroupcount
    ## default to the selected execution cluster and the published group count.
-   function maxwall( $cluster = null, $mgroupcount = null )
+   public function maxwall( $cluster = null, $mgroupcount = null )
    {
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
       ## execution_cluster(), not cluster_shortname directly: a metascheduler

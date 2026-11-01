@@ -844,9 +844,10 @@ class submit_slurm extends jobsubmit
       $autoflowID = ( $is_cli && $ID ) ? (int) $ID : 0;
 
       ## Admin notices go to the host's site admin (global_config.php); in an instance page
-      ## $admin_email is that instance's contact. It remains the fallback on a host whose
-      ## global_config.php predates the setting.
-      $siteAdmin = ! empty( $global_site_admin_email ) ? $global_site_admin_email : $admin_email;
+      ## $admin_email is that instance's contact, the fallback on a host whose global_config.php
+      ## predates the setting; root@localhost as gridctl does when neither is set.
+      $siteAdmin = ! empty( $global_site_admin_email ) ? $global_site_admin_email
+                 : ( ! empty( $admin_email ) ? $admin_email : 'root@localhost' );
       ## gridctl sends the one admin notice for a submission it drives (from this page's ERROR:
       ## output), so common mailing too sent the same failure twice.
       $gridctlNotifiesAdmin = defined( 'US3_GRIDCTL_SUBMISSION' );
@@ -922,17 +923,14 @@ class submit_slurm extends jobsubmit
       }
       } ## end autoflow-only ($autoflowID > 0)
 
-      if ( empty( $org_name ) || empty( $admin_email ) )
-      {
-         $this->message[] = "markAutoflowSubmitFailed: \$org_name/\$admin_email not configured; cannot mail anyone";
-         return;
-      }
-
-      $headers  = "From: $org_name Admin<$admin_email>" . "\n";
-      $headers .= "Reply-To: $org_name<$admin_email>"    . "\n";
-      $headers .= "X-Mailer: PHP v" . phpversion()        . "\n";
-      $headers .= "MIME-Version: 1.0"                     . "\n";
-      $headers .= "Content-Transfer-Encoding: 8bit"       . "\n";
+      $from_name = ! empty( $org_name ) ? $org_name : 'LIMS';
+      $mail_headers = function ( $from ) use ( $from_name ) {
+         return "From: $from_name Admin<$from>\n" . "Reply-To: $from_name<$from>\n"
+              . "X-Mailer: PHP v" . phpversion() . "\n" . "MIME-Version: 1.0\n" . "Content-Transfer-Encoding: 8bit\n";
+      };
+      ## Users hear from the instance contact; admin notices come from the site admin.
+      $headers      = $mail_headers( ! empty( $admin_email ) ? $admin_email : $siteAdmin );
+      $adminHeaders = $mail_headers( $siteAdmin );
 
       ## Besides the requestID, the triple and the submission step, the
       ## mail names the run's working directory and analysis method
@@ -962,6 +960,13 @@ class submit_slurm extends jobsubmit
             $this->message[] = "markAutoflowSubmitFailed: no investigator email on file for requestID=$ID";
          }
       }
+      elseif ( $stage === 'dispatch' && ! empty( $this->data[ 'db' ][ 'submitter' ] ) )
+      {
+         ## An interactive pool request left the submitter's page at "Analysis Received".
+         mail( $this->data[ 'db' ][ 'submitter' ], "US3 job submission failed",
+            "Your job submission ($runDescription) could not be completed:\n\n$statusMsg\n\nThe system"
+          . " administrator has been notified.", $headers );
+      }
 
       if ( $infraFailure && $breakerJustTripped && $gridctlNotifiesAdmin )
       {
@@ -974,7 +979,7 @@ class submit_slurm extends jobsubmit
             "A LIMS job submission ($runDescription) failed because its cluster's circuit"
           . " breaker just opened:\n\n$statusMsg\n\nFurther submissions to this cluster will"
           . " fail the same way until the breaker's cooldown expires; this is sent once per"
-          . " outage, not once per refused submission.", $headers );
+          . " outage, not once per refused submission.", $adminHeaders );
       }
       elseif ( ! $gridctlNotifiesAdmin && $autoflowID > 0 && ( empty( $investigator_email ) || $dbUnreachable ) )
       {
@@ -988,7 +993,13 @@ class submit_slurm extends jobsubmit
           . ( $dbUnreachable
             ? "the instance database could not be reached to look one up"
             : "no investigator e-mail on file" )
-          . "):\n\n$statusMsg", $headers );
+          . "):\n\n$statusMsg", $adminHeaders );
+      }
+      elseif ( ! $gridctlNotifiesAdmin && ! $infraFailure )
+      {
+         ## Outside gridctl (a pool request run by the dispatch worker, a web page) this is the one admin notice.
+         mail( $siteAdmin, "US3 job submission failed ($runDescription)",
+            "A LIMS job submission ($runDescription) failed:\n\n$statusMsg", $adminHeaders );
       }
    }
 

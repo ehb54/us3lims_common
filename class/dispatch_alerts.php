@@ -258,6 +258,9 @@ function dispatch_metrics( $link, $gdb, $db, $days = 7 )
          SUM(e.fromState = 'SUBMISSION_UNKNOWN' AND e.toState = 'WAITING') not_accepted,
          SUM(e.fromState = 'SUBMISSION_UNKNOWN' AND e.toState = 'SUBMISSION_UNKNOWN') unresolved_checks
       FROM `$db`.dispatch_event e WHERE e.createdAt >= $since" );
+   ## A failed query (an instance without the dispatch tables) returns no rows.
+   $accept = $accept ? $accept : array( array( 'n' => 0, 'avg_s' => null, 'max_s' => null ) );
+   $reconciled = $reconciled ? $reconciled : array( array( 'accepted' => 0, 'not_accepted' => 0, 'unresolved_checks' => 0 ) );
    return array(
       'acceptance' => array( 'count' => (int) $accept[ 0 ][ 'n' ], 'avg_seconds' => $accept[ 0 ][ 'avg_s' ] !== null
                              ? (int) round( $accept[ 0 ][ 'avg_s' ] ) : null,

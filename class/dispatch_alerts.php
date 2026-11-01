@@ -148,17 +148,18 @@ function dispatch_alert_scan( $link, $gdb, array $dbs )
 
 /**
  * Email urgent open items once each, when the installation enables it
- * ($global_dispatch_alert_email). $send( $subject, $body ) returns whether
- * the mail was handed off. Returns the alert IDs mailed.
+ * ($global_dispatch_alert_email), or only those of $kind. $send( $subject, $body )
+ * returns whether the mail was handed off. Returns the alert IDs mailed.
  */
-function dispatch_alert_email_pending( $link, $gdb, $enabled, callable $send )
+function dispatch_alert_email_pending( $link, $gdb, $enabled, callable $send, $kind = null )
 {
    if ( ! $enabled ) {
       return array();
    }
    $mailed = array();
    foreach ( dispatch_rows( $link, "SELECT alertID, kind, destination, instanceDb, detail, firstAt FROM `$gdb`.dispatch_alert
-         WHERE openFlag = 1 AND urgency = 'urgent' AND emailedAt IS NULL" ) as $a ) {
+         WHERE openFlag = 1 AND urgency = 'urgent' AND emailedAt IS NULL AND ( ? IS NULL OR kind = ? )",
+         'ss', array( $kind, $kind ) ) as $a ) {
       $subject = "UltraScan dispatch alert: {$a['kind']}" . ( $a[ 'destination' ] ? " at {$a['destination']}" : '' );
       $body = "{$a['detail']}\n\nInstance: " . ( $a[ 'instanceDb' ] ?: 'all' ) . "\nFirst seen (UTC): {$a['firstAt']}\n"
             . "This item stays open on the dispatch dashboard until the condition is resolved.\n";
@@ -169,6 +170,41 @@ function dispatch_alert_email_pending( $link, $gdb, $enabled, callable $send )
       }
    }
    return $mailed;
+}
+
+## The host's site administrator: $global_site_admin_email, else listen-config.php's
+## $admin_email, else root@localhost, as gridctl's own notices fall back.
+function dispatch_site_admin_address( $global_site_admin_email, $listen_admin_email )
+{
+   foreach ( array( $global_site_admin_email, $listen_admin_email ) as $address ) {
+      if ( trim( (string) $address ) !== '' ) {
+         return trim( (string) $address );
+      }
+   }
+   return 'root@localhost';
+}
+
+## A $send( $subject, $body ) for dispatch notices, mailed to $to and sent from it.
+function dispatch_site_admin_sender( $to, $org_name )
+{
+   $from = ( (string) $org_name !== '' ? $org_name : 'UltraScan' ) . " Admin<$to>";
+   return function ( $subject, $body, $recipient = null ) use ( $to, $from ) {
+      return mail( $recipient !== null ? $recipient : $to, $subject, $body,
+                   "From: $from\nReply-To: $from\nMIME-Version: 1.0\nContent-Transfer-Encoding: 8bit\n" );
+   };
+}
+
+## Submitter e-mail addresses of $ids in $db: [ dispatchRequestID => [ email, HPCAnalysisRequestID ] ].
+function dispatch_request_submitters( $link, $db, array $ids )
+{
+   $out = array();
+   foreach ( $ids as $id ) {
+      foreach ( dispatch_rows( $link, "SELECT p.email, r.HPCAnalysisRequestID FROM `$db`.dispatch_request r
+            JOIN `$db`.people p ON p.personID = r.submitterID WHERE r.dispatchRequestID = ?", 'i', array( (int) $id ) ) as $r ) {
+         $out[ (int) $id ] = array( (string) $r[ 'email' ], (int) $r[ 'HPCAnalysisRequestID' ] );
+      }
+   }
+   return $out;
 }
 
 ## Mark requests waiting past their notification time; shown to the submitter and on the dashboard.

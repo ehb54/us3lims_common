@@ -958,6 +958,12 @@ function dispatch_spool_replay( $link, $gdb, $dir )
       $settled = ! in_array( $rows[ 0 ][ 'phase' ], array( 'INTENT', 'UNKNOWN' ), true );
       if ( $settled || dispatch_record_outcome( $link, $r[ 'db' ], $r[ 'token' ], $r[ 'outcome' ], DISPATCH_WAITING,
                                                 dispatch_turn_for_token( $link, $gdb, $r[ 'token' ] ), 0 ) ) {
+         ## The worker that spooled it has exited: release its submit claim so tracking starts now,
+         ## not when the claim would have expired.
+         dispatch_affected( $link, "UPDATE `{$r['db']}`.dispatch_request r JOIN `{$r['db']}`.dispatch_attempt a
+               USING (dispatchRequestID)
+            SET r.claimOwner = NULL, r.claimExpiresAt = NULL, r.retryAt = UTC_TIMESTAMP()
+            WHERE a.attemptToken = ? AND r.state = 'ACCEPTED'", 's', array( $r[ 'token' ] ) );
          @unlink( $file );
          $done[] = $r[ 'token' ];
       }

@@ -46,6 +46,8 @@ class submit_slurm extends jobsubmit
    protected $stage_transient = false;
    protected $submitOutcome = null;
    protected $deferFailure = false;
+   ## Set while the dispatch worker reports a pool request's failure, whatever stage it failed at.
+   protected $reportingDispatchFailure = false;
    protected $deferredFailure = null;
    ## The attempt token sbatch carries in --comment, and whether scontrol
    ## showed it back unchanged (null when not checked).
@@ -337,8 +339,10 @@ class submit_slurm extends jobsubmit
             : ( $reason !== null ? array( $reason, 'dispatch' ) : null );
       $this->deferFailure = false;
       $this->deferredFailure = null;
+      $this->reportingDispatchFailure = true;
       if ( $args !== null )
          call_user_func_array( array( $this, 'markAutoflowSubmitFailed' ), $args );
+      $this->reportingDispatchFailure = false;
    }
 
    /**
@@ -946,26 +950,30 @@ class submit_slurm extends jobsubmit
                        . ( $method !== '' ? ", $method" : '' )
                        . " ($stage)";
 
+      ## Whether an admin hears of this failure: gridctl's notice, the breaker trip, or common's own below.
+      $adminNotified = $gridctlNotifiesAdmin || ( $infraFailure && $breakerJustTripped ) || ! $infraFailure
+                    || ( $autoflowID > 0 && ( empty( $investigator_email ) || $dbUnreachable ) );
+
       if ( $autoflowID > 0 )
       {
          if ( ! empty( $investigator_email ) )
          {
             mail( $investigator_email, "US3 job submission failed",
-               "Your job submission ($runDescription) could not be completed. The system"
-             . " administrator has been notified and will follow up if further action is"
-             . " needed.", $headers );
+               "Your job submission ($runDescription) could not be completed."
+             . ( $adminNotified ? " The system administrator has been notified and will follow up if further"
+                                . " action is needed." : '' ), $headers );
          }
          else
          {
             $this->message[] = "markAutoflowSubmitFailed: no investigator email on file for requestID=$ID";
          }
       }
-      elseif ( $stage === 'dispatch' && ! empty( $this->data[ 'db' ][ 'submitter' ] ) )
+      elseif ( ( $stage === 'dispatch' || $this->reportingDispatchFailure ) && ! empty( $this->data[ 'db' ][ 'submitter' ] ) )
       {
          ## An interactive pool request left the submitter's page at "Analysis Received".
          mail( $this->data[ 'db' ][ 'submitter' ], "US3 job submission failed",
-            "Your job submission ($runDescription) could not be completed:\n\n$statusMsg\n\nThe system"
-          . " administrator has been notified.", $headers );
+            "Your job submission ($runDescription) could not be completed:\n\n$statusMsg"
+          . ( $adminNotified ? "\n\nThe system administrator has been notified." : '' ), $headers );
       }
 
       if ( $infraFailure && $breakerJustTripped && $gridctlNotifiesAdmin )

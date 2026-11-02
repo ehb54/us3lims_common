@@ -116,9 +116,12 @@ $global_dispatch_retention_seconds = 7776000;
 ## How long, in seconds, a gfac.dispatch_decision row is kept. 0 disables the purge.
 $global_dispatch_decision_retention_seconds = 31536000;
 ##
-## How many submissions submitctl.php runs at once (autoflow stages and
-## dispatch attempts together). Unset, the code uses 4.
+## How many dispatch attempts (pool submissions) submitctl.php runs at once.
+## Unset, the code uses 4.
 $global_dispatch_worker_children = 4;
+## How many autoflow stages (each a submitone.php) it submits at once, counted
+## apart from dispatch attempts. Unset, the code uses 32.
+$global_autoflow_submit_children = 32;
 ##
 ## Where a submission outcome is kept when the database cannot record it after
 ## sbatch ran; replayed by submitctl.php. Readable by the service account only.

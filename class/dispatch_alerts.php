@@ -198,18 +198,22 @@ function dispatch_site_admin_sender( $to, $org_name )
 
 ## A blocked request waits for an operator: the site admin is asked to act, and the submitter
 ## (when known) is told it is held, not failed, since a dashboard retry can still run it.
-function dispatch_notify_blocked( callable $send, $db, array $req, $reason, $submitter_email )
+function dispatch_notify_blocked( callable $send, $db, array $req, $reason, $submitter_email, $code = '' )
 {
+   ## A request whose input is gone or changed cannot run again; it is cancelled and resubmitted.
+   $input = $code === 'input';
    $what = "dispatch request {$req['dispatchRequestID']} (HPC request " . (int) $req[ 'HPCAnalysisRequestID' ]
          . ", pool {$req['pool']}) in $db";
    $send( "UltraScan dispatch: request {$req['dispatchRequestID']} in $db is blocked",
           "The $what is blocked and needs an administrator:\n\n$reason\n\n"
-          . "Retry it from the dispatch dashboard once the cause is fixed.\n" );
+          . ( $input ? "Its received input is missing or changed, so it cannot run; cancel it on the queue page.\n"
+                     : "Retry it from the dispatch dashboard once the cause is fixed.\n" ) );
    if ( (string) $submitter_email !== '' ) {
-      $send( "US3 analysis held for an administrator",
-             "Your analysis (HPC request " . (int) $req[ 'HPCAnalysisRequestID' ] . ") in $db is held for an"
-             . " administrator:\n\n$reason\n\nThe site administrator has been notified. It runs once they"
-             . " clear the cause; if it is not cleared in time it expires and you are told.\n", $submitter_email );
+      $send( $input ? "US3 analysis could not be run" : "US3 analysis held for an administrator",
+             "Your analysis (HPC request " . (int) $req[ 'HPCAnalysisRequestID' ] . ") in $db "
+             . ( $input ? "cannot be run:\n\n$reason\n\nPlease resubmit it.\n"
+                        : "is held for an administrator:\n\n$reason\n\nThe site administrator has been told; it runs"
+                          . " once they clear the cause.\n" ), $submitter_email );
    }
 }
 

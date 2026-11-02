@@ -1097,10 +1097,14 @@ class submit_slurm extends jobsubmit
                     ? "metaschedulerClusterExecuting='" . mysqli_real_escape_string( $gfac_link, $metaCluster ) . "', "
                     : "" )
                 . "us3_db='$dbname'";
-         ## Replay-safe: the same job at the same execution cluster is one row.
+         ## Replay-safe: the same job at the same execution cluster is one row; with the request
+         ## column, for the same request too, since a reset controller reuses job numbers.
+         $with_request = $has_request_column && mysqli_num_rows( $has_request_column ) > 0;
          $result = $this->row_exists( $gfac_link, "SELECT 1 FROM analysis WHERE gfacID=? AND us3_db=? "
-                                    . "AND COALESCE(NULLIF(metaschedulerClusterExecuting,''),cluster)=? LIMIT 1",
-                                    array( $slurm_id, $dbname, $metaCluster !== null ? $metaCluster : $cluster ) )
+                                    . "AND COALESCE(NULLIF(metaschedulerClusterExecuting,''),cluster)=? "
+                                    . ( $with_request ? "AND HPCAnalysisRequestID=? " : "" ) . "LIMIT 1",
+                                    array_merge( array( $slurm_id, $dbname, $metaCluster !== null ? $metaCluster : $cluster ),
+                                                 $with_request ? array( (int) $requestID ) : array() ) )
                 || mysqli_query( $gfac_link, $query );
          if ( ! $result ) {
             $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "

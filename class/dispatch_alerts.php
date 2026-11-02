@@ -73,6 +73,8 @@ function dispatch_alert_open_keys( $link, $gdb, $kind, $instance = null )
  */
 function dispatch_alert_scan( $link, $gdb, array $dbs )
 {
+   ## The request lists below come from GROUP_CONCAT, cut at 1024 bytes by default.
+   @mysqli_query( $link, 'SET SESSION group_concat_max_len = 1048576' );
    foreach ( $dbs as $db ) {
       $seen = array( 'unresolved_submission' => array(), 'untracked_acceptance' => array(), 'configuration' => array() );
 
@@ -102,7 +104,7 @@ function dispatch_alert_scan( $link, $gdb, array $dbs )
       }
 
       $blocked = dispatch_rows( $link, "SELECT pool, reasonCode, GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
-         FROM `$db`.dispatch_request WHERE state = 'BLOCKED' AND reasonCode IN ('configuration','no_fit','no_permission')
+         FROM `$db`.dispatch_request WHERE state = 'BLOCKED' AND reasonCode IN ('configuration','no_fit','no_permission','input')
          GROUP BY pool, reasonCode" );
       foreach ( $blocked as $r ) {
          $key = "configuration|$db|{$r['pool']}|{$r['reasonCode']}";

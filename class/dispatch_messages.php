@@ -56,6 +56,7 @@ function dispatch_public_message( array $r )
          $blocks = array(
             'no_permission' => 'This account has no permitted destination for this analysis. Contact your administrator.',
             'no_fit'        => 'This analysis exceeds the limits of the permitted resources.',
+            'input'         => 'The analysis input is missing or changed since it was received. Please resubmit.',
             'configuration' => 'The metascheduler pool is not configured correctly. Contact your administrator.',
          );
          $text = isset( $blocks[ $code ] ) ? $blocks[ $code ] : 'This analysis needs administrator attention.';

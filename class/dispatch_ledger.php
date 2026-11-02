@@ -502,6 +502,19 @@ function dispatch_cancel_local( $link, $db, $id, $reason )
    } );
 }
 
+## Members whose staging failed as unreachable in the last $seconds, as select()'s
+## 'reachable' input (member => false): the next decision goes to the reachable members.
+function dispatch_recently_unreachable( $link, $db, $seconds )
+{
+   $out = array();
+   foreach ( dispatch_rows( $link, "SELECT DISTINCT selectedCluster FROM `$db`.dispatch_request
+         WHERE state = 'WAITING' AND reasonCode = 'unreachable' AND selectedCluster IS NOT NULL
+           AND updatedAt >= UTC_TIMESTAMP() - INTERVAL ? SECOND", 'i', array( (int) $seconds ) ) as $r ) {
+      $out[ $r[ 'selectedCluster' ] ] = false;
+   }
+   return $out;
+}
+
 ## Expire every request past its intake deadline that was never submitted. Returns the expired IDs.
 function dispatch_expire_due( $link, $db )
 {

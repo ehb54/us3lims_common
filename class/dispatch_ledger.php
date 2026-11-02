@@ -175,11 +175,14 @@ function dispatch_intake( $link, $db, array $req )
    return array( $id, $n === 1 );
 }
 
+## The event keeps the request's cluster and reason code as they stand after the change it records.
 function dispatch_append_event( $link, $db, $id, $from, $to, $generation, $reason )
 {
    return dispatch_affected( $link,
-      "INSERT INTO `$db`.dispatch_event (dispatchRequestID, fromState, toState, claimGeneration, reason, createdAt)
-       VALUES (?,?,?,?,?, UTC_TIMESTAMP())", 'issis', array( (int) $id, $from, $to, (int) $generation, $reason ) ) === 1;
+      "INSERT INTO `$db`.dispatch_event (dispatchRequestID, fromState, toState, claimGeneration, reason, cluster, reasonCode,
+                                         createdAt)
+       SELECT ?,?,?,?,?, selectedCluster, reasonCode, UTC_TIMESTAMP() FROM `$db`.dispatch_request WHERE dispatchRequestID = ?",
+      'issisi', array( (int) $id, $from, $to, (int) $generation, $reason, (int) $id ) ) === 1;
 }
 
 function dispatch_get( $link, $db, $id )
@@ -268,10 +271,12 @@ function dispatch_batch_pin( $link, $db, $batch_key )
  * ASSESSING to STAGING at $cluster for the current claim and an unexpired
  * deadline. A batch child pins every sibling to $cluster in the same
  * transaction, and loses if the batch is already pinned elsewhere.
+ * $turn: array( gdb, scopeKey, state, lane, laneOwner, laneGeneration ) saves the rotation turn
+ * with the transition while that rotation lane is still held, or null.
  */
-function dispatch_stage( $link, $db, $id, $generation, $cluster, $plan_hash, $policy_version, $reason )
+function dispatch_stage( $link, $db, $id, $generation, $cluster, $plan_hash, $policy_version, $reason, $turn = null )
 {
-   return dispatch_tx( $link, function () use ( $link, $db, $id, $generation, $cluster, $plan_hash, $policy_version, $reason ) {
+   return dispatch_tx( $link, function () use ( $link, $db, $id, $generation, $cluster, $plan_hash, $policy_version, $reason, $turn ) {
       $rows = dispatch_rows( $link, "SELECT parentBatchKey FROM `$db`.dispatch_request
          WHERE dispatchRequestID = ? AND state = 'ASSESSING' AND claimGeneration = ? AND deadlineAt > UTC_TIMESTAMP()
          FOR UPDATE", 'ii', array( (int) $id, (int) $generation ) );
@@ -294,7 +299,11 @@ function dispatch_stage( $link, $db, $id, $generation, $cluster, $plan_hash, $po
             planHash = ?, policyVersion = ?, reason = ?, updatedAt = UTC_TIMESTAMP()
          WHERE dispatchRequestID = ? AND state = 'ASSESSING' AND claimGeneration = ?",
          'ssssii', array( $cluster, $plan_hash, $policy_version, $reason, (int) $id, (int) $generation ) );
-      return $n === 1 && dispatch_append_event( $link, $db, $id, DISPATCH_ASSESSING, DISPATCH_STAGING, $generation, $reason );
+      return $n === 1 && dispatch_append_event( $link, $db, $id, DISPATCH_ASSESSING, DISPATCH_STAGING, $generation, $reason )
+             && ( $turn === null || ( dispatch_rows( $link, "SELECT 1 FROM `{$turn[0]}`.dispatch_controller_claim
+                       WHERE controller = ? AND claimOwner = ? AND claimGeneration = ? AND claimExpiresAt >= UTC_TIMESTAMP()
+                       FOR UPDATE", 'ssi', array( $turn[ 3 ], $turn[ 4 ], (int) $turn[ 5 ] ) ) !== array()
+                                      && dispatch_rotation_save( $link, $turn[ 0 ], $turn[ 1 ], $turn[ 2 ] ) ) );
    } );
 }
 
@@ -355,17 +364,15 @@ function dispatch_field_updates( array $fields, $reason )
 
 /**
  * The submission gate: STAGING to SUBMITTING for the current, unexpired claim
- * and deadline, writing the attempt intent and (when given) spending the
- * rotation turn, all in one transaction. Only the winner may run sbatch.
- * $turn: array( gdb, scopeKey, unitKey, member, state, roundTotal ) or null;
- * $artifact: the finalized request XML's checksum, when the stager made one.
- * Returns the attempt token, or '' when the gate was lost.
+ * and deadline, writing the attempt intent in one transaction. Only the
+ * winner may run sbatch. $artifact: the finalized request XML's checksum,
+ * when the stager made one. Returns the attempt token, or '' when the gate was lost.
  */
-function dispatch_submission_gate( $link, $db, $id, $generation, $cluster, array $plan, $turn = null,
+function dispatch_submission_gate( $link, $db, $id, $generation, $cluster, array $plan,
                                    $submit_lease = DISPATCH_SUBMIT_LEASE_SECONDS, $artifact = null )
 {
    $token = bin2hex( random_bytes( 16 ) );
-   $ok = dispatch_tx( $link, function () use ( $link, $db, $id, $generation, $cluster, $plan, $turn, $token, $submit_lease,
+   $ok = dispatch_tx( $link, function () use ( $link, $db, $id, $generation, $cluster, $plan, $token, $submit_lease,
                                                $artifact ) {
       $n = dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET state = 'SUBMITTING', selectedCluster = ?,
             planHash = ?, claimExpiresAt = UTC_TIMESTAMP() + INTERVAL ? SECOND, updatedAt = UTC_TIMESTAMP()
@@ -379,12 +386,8 @@ function dispatch_submission_gate( $link, $db, $id, $generation, $cluster, array
             (dispatchRequestID, attemptToken, cluster, planHash, planJson, artifactChecksum, createdAt)
          VALUES (?,?,?,?,?,?, UTC_TIMESTAMP())", 'isssss',
          array( (int) $id, $token, $cluster, $plan[ 'hash' ], json_encode( $plan ), $artifact ) );
-      if ( $n !== 1 || ! dispatch_append_event( $link, $db, $id, DISPATCH_STAGING, DISPATCH_SUBMITTING, $generation,
-                                                "attempt $token at $cluster" ) ) {
-         return false;
-      }
-      return $turn === null || dispatch_turn_spend( $link, $turn[ 0 ], $turn[ 1 ], $turn[ 2 ], $turn[ 3 ], $turn[ 4 ],
-                                                    $turn[ 5 ], $token );
+      return $n === 1 && dispatch_append_event( $link, $db, $id, DISPATCH_STAGING, DISPATCH_SUBMITTING, $generation,
+                                                "attempt $token at $cluster" );
    } );
    return $ok ? $token : '';
 }
@@ -393,16 +396,14 @@ function dispatch_submission_gate( $link, $db, $id, $generation, $cluster, array
  * Record a submission outcome for an attempt, identified by its token so a
  * reconciling owner can settle it after a lease expires. $outcome is a
  * dispatch_outcome_from_sbatch_result() array. On acceptance the request
- * becomes ACCEPTED and its turn is confirmed; on established nonacceptance it
- * becomes $next (WAITING, BLOCKED or FAILED) and its turn is refunded; an
- * uncertain outcome holds it in SUBMISSION_UNKNOWN. $turn: array( gdb, scopeKey, unitKey ) or null.
+ * becomes ACCEPTED; on established nonacceptance it becomes $next (WAITING,
+ * BLOCKED or FAILED); an uncertain outcome holds it in SUBMISSION_UNKNOWN.
  */
-function dispatch_record_outcome( $link, $db, $token, array $outcome, $next = DISPATCH_WAITING, $turn = null,
-                                  $retry_seconds = null )
+function dispatch_record_outcome( $link, $db, $token, array $outcome, $next = DISPATCH_WAITING, $retry_seconds = null )
 {
-   return dispatch_tx( $link, function () use ( $link, $db, $token, $outcome, $next, $turn, $retry_seconds ) {
+   return dispatch_tx( $link, function () use ( $link, $db, $token, $outcome, $next, $retry_seconds ) {
       $rows = dispatch_rows( $link, "SELECT a.dispatchRequestID, a.phase, a.cluster, r.state, r.claimGeneration,
-            r.parentBatchKey, r.cancelRequested
+            r.cancelRequested
          FROM `$db`.dispatch_attempt a JOIN `$db`.dispatch_request r USING (dispatchRequestID)
          WHERE a.attemptToken = ? FOR UPDATE", 's', array( $token ) );
       if ( ! $rows || ! in_array( $rows[ 0 ][ 'phase' ], array( 'INTENT', 'UNKNOWN' ), true ) ) {
@@ -448,14 +449,6 @@ function dispatch_record_outcome( $link, $db, $token, array $outcome, $next = DI
                                             (int) $r[ 'claimGeneration' ], 'cancelled; nothing was submitted' ) ) ) {
          return false;
       }
-      if ( $turn !== null && $outcome[ 'certainty' ] === SUBMIT_ACCEPTED ) {
-         dispatch_turn_confirm( $link, $turn[ 0 ], $turn[ 1 ], $turn[ 2 ] );
-      }
-      ## A batch keeps its one turn while any child may have been accepted.
-      if ( $turn !== null && $outcome[ 'certainty' ] === SUBMIT_NOT_ACCEPTED
-           && ! dispatch_batch_may_be_submitted( $link, $db, $r[ 'parentBatchKey' ], $id ) ) {
-         dispatch_turn_refund( $link, $turn[ 0 ], $turn[ 1 ], $turn[ 2 ] );
-      }
       return true;
    } );
 }
@@ -472,17 +465,6 @@ function dispatch_outcome_code( array $outcome )
    $codes = array( 'never_started' => 'unreachable', 'connect_failure' => 'unreachable', 'breaker_open' => 'unreachable',
                    'busy' => 'occupied', 'definite_rejection' => 'rejected' );
    return isset( $codes[ $outcome[ 'reason' ] ] ) ? $codes[ $outcome[ 'reason' ] ] : 'not_submitted';
-}
-
-## Whether a sibling of request $id in the batch may have reached the scheduler.
-function dispatch_batch_may_be_submitted( $link, $db, $batch_key, $id )
-{
-   if ( $batch_key === null || $batch_key === '' ) {
-      return false;
-   }
-   return dispatch_rows( $link, "SELECT 1 FROM `$db`.dispatch_request WHERE parentBatchKey = ? AND dispatchRequestID <> ?
-      AND state IN ('SUBMITTING','SUBMISSION_UNKNOWN','ACCEPTED','MONITORED','CLOSED') LIMIT 1",
-      'si', array( $batch_key, (int) $id ) ) !== array();
 }
 
 ## Cancel a never-submitted request. Wins only if it beats the submission gate.
@@ -502,22 +484,19 @@ function dispatch_cancel_local( $link, $db, $id, $reason )
    } );
 }
 
-## Members whose staging failed as unreachable in the last $seconds, as select()'s 'reachable'
-## input (member => false): the next decisions, the failed request's own retry included, go to
-## the reachable members until the window passes. Read from the STAGING -> WAITING events, so
-## neither the request's later state nor a selection wait this exclusion causes changes it; a
-## request since submitted on that member no longer counts.
+## Members a request found unreachable in the last $seconds, as select()'s 'reachable' input
+## (member => false): later decisions, the failed request's own retry included, go elsewhere until
+## the window passes or a job is accepted there. Read from the events, which keep the failed member.
 function dispatch_recently_unreachable( $link, $db, $seconds )
 {
    $out = array();
-   foreach ( dispatch_rows( $link, "SELECT DISTINCT r.selectedCluster FROM `$db`.dispatch_request r
-         JOIN `$db`.dispatch_event e ON e.dispatchRequestID = r.dispatchRequestID
-         WHERE e.fromState = 'STAGING' AND e.toState = 'WAITING'
+   foreach ( dispatch_rows( $link, "SELECT DISTINCT e.cluster FROM `$db`.dispatch_event e
+         WHERE e.reasonCode = 'unreachable' AND e.toState = 'WAITING' AND e.cluster IS NOT NULL
            AND e.createdAt >= UTC_TIMESTAMP() - INTERVAL ? SECOND
-           AND r.selectedCluster IS NOT NULL
-           AND r.state NOT IN ('SUBMITTING','SUBMISSION_UNKNOWN','ACCEPTED','MONITORED','CLOSED')",
+           AND NOT EXISTS (SELECT 1 FROM `$db`.dispatch_attempt a WHERE a.cluster = e.cluster AND a.phase = 'ACCEPTED'
+                                                                    AND a.resolvedAt >= e.createdAt)",
          'i', array( (int) $seconds ) ) as $r ) {
-      $out[ $r[ 'selectedCluster' ] ] = false;
+      $out[ $r[ 'cluster' ] ] = false;
    }
    return $out;
 }
@@ -639,61 +618,13 @@ function dispatch_rotation_load( $link, $gdb, $scope )
    return is_array( $state ) ? $state : array();
 }
 
-## Spend one turn provisionally, once per dispatch unit: store the selector's tentative state and a PROVISIONAL event.
-function dispatch_turn_spend( $link, $gdb, $scope, $unit, $member, array $state, $round_total, $token )
+## Save a scope's rotation state: the turn a selection took.
+function dispatch_rotation_save( $link, $gdb, $scope, array $state )
 {
-   $n = dispatch_affected( $link, "INSERT IGNORE INTO `$gdb`.dispatch_turn_event
-         (scopeKey, unitKey, member, roundTotal, attemptToken, createdAt)
-      VALUES (?,?,?,?,?, UTC_TIMESTAMP())", 'sssis', array( $scope, $unit, $member, (int) $round_total, $token ) );
-   if ( $n !== 1 ) {
-      ## A refunded unit trying another destination spends a new turn; a held turn
-      ## (a later batch child, or a retry) spends nothing more.
-      $held = dispatch_rows( $link, "SELECT status FROM `$gdb`.dispatch_turn_event WHERE scopeKey = ? AND unitKey = ?
-                                     FOR UPDATE", 'ss', array( $scope, $unit ) );
-      if ( ! $held ) {
-         return false;
-      }
-      if ( $held[ 0 ][ 'status' ] !== 'REFUNDED' ) {
-         return true;
-      }
-      if ( dispatch_affected( $link, "UPDATE `$gdb`.dispatch_turn_event SET status = 'PROVISIONAL', member = ?,
-               roundTotal = ?, attemptToken = ?, createdAt = UTC_TIMESTAMP(), resolvedAt = NULL
-            WHERE scopeKey = ? AND unitKey = ? AND status = 'REFUNDED'",
-            'sisss', array( $member, (int) $round_total, $token, $scope, $unit ) ) !== 1 ) {
-         return false;
-      }
-   }
    ## A sole eligible member leaves the state as it was; zero rows changed is still saved.
    return dispatch_affected( $link, "INSERT INTO `$gdb`.dispatch_rotation (scopeKey, stateJson, updatedAt)
          VALUES (?,?, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE stateJson = VALUES(stateJson), updatedAt = UTC_TIMESTAMP()",
       'ss', array( $scope, json_encode( $state ) ) ) >= 0;
-}
-
-function dispatch_turn_confirm( $link, $gdb, $scope, $unit )
-{
-   return dispatch_affected( $link, "UPDATE `$gdb`.dispatch_turn_event SET status = 'CONFIRMED', resolvedAt = UTC_TIMESTAMP()
-      WHERE scopeKey = ? AND unitKey = ? AND status = 'PROVISIONAL'", 'ss', array( $scope, $unit ) ) === 1;
-}
-
-/**
- * Refund a provisional turn once: the member gets back the round total it gave
- * up, so it leads the next round. Cursors and later decisions are not rewound.
- */
-function dispatch_turn_refund( $link, $gdb, $scope, $unit )
-{
-   $rows = dispatch_rows( $link, "SELECT member, roundTotal FROM `$gdb`.dispatch_turn_event
-      WHERE scopeKey = ? AND unitKey = ? AND status = 'PROVISIONAL' FOR UPDATE", 'ss', array( $scope, $unit ) );
-   if ( ! $rows ) {
-      return false;
-   }
-   $state = dispatch_rotation_load( $link, $gdb, $scope );
-   $member = $rows[ 0 ][ 'member' ];
-   $state[ 'current' ][ $member ] = ( isset( $state[ 'current' ][ $member ] ) ? (int) $state[ 'current' ][ $member ] : 0 )
-                                  + (int) $rows[ 0 ][ 'roundTotal' ];
-   return dispatch_affected( $link, "UPDATE `$gdb`.dispatch_turn_event SET status = 'REFUNDED', resolvedAt = UTC_TIMESTAMP()
-            WHERE scopeKey = ? AND unitKey = ? AND status = 'PROVISIONAL'", 'ss', array( $scope, $unit ) ) === 1
-       && dispatch_affected( $link, "UPDATE `$gdb`.dispatch_rotation SET stateJson = ?, updatedAt = UTC_TIMESTAMP()
-            WHERE scopeKey = ?", 'ss', array( json_encode( $state ), $scope ) ) >= 0;
 }
 
 /**
@@ -839,14 +770,6 @@ function dispatch_latest_attempt( $link, $db, $id )
    return $rows ? $rows[ 0 ] : null;
 }
 
-## The rotation turn an attempt spent, as array( gdb, scopeKey, unitKey ), or null.
-function dispatch_turn_for_token( $link, $gdb, $token )
-{
-   $rows = dispatch_rows( $link, "SELECT scopeKey, unitKey FROM `$gdb`.dispatch_turn_event WHERE attemptToken = ?",
-                          's', array( $token ) );
-   return $rows ? array( $gdb, $rows[ 0 ][ 'scopeKey' ], $rows[ 0 ][ 'unitKey' ] ) : null;
-}
-
 /**
  * Record a reconciliation check that settled nothing. The request stays
  * SUBMISSION_UNKNOWN (absence from the queue never proves nonacceptance) and
@@ -882,7 +805,7 @@ function dispatch_reconcile_checks( $link, $db, $id )
  * job ID records the acceptance; an empty ID records established
  * nonacceptance and returns the request to WAITING for a new attempt.
  */
-function dispatch_resolve_unknown( $link, $gdb, $db, $id, $job_id, $evidence )
+function dispatch_resolve_unknown( $link, $db, $id, $job_id, $evidence )
 {
    $req = dispatch_get( $link, $db, $id );
    $attempt = dispatch_latest_attempt( $link, $db, $id );
@@ -895,8 +818,7 @@ function dispatch_resolve_unknown( $link, $gdb, $db, $id, $job_id, $evidence )
                      'reason' => "operator: $evidence" )
             : array( 'certainty' => SUBMIT_NOT_ACCEPTED, 'retryable' => true, 'job_id' => '',
                      'reason' => "operator: $evidence" );
-   return dispatch_record_outcome( $link, $db, $attempt[ 'attemptToken' ], $outcome, DISPATCH_WAITING,
-                                   dispatch_turn_for_token( $link, $gdb, $attempt[ 'attemptToken' ] ), 0 );
+   return dispatch_record_outcome( $link, $db, $attempt[ 'attemptToken' ], $outcome, DISPATCH_WAITING, 0 );
 }
 
 /** ACCEPTED to MONITORED once tracking and the monitor are in place. */
@@ -949,7 +871,7 @@ function dispatch_spool_write( $dir, $db, $token, array $outcome )
  * settled is removed; one that cannot be recorded yet is kept. Returns the
  * tokens replayed.
  */
-function dispatch_spool_replay( $link, $gdb, $dir )
+function dispatch_spool_replay( $link, $dir )
 {
    $done = array();
    foreach ( glob( rtrim( $dir, '/' ) . '/*.json' ) ?: array() as $file ) {
@@ -963,8 +885,7 @@ function dispatch_spool_replay( $link, $gdb, $dir )
          continue;
       }
       $settled = ! in_array( $rows[ 0 ][ 'phase' ], array( 'INTENT', 'UNKNOWN' ), true );
-      $recorded = ! $settled && dispatch_record_outcome( $link, $r[ 'db' ], $r[ 'token' ], $r[ 'outcome' ], DISPATCH_WAITING,
-                                                         dispatch_turn_for_token( $link, $gdb, $r[ 'token' ] ), 0 );
+      $recorded = ! $settled && dispatch_record_outcome( $link, $r[ 'db' ], $r[ 'token' ], $r[ 'outcome' ], DISPATCH_WAITING, 0 );
       if ( $recorded ) {
          ## Recorded here: the worker that spooled it has exited, so its submit claim is released
          ## (and fenced) for tracking to start now, not when the claim would have expired.

@@ -1,7 +1,7 @@
 <?php
 /* Dispatch ledger tables: their names, the checks, and the loader for their
  * definitions in us3_sql. Instance tables hold requests, attempts and events;
- * gfac tables hold controller claims, rotation state, turn events and decisions.
+ * gfac tables hold controller claims, rotation state and decisions.
  * All InnoDB, all times UTC from the database server. PHP 7.4 compatible. */
 
 ## The dispatch tables are defined in us3_sql: us3_dispatch.sql (each instance) and
@@ -13,7 +13,7 @@ function dispatch_instance_tables()
 
 function dispatch_gfac_tables()
 {
-   return array( 'dispatch_controller_claim', 'dispatch_rotation', 'dispatch_turn_event', 'dispatch_decision',
+   return array( 'dispatch_controller_claim', 'dispatch_rotation', 'dispatch_decision',
                  'dispatch_alert', 'dispatch_alert_request', 'dispatch_heartbeat' );
 }
 

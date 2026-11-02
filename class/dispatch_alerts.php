@@ -232,6 +232,12 @@ function dispatch_mark_waiting_notified( $link, $db )
         AND state IN ('PENDING','ASSESSING','WAITING','STAGING')" ) );
 }
 
+## Heartbeat rows of workers gone for a day: each submitctl process beats under its own name.
+function dispatch_heartbeat_purge( $link, $gdb )
+{
+   return dispatch_affected( $link, "DELETE FROM `$gdb`.dispatch_heartbeat WHERE beatAt < UTC_TIMESTAMP() - INTERVAL 1 DAY" );
+}
+
 function dispatch_heartbeat_beat( $link, $gdb, $worker )
 {
    return dispatch_affected( $link, "INSERT INTO `$gdb`.dispatch_heartbeat (worker, beatAt) VALUES (?, UTC_TIMESTAMP())

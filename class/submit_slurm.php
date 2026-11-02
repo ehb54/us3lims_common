@@ -134,6 +134,7 @@ class submit_slurm extends jobsubmit
       $this->frozenPlan = $plan;
       $this->stage_error = '';
       $this->stage_transient = false;
+      $this->stage_breaker_just_tripped = false;
       $this->set_metascheduler_cluster_executing( $plan[ 'cluster' ] );
 
       $savedir = getcwd();
@@ -352,6 +353,8 @@ class submit_slurm extends jobsubmit
     */
    public function stage_files()
    {
+      ## Per job: a trip seen by an earlier job of the same batch is not this one's.
+      $this->stage_breaker_just_tripped = false;
       $cluster   = $this->execution_cluster();
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $login     = $this->remote( $cluster )->login();
@@ -534,8 +537,10 @@ class submit_slurm extends jobsubmit
          $this->message[] = "ERROR: job submission failed after " . $submitResult[ 'attempt' ]
                            . " attempt(s): " . $submitResult[ 'error' ];
          elog2( "submit_job: FAILED after " . $submitResult[ 'attempt' ] . " attempts: " . $submitResult[ 'error' ] );
-         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ], 'sbatch', $submitResult[ 'infra_failure' ],
-                                           $submitResult[ 'breaker_just_tripped' ] );
+         ## A lost reply is not an outage: the job may be running, so the admin hears of it like any failure.
+         $lost = ( $submitResult[ 'outcome' ][ 'certainty' ] ?? '' ) === SUBMIT_UNKNOWN;
+         $this->markAutoflowSubmitFailed( $submitResult[ 'error' ], 'sbatch', $submitResult[ 'infra_failure' ] && ! $lost,
+                                           $submitResult[ 'breaker_just_tripped' ] && ! $lost );
          return;
       }
 
@@ -941,7 +946,8 @@ class submit_slurm extends jobsubmit
       ## mail names the run's working directory and analysis method
       ## (2DSA/PCSA/GA/...), both parsed from the analysis-profile XML by
       ## jobsubmit.php and available on $this->data at all three call sites.
-      $runName = $this->data[ 'job' ][ 'directory' ] ?? null;
+      ## The run's own name, not the server path it was staged from.
+      $runName = isset( $this->data[ 'job' ][ 'directory' ] ) ? basename( (string) $this->data[ 'job' ][ 'directory' ] ) : null;
       $method  = $this->data[ 'method' ] ?? '';
 
       $runDescription = ( $autoflowID > 0
@@ -979,16 +985,16 @@ class submit_slurm extends jobsubmit
 
       if ( $infraFailure && $breakerJustTripped && $gridctlNotifiesAdmin )
       {
-         $this->message[] = "ERROR: the cluster's circuit breaker just opened; further submissions to it"
-                          . " fail until its cooldown expires";
+         $this->message[] = "ERROR: the cluster's circuit breaker just opened; submissions that reach it"
+                          . " over ssh are refused until its cooldown expires";
       }
       elseif ( $infraFailure && $breakerJustTripped )
       {
          mail( $siteAdmin, "US3 cluster unreachable notification",
             "A LIMS job submission ($runDescription) failed because its cluster's circuit"
-          . " breaker just opened:\n\n$statusMsg\n\nFurther submissions to this cluster will"
-          . " fail the same way until the breaker's cooldown expires; this is sent once per"
-          . " outage, not once per refused submission.", $adminHeaders );
+          . " breaker just opened:\n\n$statusMsg\n\nSubmissions that reach this cluster over ssh are"
+          . " refused until the breaker's cooldown expires (work on the LIMS host's own cluster"
+          . " goes on locally); this is sent once per trip, not once per refused submission.", $adminHeaders );
       }
       elseif ( ! $gridctlNotifiesAdmin && $autoflowID > 0 && ( empty( $investigator_email ) || $dbUnreachable ) )
       {

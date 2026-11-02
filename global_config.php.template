@@ -183,11 +183,11 @@ $global_dispatch_alert_email = false;
 ## whose probe immediately fails again). Must be an int, or a numeric
 ## string, from the breaker's own base cooldown (remote_exec's
 ## BREAKER_COOLDOWN_SECONDS, 120, unless that is itself overridden) through
-## circuit_breaker::MAX_COOLDOWN_CEILING_SECONDS (86400, 24h); anything else
-## is logged as invalid and treated the same as unset. Unset, the code uses
-## 1800s, which is what this matches: a sustained outage backs off instead
-## of re-probing every 120s for its whole duration, but a resolved one is
-## still found within one capped cooldown of it clearing.
+## circuit_breaker::MAX_COOLDOWN_CEILING_SECONDS (86400, 24h). Anything else is
+## logged as invalid, and the breaker then keeps its base cooldown with no
+## progressive backoff. Unset, the code uses 1800s, which is what this matches:
+## a sustained outage backs off instead of re-probing every 120s for its whole
+## duration, but a resolved one is still found within one capped cooldown of it clearing.
 
 ## $global_circuit_breaker_max_cooldown_seconds = 1800;
 

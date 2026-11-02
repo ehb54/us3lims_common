@@ -502,18 +502,21 @@ function dispatch_cancel_local( $link, $db, $id, $reason )
    } );
 }
 
-## Members whose staging failed as unreachable in the last $seconds, as select()'s
-## 'reachable' input (member => false): the next decision goes to the reachable members.
-## Only a wait entered from STAGING counts: a selection wait this exclusion caused must not renew it.
+## Members whose staging failed as unreachable in the last $seconds, as select()'s 'reachable'
+## input (member => false): the next decisions, the failed request's own retry included, go to
+## the reachable members until the window passes. Read from the STAGING -> WAITING events, so
+## neither the request's later state nor a selection wait this exclusion causes changes it; a
+## request since submitted on that member no longer counts.
 function dispatch_recently_unreachable( $link, $db, $seconds )
 {
    $out = array();
    foreach ( dispatch_rows( $link, "SELECT DISTINCT r.selectedCluster FROM `$db`.dispatch_request r
          JOIN `$db`.dispatch_event e ON e.dispatchRequestID = r.dispatchRequestID
-         WHERE r.state = 'WAITING' AND r.reasonCode = 'unreachable' AND r.selectedCluster IS NOT NULL
-           AND e.eventID = ( SELECT MAX(eventID) FROM `$db`.dispatch_event WHERE dispatchRequestID = r.dispatchRequestID )
-           AND e.fromState = 'STAGING' AND e.toState = 'WAITING'
-           AND e.createdAt >= UTC_TIMESTAMP() - INTERVAL ? SECOND", 'i', array( (int) $seconds ) ) as $r ) {
+         WHERE e.fromState = 'STAGING' AND e.toState = 'WAITING'
+           AND e.createdAt >= UTC_TIMESTAMP() - INTERVAL ? SECOND
+           AND r.selectedCluster IS NOT NULL
+           AND r.state NOT IN ('SUBMITTING','SUBMISSION_UNKNOWN','ACCEPTED','MONITORED','CLOSED')",
+         'i', array( (int) $seconds ) ) as $r ) {
       $out[ $r[ 'selectedCluster' ] ] = false;
    }
    return $out;

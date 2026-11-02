@@ -163,7 +163,7 @@ $global_dispatch_alert_email = false;
 ## Members are matched to physical schedulers by 'controller' (default: the
 ## login host 'name') plus 'queue'; two members that resolve to the same
 ## pair are aliases and keep the pool inactive. Check the effective policy
-## with: php ~us3/lims/bin/gridctl/dispatch_policy_check.php
+## with: php ~us3/lims/bin/dispatch_policy_check.php (gridctl's checkout is ~us3/lims/bin)
 
 
 ## Optional breaker directory; defaults to ~us3/lims/etc/circuit-breaker.
@@ -306,7 +306,14 @@ $default_local_cluster = 'us3iab-node0';
 ##                                required, '' when the cluster needs none
 ##   mpi_launcher         string  mpirun (default), srun, or ibrun
 ##   sbatch_directives    array   complete single-line "#SBATCH " directives
-##                               mempercore supplies --mem-per-cpu if this is empty
+##                               mempercore supplies --mem-per-cpu if this is empty. The plan owns
+##                               the partition, job name, nodes, tasks, tasks per node, time,
+##                               output, error and nice: a directive setting any of them, or
+##                               memory twice, refuses every submission to the cluster
+##                               (uslims_upgrade.php's step 8 reports it)
+##   account, qos, constraint, reservation  string  the matching #SBATCH option; may also be
+##                               a directive, but the two may not disagree
+##   exclusive            bool    #SBATCH --exclusive
 ##   sharing              string  shared (jobs share nodes; a memory request from
 ##                               mempercore or a --mem directive is then required)
 ##                               or exclusive (whole nodes); unset keeps today's behavior

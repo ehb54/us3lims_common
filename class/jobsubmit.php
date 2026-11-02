@@ -966,6 +966,14 @@ class jobsubmit
       return $plan;
    }
 
+   ## Why a cluster entry's sbatch_directives and structured keys would refuse every submission to it,
+   ## or ''. For checking a configuration before the first submission (uslims_upgrade.php step 8).
+   public static function site_directive_error( $cluster, array $cfg )
+   {
+      list( , $error ) = self::plan_directive_fields( $cluster, $cfg );
+      return preg_replace( '/^ERROR:\s*/', '', (string) $error );
+   }
+
    ## Directive flags the plan itself owns; a site directive may not set them.
    const PLAN_OWNED_DIRECTIVES =
       '/^#SBATCH\s+(-p|--partition|-J|--job-name|-N|--nodes|-n|--ntasks|--ntasks-per-node|-t|--time'
@@ -1150,7 +1158,7 @@ class jobsubmit
    ## Resolve site sbatch_directives and structured keys into plan fields:
    ## [ fields, error ]. A directive may not set what the plan owns, and a
    ## structured key and a directive may not disagree.
-   protected function plan_directive_fields( $cluster, array $cfg )
+   protected static function plan_directive_fields( $cluster, array $cfg )
    {
       $directives = (array)( $cfg[ 'sbatch_directives' ] ?? [] );
       $fields = [ 'account' => '', 'qos' => '', 'constraint' => '', 'reservation' => '',

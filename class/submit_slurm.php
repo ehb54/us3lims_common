@@ -422,7 +422,8 @@ class submit_slurm extends jobsubmit
       }
       if ( empty( $plan[ 'ok' ] ) && ( $plan[ 'error_kind' ] ?? '' ) === 'configuration' )
       {
-         throw new UnexpectedValueException( $plan[ 'error' ] );
+         ## The catch adds its own "ERROR:"; one is enough.
+         throw new UnexpectedValueException( preg_replace( '/^ERROR:\s*/', '', (string) $plan[ 'error' ] ) );
       }
       if ( empty( $plan[ 'ok' ] ) )
       {

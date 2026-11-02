@@ -636,17 +636,8 @@ function dispatch_rotation_load( $link, $gdb, $scope )
    return is_array( $state ) ? $state : array();
 }
 
-## Save a pool group's rotation state.
-function dispatch_rotation_save( $link, $gdb, $scope, array $state )
-{
-   return dispatch_affected( $link, "INSERT INTO `$gdb`.dispatch_rotation (scopeKey, stateJson, updatedAt)
-         VALUES (?,?, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE stateJson = VALUES(stateJson), updatedAt = UTC_TIMESTAMP()",
-      'ss', array( $scope, json_encode( $state ) ) ) >= 0;
-}
-
 ## Spend one turn provisionally, once per dispatch unit: store the selector's tentative state and a PROVISIONAL event.
-## $state null: the rotation state was already saved when the decision was made.
-function dispatch_turn_spend( $link, $gdb, $scope, $unit, $member, $state, $round_total, $token )
+function dispatch_turn_spend( $link, $gdb, $scope, $unit, $member, array $state, $round_total, $token )
 {
    $n = dispatch_affected( $link, "INSERT IGNORE INTO `$gdb`.dispatch_turn_event
          (scopeKey, unitKey, member, roundTotal, attemptToken, createdAt)
@@ -670,7 +661,9 @@ function dispatch_turn_spend( $link, $gdb, $scope, $unit, $member, $state, $roun
       }
    }
    ## A sole eligible member leaves the state as it was; zero rows changed is still saved.
-   return $state === null || dispatch_rotation_save( $link, $gdb, $scope, $state );
+   return dispatch_affected( $link, "INSERT INTO `$gdb`.dispatch_rotation (scopeKey, stateJson, updatedAt)
+         VALUES (?,?, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE stateJson = VALUES(stateJson), updatedAt = UTC_TIMESTAMP()",
+      'ss', array( $scope, json_encode( $state ) ) ) >= 0;
 }
 
 function dispatch_turn_confirm( $link, $gdb, $scope, $unit )

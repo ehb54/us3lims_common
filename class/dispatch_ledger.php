@@ -512,12 +512,14 @@ function dispatch_cancel_local( $link, $db, $id, $reason )
 
 ## Members a request found unreachable in the last $seconds, as select()'s 'reachable' input
 ## (member => false): later decisions, the failed request's own retry included, go elsewhere until
-## the window passes or a job is accepted there. Read from the events, which keep the failed member.
+## the window passes or a job is accepted there. Read from the events, which keep the failed member;
+## only a wait leaving staging or submission contacted it, so a wait caused by the exclusion does not renew it.
 function dispatch_recently_unreachable( $link, $db, $seconds )
 {
    $out = array();
    foreach ( dispatch_rows( $link, "SELECT DISTINCT e.cluster FROM `$db`.dispatch_event e
          WHERE e.reasonCode = 'unreachable' AND e.toState = 'WAITING' AND e.cluster IS NOT NULL
+           AND e.fromState IN ('STAGING','SUBMITTING')
            AND e.createdAt >= UTC_TIMESTAMP() - INTERVAL ? SECOND
            AND NOT EXISTS (SELECT 1 FROM `$db`.dispatch_attempt a WHERE a.cluster = e.cluster AND a.phase = 'ACCEPTED'
                                                                     AND a.resolvedAt >= e.createdAt)",

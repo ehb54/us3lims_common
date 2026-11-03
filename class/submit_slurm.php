@@ -145,13 +145,15 @@ class submit_slurm extends jobsubmit
          if ( $envelope[ 'error' ] !== '' )
          {
             $this->markAutoflowSubmitFailed( $envelope[ 'error' ], 'staging', true );
-            return array( 'ok' => false, 'transient' => true, 'reason' => $envelope[ 'error' ] );
+            ## A failure on this server, before the member is contacted.
+            return array( 'ok' => false, 'transient' => true, 'reason' => $envelope[ 'error' ], 'code' => 'local_failure' );
          }
          if ( $this->stage_files() )
             return array( 'ok' => true, 'transient' => false, 'reason' => '', 'artifact' => $envelope[ 'checksum' ] );
          $reason = $this->stage_error !== '' ? $this->stage_error : 'staging failed';
          $this->markAutoflowSubmitFailed( $reason, 'staging', $this->stage_transient, $this->stage_breaker_just_tripped );
-         return array( 'ok' => false, 'transient' => $this->stage_transient, 'reason' => $reason );
+         return array( 'ok' => false, 'transient' => $this->stage_transient, 'reason' => $reason,
+                       'code' => $this->stage_transient ? 'unreachable' : 'staging_rejected' );
       }
       catch ( InvalidArgumentException | UnexpectedValueException $error )
       {

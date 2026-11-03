@@ -25,6 +25,7 @@ function dispatch_public_message( array $r )
       case DISPATCH_WAITING:
          $waits = array(
             'unreachable'          => 'The destination could not be reached. No job was submitted; another attempt is scheduled.',
+            'local_failure'        => 'The analysis could not be prepared for submission on this server. No job was submitted; another attempt is scheduled.',
             'availability_unknown' => 'Resource availability could not be checked. Your analysis is waiting; the next check is scheduled.',
             'occupied'             => 'No permitted resource can start this analysis now. Your analysis is waiting for one.',
             'operator'             => 'The permitted resources are taken out of service by the site operator. Your analysis is waiting for one to return.',

@@ -816,32 +816,14 @@ class submit_slurm extends jobsubmit
    ## pass neither, which defaults both to false.
    ##
    ## Mail policy:
-   ## - The investigator always gets a plain notice naming the run, never
-   ##   $statusMsg's raw internal detail (ssh errors, breaker internals,
-   ##   config keys, Slurm partition names) -- that detail is an admin's
-   ##   to read, not something an investigator can act on, and the live
-   ##   detail is already in this->message/elog2's log either way.
-   ## - The admin gets $statusMsg's full detail, but only when there is a
-   ##   reason beyond "a submission failed" to tell them: either the
-   ##   breaker just tripped (once per outage, not once per refused
-   ##   submission while it stays open -- see record_failure()'s own return
-   ##   value, threaded through attemptSubmit()'s 'breaker_just_tripped'),
-   ##   or nobody else could be told at all (no investigator address on
-   ##   file, or the instance database itself was unreachable) -- otherwise
-   ##   a routine, investigator-fixable failure (a rejected sbatch
-   ##   directive, a bad resource request) would page an admin for no
-   ##   reason.
-   ##
-   ## The autoflowAnalysis row update, the investigator lookup/mail, and the
-   ## "nobody else notified" fallback are autoflow only (gated on
-   ## $is_cli/$ID below): the interactive web UI already shows "job
-   ## submission failed" live in the page it renders, so mailing the
-   ## submitter there too would just be a redundant second notice for
-   ## someone already looking at the answer. The breaker-trip admin notice
-   ## is NOT gated on that: a web
-   ## submission failing because the cluster is down is exactly the kind of
-   ## thing the admin needs to hear about too, and nothing about the web UI
-   ## already showing the user their own failure tells the admin that.
+   ## - The site admin gets the full status message, From/Reply-To the site admin: once per trip
+   ##   for an outage (the breaker opening), when no investigator can be told, and for every other
+   ##   failure outside gridctl (a pool request, a web page), once per process for the same
+   ##   failure so a web batch sends one. gridctl sends its own notice for what it drives.
+   ## - The autoflow investigator and the interactive pool submitter (whose page stopped at
+   ##   "Analysis Received") get a plain notice naming the request, never the status message's
+   ##   internal detail, and are told the administrator knows only when that mail went out.
+   ## - A direct web submission's user sees the failure on the page and gets no mail.
    protected function markAutoflowSubmitFailed( $statusMsg, $stage, $infraFailure = false, $breakerJustTripped = false )
    {
       if ( $this->deferFailure )
@@ -851,15 +833,13 @@ class submit_slurm extends jobsubmit
       }
       global $dbusername, $dbpasswd, $dbhost, $dbname;
       global $ID, $is_cli;
-      global $org_name, $admin_email, $global_site_admin_email;
+      global $org_name, $global_site_admin_email;
 
       $autoflowID = ( $is_cli && $ID ) ? (int) $ID : 0;
 
-      ## Admin notices go to the host's site admin (global_config.php); in an instance page
-      ## $admin_email is that instance's contact, the fallback on a host whose global_config.php
-      ## predates the setting; root@localhost as gridctl does when neither is set.
-      $siteAdmin = ! empty( $global_site_admin_email ) ? $global_site_admin_email
-                 : ( ! empty( $admin_email ) ? $admin_email : 'root@localhost' );
+      ## Admin notices go to the host's site admin (global_config.php), root@localhost when unset, as
+      ## gridctl's do; in an instance page $admin_email is that instance's contact, not the site admin.
+      $siteAdmin = ! empty( $global_site_admin_email ) ? $global_site_admin_email : 'root@localhost';
       ## gridctl sends the one admin notice for a submission it drives (from this page's ERROR:
       ## output), so common mailing too sent the same failure twice.
       $gridctlNotifiesAdmin = defined( 'US3_GRIDCTL_SUBMISSION' );
@@ -868,18 +848,7 @@ class submit_slurm extends jobsubmit
       $tripleName         = null;
       $dbUnreachable      = false;
 
-      ## Below this point is autoflow-only: there is no autoflowAnalysis row
-      ## to update or look an investigator up against for a web submission,
-      ## and the web UI already shows "job submission failed" live in the
-      ## page it renders, so mailing the submitter there would just be a
-      ## redundant second notice for someone already looking at the answer.
-      ## That reasoning never applied to telling the ADMIN about a breaker
-      ## trip, though: the admin does not
-      ## already know the cluster just went down merely because some web
-      ## user's own page said their job failed. The breaker-trip mail below
-      ## is reachable either way; only the DB update, the investigator
-      ## lookup/mail, and the "nobody else notified" fallback stay gated on
-      ## actually having an autoflow row to work from.
+      ## The autoflow row and the investigator are looked up for an autoflow stage only.
       if ( $autoflowID > 0 )
       {
       ## Pooled, not a direct mysqli_connect()/mysqli_close() pair: a
@@ -940,22 +909,19 @@ class submit_slurm extends jobsubmit
          return "From: $from_name Admin<$from>\n" . "Reply-To: $from_name<$from>\n"
               . "X-Mailer: PHP v" . phpversion() . "\n" . "MIME-Version: 1.0\n" . "Content-Transfer-Encoding: 8bit\n";
       };
-      ## Users hear from the instance contact; admin notices come from the site admin.
-      $headers      = $mail_headers( ! empty( $admin_email ) ? $admin_email : $siteAdmin );
-      $adminHeaders = $mail_headers( $siteAdmin );
+      ## Every failure notice comes from the site admin, as the dispatch worker's do.
+      $headers      = $mail_headers( $siteAdmin );
+      $adminHeaders = $headers;
 
-      ## Besides the requestID, the triple and the submission step, the
-      ## mail names the run's working directory and analysis method
-      ## (2DSA/PCSA/GA/...), both parsed from the analysis-profile XML by
-      ## jobsubmit.php and available on $this->data at all three call sites.
-      ## The run's own name, not the server path it was staged from.
-      $runName = isset( $this->data[ 'job' ][ 'directory' ] ) ? basename( (string) $this->data[ 'job' ][ 'directory' ] ) : null;
-      $method  = $this->data[ 'method' ] ?? '';
+      ## The mail names the autoflow stage's request and triple, the HPC request the user knows,
+      ## the analysis method and the submission step.
+      $hpcRequest = (int) ( $this->data[ 'job' ][ 'requestID' ] ?? 0 );
+      $method     = $this->data[ 'method' ] ?? '';
 
       $runDescription = ( $autoflowID > 0
                          ? "requestID=$autoflowID" . ( ! empty( $tripleName ) ? ", $tripleName" : '' )
                          : 'web submission' )
-                       . ( ! empty( $runName ) ? ", run $runName" : '' )
+                       . ( $hpcRequest > 0 ? ", HPC request $hpcRequest" : '' )
                        . ( $method !== '' ? ", $method" : '' )
                        . " ($stage)";
 
@@ -989,8 +955,12 @@ class submit_slurm extends jobsubmit
       elseif ( ! $gridctlNotifiesAdmin && ! $infraFailure )
       {
          ## Outside gridctl (a pool request run by the dispatch worker, a web page) this is the one admin notice.
-         $adminNotified = $this->send_mail( $siteAdmin, "US3 job submission failed ($runDescription)",
-            "A LIMS job submission ($runDescription) failed:\n\n$statusMsg", $adminHeaders );
+         ## A web batch fails each dataset alike: one notice per failure and process.
+         static $told = array();
+         $once = "$stage|$statusMsg";
+         $adminNotified = isset( $told[ $once ] ) ? $told[ $once ]
+                        : ( $told[ $once ] = $this->send_mail( $siteAdmin, "US3 job submission failed ($runDescription)",
+                              "A LIMS job submission ($runDescription) failed:\n\n$statusMsg", $adminHeaders ) );
       }
 
       if ( $autoflowID > 0 )
@@ -1011,8 +981,8 @@ class submit_slurm extends jobsubmit
       {
          ## An interactive pool request left the submitter's page at "Analysis Received".
          $this->send_mail( $this->data[ 'db' ][ 'submitter' ], "US3 job submission failed",
-            "Your job submission ($runDescription) could not be completed:\n\n$statusMsg"
-          . ( $adminNotified ? "\n\nThe system administrator has been notified." : '' ), $headers );
+            "Your job submission ($runDescription) could not be completed."
+          . ( $adminNotified ? " The system administrator has been notified." : '' ), $headers );
       }
    }
 

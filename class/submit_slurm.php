@@ -959,15 +959,45 @@ class submit_slurm extends jobsubmit
                        . ( $method !== '' ? ", $method" : '' )
                        . " ($stage)";
 
-      ## Whether an admin hears of this failure: gridctl's notice, the breaker trip, or common's own below.
-      $adminNotified = $gridctlNotifiesAdmin || ( $infraFailure && $breakerJustTripped ) || ! $infraFailure
-                    || ( $autoflowID > 0 && ( empty( $investigator_email ) || $dbUnreachable ) );
+      ## The admin notice goes first, so the user is told the administrator knows only when it went
+      ## out: gridctl's own notice, the breaker trip, or common's own below.
+      $adminNotified = $gridctlNotifiesAdmin;
+      if ( $infraFailure && $breakerJustTripped && $gridctlNotifiesAdmin )
+      {
+         $this->message[] = "ERROR: the cluster's circuit breaker just opened; submissions that reach it"
+                          . " over ssh are refused until its cooldown expires";
+      }
+      elseif ( $infraFailure && $breakerJustTripped )
+      {
+         $adminNotified = $this->send_mail( $siteAdmin, "US3 cluster unreachable notification",
+            "A LIMS job submission ($runDescription) failed because its cluster's circuit"
+          . " breaker just opened:\n\n$statusMsg\n\nSubmissions that reach this cluster over ssh are"
+          . " refused until the breaker's cooldown expires (work on the LIMS host's own cluster"
+          . " goes on locally); this is sent once per trip, not once per refused submission.", $adminHeaders );
+      }
+      elseif ( ! $gridctlNotifiesAdmin && $autoflowID > 0 && ( empty( $investigator_email ) || $dbUnreachable ) )
+      {
+         ## No investigator can be told, so without this nobody would hear of the failure.
+         $adminNotified = $this->send_mail( $siteAdmin, "US3 job submission failed ($runDescription)",
+            "A LIMS job submission ($runDescription) failed and no investigator could be"
+          . " notified ("
+          . ( $dbUnreachable
+            ? "the instance database could not be reached to look one up"
+            : "no investigator e-mail on file" )
+          . "):\n\n$statusMsg", $adminHeaders );
+      }
+      elseif ( ! $gridctlNotifiesAdmin && ! $infraFailure )
+      {
+         ## Outside gridctl (a pool request run by the dispatch worker, a web page) this is the one admin notice.
+         $adminNotified = $this->send_mail( $siteAdmin, "US3 job submission failed ($runDescription)",
+            "A LIMS job submission ($runDescription) failed:\n\n$statusMsg", $adminHeaders );
+      }
 
       if ( $autoflowID > 0 )
       {
          if ( ! empty( $investigator_email ) )
          {
-            mail( $investigator_email, "US3 job submission failed",
+            $this->send_mail( $investigator_email, "US3 job submission failed",
                "Your job submission ($runDescription) could not be completed."
              . ( $adminNotified ? " The system administrator has been notified and will follow up if further"
                                 . " action is needed." : '' ), $headers );
@@ -980,44 +1010,16 @@ class submit_slurm extends jobsubmit
       elseif ( ( $stage === 'dispatch' || $this->reportingDispatchFailure ) && ! empty( $this->data[ 'db' ][ 'submitter' ] ) )
       {
          ## An interactive pool request left the submitter's page at "Analysis Received".
-         mail( $this->data[ 'db' ][ 'submitter' ], "US3 job submission failed",
+         $this->send_mail( $this->data[ 'db' ][ 'submitter' ], "US3 job submission failed",
             "Your job submission ($runDescription) could not be completed:\n\n$statusMsg"
           . ( $adminNotified ? "\n\nThe system administrator has been notified." : '' ), $headers );
       }
+   }
 
-      if ( $infraFailure && $breakerJustTripped && $gridctlNotifiesAdmin )
-      {
-         $this->message[] = "ERROR: the cluster's circuit breaker just opened; submissions that reach it"
-                          . " over ssh are refused until its cooldown expires";
-      }
-      elseif ( $infraFailure && $breakerJustTripped )
-      {
-         mail( $siteAdmin, "US3 cluster unreachable notification",
-            "A LIMS job submission ($runDescription) failed because its cluster's circuit"
-          . " breaker just opened:\n\n$statusMsg\n\nSubmissions that reach this cluster over ssh are"
-          . " refused until the breaker's cooldown expires (work on the LIMS host's own cluster"
-          . " goes on locally); this is sent once per trip, not once per refused submission.", $adminHeaders );
-      }
-      elseif ( ! $gridctlNotifiesAdmin && $autoflowID > 0 && ( empty( $investigator_email ) || $dbUnreachable ) )
-      {
-         ## Neither the breaker-outage notice above nor the investigator
-         ## mail above reached anyone -- without this, a submission failure
-         ## with no investigator on file (or hit while the instance
-         ## database itself was down) notified nobody at all.
-         mail( $siteAdmin, "US3 job submission failed ($runDescription)",
-            "A LIMS job submission ($runDescription) failed and no investigator could be"
-          . " notified ("
-          . ( $dbUnreachable
-            ? "the instance database could not be reached to look one up"
-            : "no investigator e-mail on file" )
-          . "):\n\n$statusMsg", $adminHeaders );
-      }
-      elseif ( ! $gridctlNotifiesAdmin && ! $infraFailure )
-      {
-         ## Outside gridctl (a pool request run by the dispatch worker, a web page) this is the one admin notice.
-         mail( $siteAdmin, "US3 job submission failed ($runDescription)",
-            "A LIMS job submission ($runDescription) failed:\n\n$statusMsg", $adminHeaders );
-      }
+   ## mail(), for the failure notices; true when the mail was accepted for delivery.
+   protected function send_mail( $to, $subject, $body, $headers )
+   {
+      return (bool) mail( $to, $subject, $body, $headers );
    }
 
    ## Record the job in both databases and launch jobmonitor.

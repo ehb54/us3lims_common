@@ -204,7 +204,7 @@ function dispatch_notify_blocked( callable $send, $db, array $req, $reason, $sub
    $input = $code === 'input';
    $what = "dispatch request {$req['dispatchRequestID']} (HPC request " . (int) $req[ 'HPCAnalysisRequestID' ]
          . ", pool {$req['pool']}) in $db";
-   $send( "UltraScan dispatch: request {$req['dispatchRequestID']} in $db is blocked",
+   $told = $send( "UltraScan dispatch: request {$req['dispatchRequestID']} in $db is blocked",
           "The $what is blocked and needs an administrator:\n\n$reason\n\n"
           . ( $input ? "Its received input is missing or changed, so it cannot run; cancel it on the queue page.\n"
                      : "Retry it from the dispatch dashboard once the cause is fixed.\n" ) );
@@ -212,8 +212,9 @@ function dispatch_notify_blocked( callable $send, $db, array $req, $reason, $sub
       $send( $input ? "US3 analysis could not be run" : "US3 analysis held for an administrator",
              "Your analysis (HPC request " . (int) $req[ 'HPCAnalysisRequestID' ] . ") in $db "
              . ( $input ? "cannot be run:\n\n$reason\n\nPlease resubmit it.\n"
-                        : "is held for an administrator:\n\n$reason\n\nThe site administrator has been told; it runs"
-                          . " once they clear the cause.\n" ), $submitter_email );
+                        : "is held for an administrator:\n\n$reason\n\n"
+                          . ( $told ? "The site administrator has been told; it runs once they clear the cause.\n"
+                                    : "It runs once an administrator clears the cause.\n" ) ), $submitter_email );
    }
 }
 

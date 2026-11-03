@@ -672,6 +672,16 @@ function dispatch_controller_claim( $link, $gdb, $controller, $owner, $lease_sec
    return $rows ? (int) $rows[ 0 ][ 'claimGeneration' ] : 0;
 }
 
+## Extend a held lane's lease, keeping its generation; false once it was lost.
+function dispatch_controller_renew( $link, $gdb, $controller, $owner, $generation, $lease_seconds )
+{
+   $n = dispatch_affected( $link, "UPDATE `$gdb`.dispatch_controller_claim SET claimExpiresAt = UTC_TIMESTAMP() + INTERVAL ? SECOND
+      WHERE controller = ? AND claimOwner = ? AND claimGeneration = ?", 'issi',
+      array( (int) $lease_seconds, $controller, $owner, (int) $generation ) );
+   return $n === 1 || ( $n === 0 && dispatch_rows( $link, "SELECT 1 FROM `$gdb`.dispatch_controller_claim
+      WHERE controller = ? AND claimOwner = ? AND claimGeneration = ?", 'ssi', array( $controller, $owner, (int) $generation ) ) !== array() );
+}
+
 function dispatch_controller_release( $link, $gdb, $controller, $owner, $generation )
 {
    return dispatch_affected( $link, "UPDATE `$gdb`.dispatch_controller_claim SET claimOwner = NULL, claimExpiresAt = NULL

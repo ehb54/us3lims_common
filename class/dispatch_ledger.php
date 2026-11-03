@@ -268,6 +268,32 @@ function dispatch_batch_pin( $link, $db, $batch_key )
 }
 
 /**
+ * Unpin a batch from $cluster while no child has been staged or submitted there,
+ * so its children follow the batch to a reachable member. Returns whether it was unpinned.
+ */
+function dispatch_batch_unpin( $link, $db, $batch_key, $cluster )
+{
+   if ( $batch_key === null || $batch_key === '' ) {
+      return false;
+   }
+   return dispatch_tx( $link, function () use ( $link, $db, $batch_key, $cluster ) {
+      $kids = dispatch_rows( $link, "SELECT dispatchRequestID, state, pinnedCluster FROM `$db`.dispatch_request
+         WHERE parentBatchKey = ? FOR UPDATE", 's', array( $batch_key ) );
+      foreach ( $kids as $k ) {
+         if ( $k[ 'pinnedCluster' ] !== $cluster
+              || in_array( $k[ 'state' ], array( 'STAGING', 'SUBMITTING', 'SUBMISSION_UNKNOWN', 'ACCEPTED', 'MONITORED', 'CLOSED' ), true ) ) {
+            return false;
+         }
+      }
+      $sent = dispatch_rows( $link, "SELECT 1 FROM `$db`.dispatch_attempt a JOIN `$db`.dispatch_request r USING (dispatchRequestID)
+         WHERE r.parentBatchKey = ? AND a.phase IN ('INTENT','ACCEPTED','UNKNOWN') LIMIT 1", 's', array( $batch_key ) );
+      return $kids && ! $sent
+             && dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET pinnedCluster = NULL
+                   WHERE parentBatchKey = ? AND pinnedCluster = ?", 'ss', array( $batch_key, $cluster ) ) > 0;
+   } );
+}
+
+/**
  * ASSESSING to STAGING at $cluster for the current claim and an unexpired
  * deadline. A batch child pins every sibling to $cluster in the same
  * transaction, and loses if the batch is already pinned elsewhere.

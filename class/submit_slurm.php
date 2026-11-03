@@ -929,7 +929,9 @@ class submit_slurm extends jobsubmit
 
       ## The admin notice goes first, so the user is told the administrator knows only when it went
       ## out: gridctl's own notice, the breaker trip, or common's own below.
-      $adminNotified = $gridctlNotifiesAdmin;
+      ## Under gridctl the notice is gridctl's: sent now, so the investigator mail below is told its outcome.
+      $adminNotified = $gridctlNotifiesAdmin && function_exists( 'mail_submission_fail_to_admin' )
+                     && mail_submission_fail_to_admin( $statusMsg ) === true;
       if ( $infraFailure && $breakerJustTripped && $gridctlNotifiesAdmin )
       {
          $this->message[] = "ERROR: the cluster's circuit breaker just opened; submissions that reach it"

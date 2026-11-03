@@ -69,6 +69,7 @@ function dispatch_alert_open_keys( $link, $gdb, $kind, $instance = null )
  *                                   reached; controller-level, closed only by later
  *                                   evidence that the destination works, never by expiry
  *   configuration                   requests blocked by pool configuration, fit or permission
+ *   local_failure                   requests waiting because staging fails on this server
  * Routine capacity waiting raises nothing.
  */
 function dispatch_alert_scan( $link, $gdb, array $dbs )
@@ -76,7 +77,8 @@ function dispatch_alert_scan( $link, $gdb, array $dbs )
    ## The request lists below come from GROUP_CONCAT, cut at 1024 bytes by default.
    @mysqli_query( $link, 'SET SESSION group_concat_max_len = 1048576' );
    foreach ( $dbs as $db ) {
-      $seen = array( 'unresolved_submission' => array(), 'untracked_acceptance' => array(), 'configuration' => array() );
+      $seen = array( 'unresolved_submission' => array(), 'untracked_acceptance' => array(), 'configuration' => array(),
+                     'local_failure' => array() );
 
       $held = dispatch_rows( $link, "SELECT r.dispatchRequestID, r.selectedCluster, r.reason,
             (SELECT COUNT(*) FROM `$db`.dispatch_event e WHERE e.dispatchRequestID = r.dispatchRequestID
@@ -111,6 +113,18 @@ function dispatch_alert_scan( $link, $gdb, array $dbs )
          $seen[ 'configuration' ][ $key ] = true;
          dispatch_alert_raise( $link, $gdb, $key, 'configuration', 'normal', $r[ 'pool' ], $db,
             "requests for '{$r['pool']}' are blocked ({$r['reasonCode']}): {$r['reason']}",
+            array( $db => explode( ',', $r[ 'ids' ] ) ) );
+      }
+
+      ## Staging that keeps failing on this server (a full or unwritable disk) waits without contacting
+      ## any member, so nothing else would tell the operator.
+      $local = dispatch_rows( $link, "SELECT GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
+         FROM `$db`.dispatch_request WHERE state = 'WAITING' AND reasonCode = 'local_failure' HAVING ids IS NOT NULL" );
+      foreach ( $local as $r ) {
+         $key = "local_failure|$db";
+         $seen[ 'local_failure' ][ $key ] = true;
+         dispatch_alert_raise( $link, $gdb, $key, 'local_failure', 'normal', null, $db,
+            "requests in $db cannot be prepared for submission on this server: {$r['reason']}",
             array( $db => explode( ',', $r[ 'ids' ] ) ) );
       }
 

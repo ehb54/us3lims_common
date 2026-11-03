@@ -837,9 +837,11 @@ class submit_slurm extends jobsubmit
 
       $autoflowID = ( $is_cli && $ID ) ? (int) $ID : 0;
 
-      ## Admin notices go to the host's site admin (global_config.php), root@localhost when unset, as
-      ## gridctl's do; in an instance page $admin_email is that instance's contact, not the site admin.
-      $siteAdmin = ! empty( $global_site_admin_email ) ? $global_site_admin_email : 'root@localhost';
+      ## Admin notices go to the host's site admin (global_config.php), as the dispatch notices do: else
+      ## listen-config's $admin_email where a gridctl process loaded it, else root@localhost. In an
+      ## instance page $admin_email is that instance's contact, not the site admin.
+      $siteAdmin = ! empty( $global_site_admin_email ) ? $global_site_admin_email
+                 : ( ! empty( $GLOBALS[ 'listen_admin_email' ] ) ? $GLOBALS[ 'listen_admin_email' ] : 'root@localhost' );
       ## gridctl sends the one admin notice for a submission it drives (from this page's ERROR:
       ## output), so common mailing too sent the same failure twice.
       $gridctlNotifiesAdmin = defined( 'US3_GRIDCTL_SUBMISSION' );
@@ -958,8 +960,9 @@ class submit_slurm extends jobsubmit
          ## A web batch fails each dataset alike: one notice per failure and process.
          static $told = array();
          $once = "$stage|$statusMsg";
-         $adminNotified = isset( $told[ $once ] ) ? $told[ $once ]
-                        : ( $told[ $once ] = $this->send_mail( $siteAdmin, "US3 job submission failed ($runDescription)",
+         ## Only a sent notice is remembered, so a failed one is tried again for the next dataset.
+         $adminNotified = ! empty( $told[ $once ] )
+                       || ( $told[ $once ] = $this->send_mail( $siteAdmin, "US3 job submission failed ($runDescription)",
                               "A LIMS job submission ($runDescription) failed:\n\n$statusMsg", $adminHeaders ) );
       }
 

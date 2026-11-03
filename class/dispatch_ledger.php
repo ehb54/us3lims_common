@@ -180,8 +180,9 @@ function dispatch_intake( $link, $db, array $req )
    }
    ## affected rows: 1 for a new row, 0 when the key already existed.
    $id = (int) mysqli_insert_id( $link );
-   if ( $n === 1 ) {
-      dispatch_append_event( $link, $db, $id, null, DISPATCH_PENDING, 0, 'received' );
+   ## A failed event (a deadlock rolls back the page's whole transaction) fails the intake.
+   if ( $n === 1 && ! dispatch_append_event( $link, $db, $id, null, DISPATCH_PENDING, 0, 'received' ) ) {
+      return array( 0, false );
    }
    return array( $id, $n === 1 );
 }

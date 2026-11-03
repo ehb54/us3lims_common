@@ -268,20 +268,22 @@ function dispatch_batch_children( $link, $db, $batch_key )
       FROM `$db`.dispatch_request WHERE parentBatchKey = ? ORDER BY dispatchRequestID", 's', array( $batch_key ) );
 }
 
-## The destination a batch is pinned to, or null before its first child is staged.
+## The destination a batch's unsubmitted children are pinned to, or null before one is staged.
 function dispatch_batch_pin( $link, $db, $batch_key )
 {
    if ( $batch_key === null || $batch_key === '' ) {
       return null;
    }
    $rows = dispatch_rows( $link, "SELECT pinnedCluster FROM `$db`.dispatch_request
-      WHERE parentBatchKey = ? AND pinnedCluster IS NOT NULL LIMIT 1", 's', array( $batch_key ) );
+      WHERE parentBatchKey = ? AND pinnedCluster IS NOT NULL AND state IN ('PENDING','ASSESSING','WAITING','STAGING','BLOCKED') LIMIT 1", 's', array( $batch_key ) );
    return $rows ? $rows[ 0 ][ 'pinnedCluster' ] : null;
 }
 
 /**
- * Unpin a batch from $cluster while no child has been staged or submitted there,
- * so its children follow the batch to a reachable member. Returns whether it was unpinned.
+ * Re-pin a batch away from an unreachable $cluster: every child not yet past the
+ * submission gate is unpinned and, if waiting, retried now, so the children move
+ * together to a reachable member. Children submitted or accepted there stay.
+ * Returns whether any child was unpinned.
  */
 function dispatch_batch_unpin( $link, $db, $batch_key, $cluster )
 {
@@ -289,20 +291,24 @@ function dispatch_batch_unpin( $link, $db, $batch_key, $cluster )
       return false;
    }
    return dispatch_tx( $link, function () use ( $link, $db, $batch_key, $cluster ) {
-      $kids = dispatch_rows( $link, "SELECT dispatchRequestID, state, pinnedCluster FROM `$db`.dispatch_request
-         WHERE parentBatchKey = ? FOR UPDATE", 's', array( $batch_key ) );
-      foreach ( $kids as $k ) {
-         if ( $k[ 'pinnedCluster' ] !== $cluster
-              || in_array( $k[ 'state' ], array( 'STAGING', 'SUBMITTING', 'SUBMISSION_UNKNOWN', 'ACCEPTED', 'MONITORED', 'CLOSED' ), true ) ) {
-            return false;
-         }
-      }
-      $sent = dispatch_rows( $link, "SELECT 1 FROM `$db`.dispatch_attempt a JOIN `$db`.dispatch_request r USING (dispatchRequestID)
-         WHERE r.parentBatchKey = ? AND a.phase IN ('INTENT','ACCEPTED','UNKNOWN') LIMIT 1", 's', array( $batch_key ) );
-      return $kids && ! $sent
-             && dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET pinnedCluster = NULL
-                   WHERE parentBatchKey = ? AND pinnedCluster = ?", 'ss', array( $batch_key, $cluster ) ) > 0;
+      $n = dispatch_affected( $link, "UPDATE `$db`.dispatch_request
+            SET pinnedCluster = NULL, retryAt = IF(state = 'WAITING', UTC_TIMESTAMP(), retryAt)
+         WHERE parentBatchKey = ? AND pinnedCluster = ? AND state IN ('PENDING','ASSESSING','WAITING','STAGING','BLOCKED')", 'ss', array( $batch_key, $cluster ) );
+      return $n > 0;
    } );
+}
+
+## The member a request's latest wait found unreachable while staging or submitting, or null.
+function dispatch_request_unreachable_at( $link, $db, $id )
+{
+   $rows = dispatch_rows( $link, "SELECT toState, reasonCode, fromState, cluster FROM `$db`.dispatch_event
+      WHERE dispatchRequestID = ? ORDER BY eventID DESC LIMIT 1", 'i', array( (int) $id ) );
+   if ( ! $rows ) {
+      return null;
+   }
+   $e = $rows[ 0 ];
+   return $e[ 'toState' ] === 'WAITING' && $e[ 'reasonCode' ] === 'unreachable'
+          && in_array( $e[ 'fromState' ], array( 'STAGING', 'SUBMITTING' ), true ) ? $e[ 'cluster' ] : null;
 }
 
 /**
@@ -324,12 +330,12 @@ function dispatch_stage( $link, $db, $id, $generation, $cluster, $plan_hash, $po
       $batch = $rows[ 0 ][ 'parentBatchKey' ];
       if ( $batch !== null ) {
          $pins = dispatch_rows( $link, "SELECT DISTINCT pinnedCluster FROM `$db`.dispatch_request
-            WHERE parentBatchKey = ? AND pinnedCluster IS NOT NULL FOR UPDATE", 's', array( $batch ) );
+            WHERE parentBatchKey = ? AND pinnedCluster IS NOT NULL AND state IN ('PENDING','ASSESSING','WAITING','STAGING','BLOCKED') FOR UPDATE", 's', array( $batch ) );
          if ( $pins && $pins[ 0 ][ 'pinnedCluster' ] !== $cluster ) {
             return false;
          }
          if ( dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET pinnedCluster = ?
-               WHERE parentBatchKey = ? AND pinnedCluster IS NULL", 'ss', array( $cluster, $batch ) ) < 0 ) {
+               WHERE parentBatchKey = ? AND pinnedCluster IS NULL AND state IN ('PENDING','ASSESSING','WAITING','STAGING','BLOCKED')", 'ss', array( $cluster, $batch ) ) < 0 ) {
             return false;
          }
       }

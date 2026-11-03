@@ -31,6 +31,7 @@ function dispatch_tx( $link, callable $fn )
 function dispatch_exec( $link, $sql, $types = '', array $args = array() )
 {
    $log = function ( $error ) use ( $sql ) {
+      dispatch_last_error( $error );
       error_log( 'dispatch ledger: ' . $error . ' in: ' . preg_replace( '/\s+/', ' ', substr( $sql, 0, 160 ) ) );
    };
    try {
@@ -57,6 +58,16 @@ function dispatch_exec( $link, $sql, $types = '', array $args = array() )
       $log( $e->getMessage() );
       return false;
    }
+}
+
+## The last statement error dispatch_exec() met, kept after its statement is closed; $set records one.
+function dispatch_last_error( $set = null )
+{
+   static $last = '';
+   if ( $set !== null ) {
+      $last = (string) $set;
+   }
+   return $last;
 }
 
 function dispatch_query( $link, $sql )

@@ -849,18 +849,19 @@ function dispatch_latest_attempt( $link, $db, $id )
  * SUBMISSION_UNKNOWN (absence from the queue never proves nonacceptance) and
  * is checked again with backoff. Returns how many checks have been made.
  */
-function dispatch_reconcile_unresolved( $link, $db, $id, $generation, $reason )
+## $code 'job_found' marks a check that found the job (recorded on the event), so Resolve cannot then call it unsubmitted.
+function dispatch_reconcile_unresolved( $link, $db, $id, $generation, $reason, $code = null )
 {
    $checks = dispatch_reconcile_checks( $link, $db, $id ) + 1;
    $delay = min( DISPATCH_RECONCILE_MAX_SECONDS, DISPATCH_RECONCILE_FIRST_SECONDS * ( 1 << min( $checks - 1, 6 ) ) );
    if ( $checks >= DISPATCH_RECONCILE_ALERT_AFTER ) {
       $reason .= '; operator reconciliation required';
    }
-   dispatch_tx( $link, function () use ( $link, $db, $id, $generation, $reason, $delay ) {
-      $n = dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET reason = ?, claimOwner = NULL, claimExpiresAt = NULL,
-            retryAt = UTC_TIMESTAMP() + INTERVAL ? SECOND, updatedAt = UTC_TIMESTAMP()
+   dispatch_tx( $link, function () use ( $link, $db, $id, $generation, $reason, $delay, $code ) {
+      $n = dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET reason = ?, reasonCode = COALESCE(?, reasonCode),
+            claimOwner = NULL, claimExpiresAt = NULL, retryAt = UTC_TIMESTAMP() + INTERVAL ? SECOND, updatedAt = UTC_TIMESTAMP()
          WHERE dispatchRequestID = ? AND state = 'SUBMISSION_UNKNOWN' AND claimGeneration = ?",
-         'siii', array( $reason, $delay, (int) $id, (int) $generation ) );
+         'ssiii', array( $reason, $code, $delay, (int) $id, (int) $generation ) );
       return $n === 1 && dispatch_append_event( $link, $db, $id, DISPATCH_SUBMISSION_UNKNOWN, DISPATCH_SUBMISSION_UNKNOWN,
                                                 $generation, "reconcile: $reason" );
    } );
@@ -877,7 +878,8 @@ function dispatch_reconcile_checks( $link, $db, $id )
 /**
  * Operator resolution of an uncertain submission, with evidence: a scheduler
  * job ID records the acceptance; an empty ID records established
- * nonacceptance and returns the request to WAITING for a new attempt.
+ * nonacceptance and returns the request to WAITING for a new attempt, refused
+ * once reconciliation found a job carrying the attempt.
  */
 function dispatch_resolve_unknown( $link, $db, $id, $job_id, $evidence )
 {
@@ -887,6 +889,11 @@ function dispatch_resolve_unknown( $link, $db, $id, $job_id, $evidence )
       return false;
    }
    $job_id = trim( (string) $job_id );
+   ## "Nothing was submitted" cannot stand once a check found a job carrying this attempt.
+   if ( $job_id === '' && dispatch_rows( $link, "SELECT 1 FROM `$db`.dispatch_event
+         WHERE dispatchRequestID = ? AND reasonCode = 'job_found' LIMIT 1", 'i', array( (int) $id ) ) !== array() ) {
+      return false;
+   }
    $outcome = $job_id !== ''
             ? array( 'certainty' => SUBMIT_ACCEPTED, 'retryable' => false, 'job_id' => $job_id,
                      'reason' => "operator: $evidence" )

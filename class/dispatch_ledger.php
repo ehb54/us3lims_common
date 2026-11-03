@@ -34,6 +34,7 @@ function dispatch_exec( $link, $sql, $types = '', array $args = array() )
       dispatch_last_error( $error );
       error_log( 'dispatch ledger: ' . $error . ' in: ' . preg_replace( '/\s+/', ' ', substr( $sql, 0, 160 ) ) );
    };
+   dispatch_last_error( '' );
    try {
       $stmt = mysqli_prepare( $link, $sql );
       if ( ! $stmt ) {
@@ -89,6 +90,13 @@ function dispatch_affected( $link, $sql, $types = '', array $args = array() )
    $n = mysqli_stmt_affected_rows( $stmt );
    mysqli_stmt_close( $stmt );
    return $n;
+}
+
+## As dispatch_rows(), but null when the statement failed, so no rows and an error differ.
+function dispatch_rows_checked( $link, $sql, $types = '', array $args = array() )
+{
+   $rows = dispatch_rows( $link, $sql, $types, $args );
+   return $rows === array() && dispatch_last_error() !== '' ? null : $rows;
 }
 
 function dispatch_rows( $link, $sql, $types = '', array $args = array() )
@@ -235,8 +243,8 @@ function dispatch_claim( $link, $db, $id, $owner, $lease_seconds )
    return $claimed;
 }
 
-## Extend the current claim's lease; false once it was lost. A renewal within
-## the same second changes nothing, so the claim is confirmed by a read.
+## Extend the current claim's lease: true held, false lost, null when the database
+## could not be asked. A renewal within the same second changes nothing, so the claim is confirmed by a read.
 function dispatch_renew( $link, $db, $id, $generation, $owner, $lease_seconds )
 {
    $where = "dispatchRequestID = ? AND claimOwner = ? AND claimGeneration = ? AND state IN ('ASSESSING','STAGING')";
@@ -244,8 +252,11 @@ function dispatch_renew( $link, $db, $id, $generation, $owner, $lease_seconds )
    $n = dispatch_affected( $link, "UPDATE `$db`.dispatch_request
          SET claimExpiresAt = UTC_TIMESTAMP() + INTERVAL ? SECOND, updatedAt = UTC_TIMESTAMP() WHERE $where",
       'iisi', array_merge( array( (int) $lease_seconds ), $args ) );
-   return $n === 1 || ( $n === 0 && dispatch_rows( $link, "SELECT 1 FROM `$db`.dispatch_request WHERE $where",
-                                                   'isi', $args ) !== array() );
+   if ( $n !== 0 ) {
+      return $n === 1 ? true : ( $n < 0 ? null : false );
+   }
+   $rows = dispatch_rows_checked( $link, "SELECT 1 FROM `$db`.dispatch_request WHERE $where", 'isi', $args );
+   return $rows === null ? null : $rows !== array();
 }
 
 /**
@@ -675,31 +686,38 @@ function dispatch_rotation_save( $link, $gdb, $scope, array $state )
 
 /**
  * Take the availability-decision lane for one physical scheduler. Returns the
- * new generation, or 0 while another owner's lease is live.
+ * new generation, 0 while another owner's lease is live, or null when the database could not be asked.
  */
 function dispatch_controller_claim( $link, $gdb, $controller, $owner, $lease_seconds )
 {
-   dispatch_affected( $link, "INSERT IGNORE INTO `$gdb`.dispatch_controller_claim (controller) VALUES (?)", 's', array( $controller ) );
+   if ( dispatch_affected( $link, "INSERT IGNORE INTO `$gdb`.dispatch_controller_claim (controller) VALUES (?)",
+                           's', array( $controller ) ) < 0 ) {
+      return null;
+   }
    $n = dispatch_affected( $link, "UPDATE `$gdb`.dispatch_controller_claim SET claimOwner = ?,
          claimGeneration = claimGeneration + 1, claimExpiresAt = UTC_TIMESTAMP() + INTERVAL ? SECOND
       WHERE controller = ? AND (claimOwner IS NULL OR claimOwner = ? OR claimExpiresAt < UTC_TIMESTAMP())",
       'siss', array( $owner, (int) $lease_seconds, $controller, $owner ) );
    if ( $n !== 1 ) {
-      return 0;
+      return $n < 0 ? null : 0;
    }
-   $rows = dispatch_rows( $link, "SELECT claimGeneration FROM `$gdb`.dispatch_controller_claim WHERE controller = ?",
-                          's', array( $controller ) );
-   return $rows ? (int) $rows[ 0 ][ 'claimGeneration' ] : 0;
+   $rows = dispatch_rows_checked( $link, "SELECT claimGeneration FROM `$gdb`.dispatch_controller_claim WHERE controller = ?",
+                                  's', array( $controller ) );
+   return $rows === null ? null : ( $rows ? (int) $rows[ 0 ][ 'claimGeneration' ] : 0 );
 }
 
-## Extend a held lane's lease, keeping its generation; false once it was lost.
+## Extend a held lane's lease, keeping its generation: true held, false lost, null when the database could not be asked.
 function dispatch_controller_renew( $link, $gdb, $controller, $owner, $generation, $lease_seconds )
 {
    $n = dispatch_affected( $link, "UPDATE `$gdb`.dispatch_controller_claim SET claimExpiresAt = UTC_TIMESTAMP() + INTERVAL ? SECOND
       WHERE controller = ? AND claimOwner = ? AND claimGeneration = ?", 'issi',
       array( (int) $lease_seconds, $controller, $owner, (int) $generation ) );
-   return $n === 1 || ( $n === 0 && dispatch_rows( $link, "SELECT 1 FROM `$gdb`.dispatch_controller_claim
-      WHERE controller = ? AND claimOwner = ? AND claimGeneration = ?", 'ssi', array( $controller, $owner, (int) $generation ) ) !== array() );
+   if ( $n !== 0 ) {
+      return $n === 1 ? true : ( $n < 0 ? null : false );
+   }
+   $rows = dispatch_rows_checked( $link, "SELECT 1 FROM `$gdb`.dispatch_controller_claim
+      WHERE controller = ? AND claimOwner = ? AND claimGeneration = ?", 'ssi', array( $controller, $owner, (int) $generation ) );
+   return $rows === null ? null : $rows !== array();
 }
 
 function dispatch_controller_release( $link, $gdb, $controller, $owner, $generation )

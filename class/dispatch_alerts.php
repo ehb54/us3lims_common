@@ -18,11 +18,14 @@ const DISPATCH_UNTRACKED_ALERT_SECONDS = 900;
  */
 function dispatch_alert_raise( $link, $gdb, $key, $kind, $urgency, $destination, $instance, $detail, array $requests = array() )
 {
-   dispatch_affected( $link, "INSERT INTO `$gdb`.dispatch_alert
+   if ( dispatch_affected( $link, "INSERT INTO `$gdb`.dispatch_alert
          (dedupKey, kind, urgency, destination, instanceDb, detail, firstAt, lastAt)
       VALUES (?,?,?,?,?,?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
       ON DUPLICATE KEY UPDATE lastAt = UTC_TIMESTAMP(), detail = VALUES(detail)",
-      'ssssss', array( $key, $kind, $urgency, $destination, $instance, $detail ) );
+      'ssssss', array( $key, $kind, $urgency, $destination, $instance, $detail ) ) < 0 ) {
+      error_log( "dispatch alert '$kind' could not be recorded: " . dispatch_last_error() . "; detail: $detail" );
+      return 0;
+   }
    $rows = dispatch_rows( $link, "SELECT alertID FROM `$gdb`.dispatch_alert WHERE dedupKey = ? AND openFlag = 1",
                           's', array( $key ) );
    if ( ! $rows ) {
@@ -268,12 +271,16 @@ function dispatch_heartbeat_beat( $link, $gdb, $worker )
 /**
  * The independent heartbeat check: the worker cannot report its own death.
  * Returns array( ok, age, worker ): ok when a worker beat within the limit;
- * age in seconds since the newest beat, or null when none was ever recorded.
+ * age in seconds since the newest beat, or null when none was ever recorded;
+ * 'error' when the heartbeat table could not be read.
  */
 function dispatch_heartbeat_status( $link, $gdb, $stale_seconds = DISPATCH_HEARTBEAT_STALE_SECONDS )
 {
-   $rows = dispatch_rows( $link, "SELECT worker, TIMESTAMPDIFF(SECOND, beatAt, UTC_TIMESTAMP()) age
+   $rows = dispatch_rows_checked( $link, "SELECT worker, TIMESTAMPDIFF(SECOND, beatAt, UTC_TIMESTAMP()) age
       FROM `$gdb`.dispatch_heartbeat ORDER BY beatAt DESC LIMIT 1" );
+   if ( $rows === null ) {
+      return array( 'ok' => false, 'age' => null, 'worker' => null, 'error' => dispatch_last_error() );
+   }
    if ( ! $rows ) {
       return array( 'ok' => false, 'age' => null, 'worker' => null );
    }

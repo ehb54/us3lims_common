@@ -342,7 +342,7 @@ function dispatch_stage( $link, $db, $id, $generation, $cluster, $plan_hash, $po
       if ( $batch !== null ) {
          $pins = dispatch_rows( $link, "SELECT DISTINCT pinnedCluster FROM `$db`.dispatch_request
             WHERE parentBatchKey = ? AND pinnedCluster IS NOT NULL AND state IN ('PENDING','ASSESSING','WAITING','STAGING','BLOCKED') FOR UPDATE", 's', array( $batch ) );
-         if ( $pins && $pins[ 0 ][ 'pinnedCluster' ] !== $cluster ) {
+         if ( count( $pins ) > 1 || ( $pins && $pins[ 0 ][ 'pinnedCluster' ] !== $cluster ) ) {
             return false;
          }
          if ( dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET pinnedCluster = ?
@@ -432,8 +432,9 @@ function dispatch_submission_gate( $link, $db, $id, $generation, $cluster, array
       $n = dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET state = 'SUBMITTING', selectedCluster = ?,
             planHash = ?, claimExpiresAt = UTC_TIMESTAMP() + INTERVAL ? SECOND, updatedAt = UTC_TIMESTAMP()
          WHERE dispatchRequestID = ? AND state = 'STAGING' AND claimGeneration = ?
-           AND claimExpiresAt >= UTC_TIMESTAMP() AND deadlineAt > UTC_TIMESTAMP()",
-         'ssiii', array( $cluster, $plan[ 'hash' ], (int) $submit_lease, (int) $id, (int) $generation ) );
+           AND claimExpiresAt >= UTC_TIMESTAMP() AND deadlineAt > UTC_TIMESTAMP()
+           AND (parentBatchKey IS NULL OR pinnedCluster = ?)",
+         'ssiiis', array( $cluster, $plan[ 'hash' ], (int) $submit_lease, (int) $id, (int) $generation, $cluster ) );
       if ( $n !== 1 ) {
          return false;
       }
@@ -495,6 +496,9 @@ function dispatch_record_outcome( $link, $db, $token, array $outcome, $next = DI
             return false;
          }
       }
+      if ( $to === DISPATCH_WAITING ) {
+         dispatch_batch_rejoin( $link, $db, $id, $r[ 'cluster' ] );
+      }
       ## A cancellation requested while the gate was held settles once nothing was submitted.
       if ( $to === DISPATCH_WAITING && (int) $r[ 'cancelRequested' ] > 0
            && ( dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET state = 'CANCELLED',
@@ -506,6 +510,33 @@ function dispatch_record_outcome( $link, $db, $token, array $outcome, $next = DI
       }
       return true;
    } );
+}
+
+/**
+ * A batch child back to WAITING after the gate rejoins its batch, inside the caller's transaction:
+ * unreachable at $cluster, the batch's unsubmitted children leave $cluster; otherwise the child
+ * takes the pin its unsubmitted siblings hold now, so the batch never holds two pins.
+ */
+function dispatch_batch_rejoin( $link, $db, $id, $cluster )
+{
+   $rows = dispatch_rows( $link, "SELECT parentBatchKey, reasonCode FROM `$db`.dispatch_request WHERE dispatchRequestID = ?",
+                          'i', array( (int) $id ) );
+   if ( ! $rows || $rows[ 0 ][ 'parentBatchKey' ] === null ) {
+      return;
+   }
+   $batch = $rows[ 0 ][ 'parentBatchKey' ];
+   if ( $rows[ 0 ][ 'reasonCode' ] === 'unreachable' ) {
+      dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET pinnedCluster = NULL,
+            retryAt = IF(state = 'WAITING', UTC_TIMESTAMP(), retryAt)
+         WHERE parentBatchKey = ? AND pinnedCluster = ? AND state IN ('PENDING','ASSESSING','WAITING','STAGING','BLOCKED')", 'ss', array( $batch, $cluster ) );
+      return;
+   }
+   $pin = dispatch_rows( $link, "SELECT pinnedCluster FROM `$db`.dispatch_request WHERE parentBatchKey = ?
+      AND dispatchRequestID <> ? AND pinnedCluster IS NOT NULL AND state IN ('PENDING','ASSESSING','WAITING','STAGING','BLOCKED') LIMIT 1", 'si', array( $batch, (int) $id ) );
+   if ( $pin ) {
+      dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET pinnedCluster = ? WHERE dispatchRequestID = ?",
+                         'si', array( $pin[ 0 ][ 'pinnedCluster' ], (int) $id ) );
+   }
 }
 
 ## The reason code an sbatch outcome leaves on its request.

@@ -974,10 +974,23 @@ class jobsubmit
       return preg_replace( '/^ERROR:\s*/', '', (string) $error );
    }
 
-   ## Directive flags the plan itself owns; a site directive may not set them.
-   const PLAN_OWNED_DIRECTIVES =
-      '/^#SBATCH\s+(-p|--partition|-J|--job-name|-N|--nodes|-n|--ntasks|--ntasks-per-node|-t|--time'
-      . '|-o|--output|-e|--error|--nice)(=|\s|$)/';
+   ## Whether a site directive sets what the plan itself owns: a short option with its value
+   ## attached or not (-t60, -n 8), or a long option or an abbreviation sbatch accepts (--part).
+   protected static function plan_owned_directive( $directive )
+   {
+      if ( ! preg_match( '/^#SBATCH\s+(?:-([A-Za-z])|--([A-Za-z][A-Za-z-]*))/', $directive, $m ) )
+         return false;
+      if ( isset( $m[ 2 ] ) && $m[ 2 ] !== '' )
+      {
+         foreach ( [ 'partition', 'job-name', 'nodes', 'ntasks', 'ntasks-per-node', 'time', 'output', 'error', 'nice' ] as $owned )
+         {
+            if ( strpos( $owned, $m[ 2 ] ) === 0 )
+               return true;
+         }
+         return false;
+      }
+      return strpos( 'pJNntoe', $m[ 1 ] ) !== false;
+   }
 
    /**
     * The canonical plan for one explicit candidate cluster. Pure: it never
@@ -1179,7 +1192,7 @@ class jobsubmit
          {
             return [ [], "invalid sbatch directive for cluster $cluster" ];
          }
-         if ( preg_match( self::PLAN_OWNED_DIRECTIVES, $directive ) )
+         if ( self::plan_owned_directive( $directive ) )
          {
             return [ [], "ERROR: sbatch directive '$directive' on cluster $cluster overrides a planned resource" ];
          }
@@ -1193,7 +1206,7 @@ class jobsubmit
          {
             $fields[ 'exclusive' ] = true;
          }
-         if ( preg_match( '/^#SBATCH\s+--mem(-per-cpu)?=(\S+)$/', $directive, $m ) )
+         if ( preg_match( '/^#SBATCH\s+--mem(-per-cpu)?(?:=|\s+)(\S+)$/', $directive, $m ) )
          {
             $basis = $m[ 1 ] !== '' ? 'per_cpu' : 'per_node';
             if ( $fields[ 'memory_basis' ] !== 'none' )

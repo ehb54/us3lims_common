@@ -85,7 +85,7 @@ function dispatch_public_message( array $r )
       default:
          $text = (string) $r[ 'state' ];
    }
-   if ( isset( $r[ 'cancelRequested' ] ) && (int) $r[ 'cancelRequested' ] === 1 && $r[ 'state' ] !== DISPATCH_CANCELLED ) {
+   if ( isset( $r[ 'cancelRequested' ] ) && (int) $r[ 'cancelRequested' ] === 1 && ! dispatch_state_is_terminal( $r[ 'state' ] ) ) {
       $text .= ' Cancellation requested; it completes once the submission outcome is known.';
    }
    return $text;

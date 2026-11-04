@@ -947,7 +947,8 @@ function dispatch_resolve_unknown( $link, $db, $id, $job_id, $evidence )
 /**
  * An operator gives up on an uncertain submission. The next recovery check takes one last look: a job it
  * finds is tracked as usual; otherwise the request fails and its submitter is told. No new attempt is made.
- * Refused while a check holds the claim, since that check would overwrite the request.
+ * Refused while a check holds the claim. A new generation keeps a check that outlived its lease from
+ * overwriting the close.
  */
 function dispatch_close_unknown( $link, $db, $id, $evidence )
 {
@@ -964,10 +965,11 @@ function dispatch_close_unknown( $link, $db, $id, $evidence )
          return false;
       }
       return dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET reason = ?, reasonCode = 'operator_close',
+               claimOwner = NULL, claimExpiresAt = NULL, claimGeneration = claimGeneration + 1,
                retryAt = UTC_TIMESTAMP(), updatedAt = UTC_TIMESTAMP() WHERE dispatchRequestID = ?",
                'si', array( $reason, (int) $id ) ) === 1
           && dispatch_append_event( $link, $db, $id, DISPATCH_SUBMISSION_UNKNOWN, DISPATCH_SUBMISSION_UNKNOWN,
-                                    (int) $rows[ 0 ][ 'claimGeneration' ], $reason );
+                                    (int) $rows[ 0 ][ 'claimGeneration' ] + 1, $reason );
    } );
 }
 

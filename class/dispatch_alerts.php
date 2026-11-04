@@ -245,6 +245,17 @@ function dispatch_notify_blocked( callable $send, $db, array $req, $reason, $sub
    }
 }
 
+## An operator closed an uncertain submission: the submitter learns it will not run again from here.
+function dispatch_notify_closed( callable $send, $db, array $req, $reason, $submitter_email )
+{
+   if ( (string) $submitter_email !== '' ) {
+      $send( "US3 analysis closed by an administrator",
+             "Your analysis (HPC request " . (int) $req[ 'HPCAnalysisRequestID' ] . ") in $db could not be confirmed as"
+             . " submitted, and no further attempt will be made:\n\n$reason\n\nResubmit it if you still need it.\n",
+             $submitter_email );
+   }
+}
+
 ## Submitter e-mail addresses of $ids in $db: [ dispatchRequestID => [ email, HPCAnalysisRequestID ] ].
 function dispatch_request_submitters( $link, $db, array $ids )
 {

@@ -900,7 +900,7 @@ function dispatch_latest_attempt( $link, $db, $id )
  * is checked again with backoff. Returns how many checks have been made.
  */
 ## $code is recorded on the event: 'job_found', 'job_absent' (the member answered, no job carries the attempt) or
-## 'check_failed' (the member could not be queried). Resolve reads them to decide whether "nothing was submitted" can stand.
+## 'check_failed' (the member could not be queried). They are history: no outcome is inferred from them.
 function dispatch_reconcile_unresolved( $link, $db, $id, $generation, $reason, $code = null )
 {
    $checks = dispatch_reconcile_checks( $link, $db, $id ) + 1;
@@ -926,49 +926,49 @@ function dispatch_reconcile_checks( $link, $db, $id )
    return $rows ? (int) $rows[ 0 ][ 'n' ] : 0;
 }
 
-## Whether an operator may record "nothing was submitted" for the current attempt: no check of it found a
-## job, and the latest one reached the member after the submission lease, which covers sbatch's whole retry
-## schedule. Until then the submission may be running or still landing.
-function dispatch_resolve_empty_allowed( $link, $db, $id )
-{
-   $gate = dispatch_rows_checked( $link, "SELECT eventID, createdAt FROM `$db`.dispatch_event WHERE dispatchRequestID = ?
-      AND toState = 'SUBMITTING' ORDER BY eventID DESC LIMIT 1", 'i', array( (int) $id ) );
-   if ( ! $gate ) {
-      return false;
-   }
-   $checks = dispatch_rows_checked( $link, "SELECT reasonCode, TIMESTAMPDIFF(SECOND, ?, createdAt) AS age FROM `$db`.dispatch_event
-      WHERE dispatchRequestID = ? AND eventID > ? AND fromState = 'SUBMISSION_UNKNOWN' AND toState = 'SUBMISSION_UNKNOWN'
-      ORDER BY eventID", 'sii', array( $gate[ 0 ][ 'createdAt' ], (int) $id, (int) $gate[ 0 ][ 'eventID' ] ) );
-   if ( ! $checks || in_array( 'job_found', array_column( $checks, 'reasonCode' ), true ) ) {
-      return false;
-   }
-   $latest = end( $checks );
-   return $latest[ 'reasonCode' ] === 'job_absent' && (int) $latest[ 'age' ] >= DISPATCH_SUBMIT_LEASE_SECONDS;
-}
-
 /**
- * Operator resolution of an uncertain submission, with evidence: a scheduler
- * job ID records the acceptance; an empty ID records established
- * nonacceptance and returns the request to WAITING for a new attempt, refused
- * once reconciliation found a job carrying the attempt.
+ * Operator resolution of an uncertain submission: a scheduler job ID, with
+ * evidence, records the acceptance. An empty check never establishes that
+ * nothing was submitted, so no job ID means no change; see dispatch_close_unknown().
  */
 function dispatch_resolve_unknown( $link, $db, $id, $job_id, $evidence )
 {
    $req = dispatch_get( $link, $db, $id );
    $attempt = dispatch_latest_attempt( $link, $db, $id );
-   if ( ! $req || $req[ 'state' ] !== DISPATCH_SUBMISSION_UNKNOWN || ! $attempt || trim( (string) $evidence ) === '' ) {
-      return false;
-   }
    $job_id = trim( (string) $job_id );
-   if ( $job_id === '' && ! dispatch_resolve_empty_allowed( $link, $db, $id ) ) {
+   if ( ! $req || $req[ 'state' ] !== DISPATCH_SUBMISSION_UNKNOWN || ! $attempt || $job_id === '' || trim( (string) $evidence ) === '' ) {
       return false;
    }
-   $outcome = $job_id !== ''
-            ? array( 'certainty' => SUBMIT_ACCEPTED, 'retryable' => false, 'job_id' => $job_id,
-                     'reason' => "operator: $evidence" )
-            : array( 'certainty' => SUBMIT_NOT_ACCEPTED, 'retryable' => true, 'job_id' => '',
-                     'reason' => "operator: $evidence" );
-   return dispatch_record_outcome( $link, $db, $attempt[ 'attemptToken' ], $outcome, DISPATCH_WAITING, 0 );
+   return dispatch_record_outcome( $link, $db, $attempt[ 'attemptToken' ],
+      array( 'certainty' => SUBMIT_ACCEPTED, 'retryable' => false, 'job_id' => $job_id, 'reason' => "operator: $evidence" ),
+      DISPATCH_WAITING, 0 );
+}
+
+/**
+ * An operator gives up on an uncertain submission. The next recovery check takes one last look: a job it
+ * finds is tracked as usual; otherwise the request fails and its submitter is told. No new attempt is made.
+ * Refused while a check holds the claim, since that check would overwrite the request.
+ */
+function dispatch_close_unknown( $link, $db, $id, $evidence )
+{
+   $evidence = trim( (string) $evidence );
+   if ( $evidence === '' ) {
+      return false;
+   }
+   $reason = "closed by an administrator: $evidence";
+   return dispatch_tx( $link, function () use ( $link, $db, $id, $reason ) {
+      $rows = dispatch_rows( $link, "SELECT claimGeneration FROM `$db`.dispatch_request
+         WHERE dispatchRequestID = ? AND state = 'SUBMISSION_UNKNOWN'
+           AND (claimExpiresAt IS NULL OR claimExpiresAt < UTC_TIMESTAMP()) FOR UPDATE", 'i', array( (int) $id ) );
+      if ( ! $rows ) {
+         return false;
+      }
+      return dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET reason = ?, reasonCode = 'operator_close',
+               retryAt = UTC_TIMESTAMP(), updatedAt = UTC_TIMESTAMP() WHERE dispatchRequestID = ?",
+               'si', array( $reason, (int) $id ) ) === 1
+          && dispatch_append_event( $link, $db, $id, DISPATCH_SUBMISSION_UNKNOWN, DISPATCH_SUBMISSION_UNKNOWN,
+                                    (int) $rows[ 0 ][ 'claimGeneration' ], $reason );
+   } );
 }
 
 /** ACCEPTED to MONITORED once tracking and the monitor are in place. */
@@ -1017,11 +1017,12 @@ function dispatch_spool_write( $dir, $db, $token, array $outcome )
 }
 
 /**
- * Replay spooled receipts into the ledger. A receipt whose attempt is already
- * settled is removed; one that cannot be recorded yet is kept. Returns the
+ * Replay spooled receipts into the ledger. A receipt whose attempt or request
+ * is already settled is removed, after raising an item when it names a job the
+ * ledger does not hold; one that cannot be recorded yet is kept. Returns the
  * tokens replayed.
  */
-function dispatch_spool_replay( $link, $dir )
+function dispatch_spool_replay( $link, $dir, $gdb = 'gfac' )
 {
    $done = array();
    foreach ( glob( rtrim( $dir, '/' ) . '/*.json' ) ?: array() as $file ) {
@@ -1029,12 +1030,17 @@ function dispatch_spool_replay( $link, $dir )
       if ( ! is_array( $r ) || ! dispatch_db_name_ok( $r[ 'db' ] ) || ! isset( $r[ 'token' ], $r[ 'outcome' ] ) ) {
          continue;
       }
-      $rows = dispatch_rows( $link, "SELECT phase FROM `{$r['db']}`.dispatch_attempt WHERE attemptToken = ?",
-                             's', array( $r[ 'token' ] ) );
+      $rows = dispatch_rows( $link, "SELECT a.phase, a.cluster, a.schedulerJobID, a.dispatchRequestID, r.state
+            FROM `{$r['db']}`.dispatch_attempt a JOIN `{$r['db']}`.dispatch_request r USING (dispatchRequestID)
+            WHERE a.attemptToken = ?", 's', array( $r[ 'token' ] ) );
       if ( ! $rows ) {
          continue;
       }
-      $settled = ! in_array( $rows[ 0 ][ 'phase' ], array( 'INTENT', 'UNKNOWN' ), true );
+      $settled = ! in_array( $rows[ 0 ][ 'phase' ], array( 'INTENT', 'UNKNOWN' ), true )
+               || dispatch_state_is_terminal( $rows[ 0 ][ 'state' ] );
+      if ( $settled && ! dispatch_spool_report_late_job( $link, $gdb, $r, $rows[ 0 ] ) ) {
+         continue;
+      }
       $recorded = ! $settled && dispatch_record_outcome( $link, $r[ 'db' ], $r[ 'token' ], $r[ 'outcome' ], DISPATCH_WAITING, 0 );
       if ( $recorded ) {
          ## Recorded here: the worker that spooled it has exited, so its submit claim is released
@@ -1051,6 +1057,22 @@ function dispatch_spool_replay( $link, $dir )
       }
    }
    return $done;
+}
+
+## A settled attempt's receipt that names another job means a job is running untracked: keep it in an item.
+## False when the item could not be recorded, so the receipt stays for the next pass.
+function dispatch_spool_report_late_job( $link, $gdb, array $receipt, array $attempt )
+{
+   $job = isset( $receipt[ 'outcome' ][ 'job_id' ] ) ? (string) $receipt[ 'outcome' ][ 'job_id' ] : '';
+   if ( $job === '' || $job === (string) $attempt[ 'schedulerJobID' ] || ! function_exists( 'dispatch_alert_raise' ) ) {
+      return true;
+   }
+   $id = (int) $attempt[ 'dispatchRequestID' ];
+   return dispatch_alert_raise( $link, $gdb, "late_receipt|{$receipt['db']}|{$receipt['token']}", 'late_receipt', 'urgent',
+      $attempt[ 'cluster' ], $receipt[ 'db' ],
+      "job $job at {$attempt['cluster']} belongs to request $id, whose attempt was already settled, and is not tracked."
+      . " Check it at the cluster and cancel it if it is not wanted.",
+      array( $receipt[ 'db' ] => array( $id ) ) ) > 0;
 }
 
 /**

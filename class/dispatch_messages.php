@@ -68,6 +68,7 @@ function dispatch_public_message( array $r )
             'rejected'         => 'Not submitted: the destination rejected this analysis.',
             'staging_rejected' => 'Not submitted: the destination refused the analysis files.',
             'interrupted'      => 'Not submitted: the submission was interrupted. Please resubmit.',
+            'operator_close'   => 'The submission could not be confirmed and an administrator closed this request. Resubmit it if you still need it.',
          );
          $text = isset( $fails[ $code ] ) ? $fails[ $code ] : 'Not submitted.';
          break;

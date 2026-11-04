@@ -21,7 +21,22 @@ function dispatch_tx( $link, callable $fn )
       mysqli_rollback( $link );
       throw $e;
    }
-   $ok ? mysqli_commit( $link ) : mysqli_rollback( $link );
+   if ( ! $ok ) {
+      mysqli_rollback( $link );
+      return $ok;
+   }
+   ## A commit lost with its connection stored nothing the caller can rely on.
+   try {
+      $committed = mysqli_commit( $link );
+   }
+   catch ( mysqli_sql_exception $e ) {
+      $committed = false;
+   }
+   if ( ! $committed ) {
+      dispatch_last_error( 'commit failed: ' . mysqli_error( $link ) );
+      error_log( 'dispatch ledger: ' . dispatch_last_error() );
+      return false;
+   }
    return $ok;
 }
 
@@ -55,7 +70,8 @@ function dispatch_exec( $link, $sql, $types = '', array $args = array() )
       }
       return $stmt;
    }
-   catch ( mysqli_sql_exception $e ) {
+   ## Error: on PHP 8 a connection left by a failed reconnect throws it rather than failing.
+   catch ( mysqli_sql_exception | Error $e ) {
       $log( $e->getMessage() );
       return false;
    }
@@ -76,7 +92,7 @@ function dispatch_query( $link, $sql )
    try {
       return mysqli_query( $link, $sql );
    }
-   catch ( mysqli_sql_exception $e ) {
+   catch ( mysqli_sql_exception | Error $e ) {
       return false;
    }
 }
@@ -220,7 +236,7 @@ function dispatch_get( $link, $db, $id )
 function dispatch_claim( $link, $db, $id, $owner, $lease_seconds )
 {
    $claimed = 0;
-   dispatch_tx( $link, function () use ( $link, $db, $id, $owner, $lease_seconds, &$claimed ) {
+   $committed = dispatch_tx( $link, function () use ( $link, $db, $id, $owner, $lease_seconds, &$claimed ) {
       $rows = dispatch_rows( $link, "SELECT state, claimGeneration FROM `$db`.dispatch_request
          WHERE dispatchRequestID = ? AND batchSealed = 1 AND (
             (state IN ('PENDING','WAITING') AND (retryAt IS NULL OR retryAt <= UTC_TIMESTAMP()))
@@ -240,7 +256,7 @@ function dispatch_claim( $link, $db, $id, $owner, $lease_seconds )
       $claimed = $gen;
       return true;
    } );
-   return $claimed;
+   return $committed ? $claimed : 0;
 }
 
 ## Extend the current claim's lease: true held, false lost, null when the database
@@ -701,7 +717,10 @@ function dispatch_rotation_scope( $db, $pool, $group, $policy_version )
 
 function dispatch_rotation_load( $link, $gdb, $scope )
 {
-   $rows = dispatch_rows( $link, "SELECT stateJson FROM `$gdb`.dispatch_rotation WHERE scopeKey = ?", 's', array( $scope ) );
+   $rows = dispatch_rows_checked( $link, "SELECT stateJson FROM `$gdb`.dispatch_rotation WHERE scopeKey = ?", 's', array( $scope ) );
+   if ( $rows === null ) {
+      return null;   ## the database could not be asked: not a fresh state
+   }
    $state = $rows ? json_decode( $rows[ 0 ][ 'stateJson' ], true ) : null;
    return is_array( $state ) ? $state : array();
 }
@@ -880,7 +899,8 @@ function dispatch_latest_attempt( $link, $db, $id )
  * SUBMISSION_UNKNOWN (absence from the queue never proves nonacceptance) and
  * is checked again with backoff. Returns how many checks have been made.
  */
-## $code 'job_found' marks a check that found the job (recorded on the event), so Resolve cannot then call it unsubmitted.
+## $code is recorded on the event: 'job_found', 'job_absent' (the member answered, no job carries the attempt) or
+## 'check_failed' (the member could not be queried). Resolve reads them to decide whether "nothing was submitted" can stand.
 function dispatch_reconcile_unresolved( $link, $db, $id, $generation, $reason, $code = null )
 {
    $checks = dispatch_reconcile_checks( $link, $db, $id ) + 1;
@@ -906,6 +926,26 @@ function dispatch_reconcile_checks( $link, $db, $id )
    return $rows ? (int) $rows[ 0 ][ 'n' ] : 0;
 }
 
+## Whether an operator may record "nothing was submitted" for the current attempt: no check of it found a
+## job, and the latest one reached the member after the submission lease, which covers sbatch's whole retry
+## schedule. Until then the submission may be running or still landing.
+function dispatch_resolve_empty_allowed( $link, $db, $id )
+{
+   $gate = dispatch_rows_checked( $link, "SELECT eventID, createdAt FROM `$db`.dispatch_event WHERE dispatchRequestID = ?
+      AND toState = 'SUBMITTING' ORDER BY eventID DESC LIMIT 1", 'i', array( (int) $id ) );
+   if ( ! $gate ) {
+      return false;
+   }
+   $checks = dispatch_rows_checked( $link, "SELECT reasonCode, TIMESTAMPDIFF(SECOND, ?, createdAt) AS age FROM `$db`.dispatch_event
+      WHERE dispatchRequestID = ? AND eventID > ? AND fromState = 'SUBMISSION_UNKNOWN' AND toState = 'SUBMISSION_UNKNOWN'
+      ORDER BY eventID", 'sii', array( $gate[ 0 ][ 'createdAt' ], (int) $id, (int) $gate[ 0 ][ 'eventID' ] ) );
+   if ( ! $checks || in_array( 'job_found', array_column( $checks, 'reasonCode' ), true ) ) {
+      return false;
+   }
+   $latest = end( $checks );
+   return $latest[ 'reasonCode' ] === 'job_absent' && (int) $latest[ 'age' ] >= DISPATCH_SUBMIT_LEASE_SECONDS;
+}
+
 /**
  * Operator resolution of an uncertain submission, with evidence: a scheduler
  * job ID records the acceptance; an empty ID records established
@@ -920,9 +960,7 @@ function dispatch_resolve_unknown( $link, $db, $id, $job_id, $evidence )
       return false;
    }
    $job_id = trim( (string) $job_id );
-   ## "Nothing was submitted" cannot stand once a check found a job carrying this attempt.
-   if ( $job_id === '' && dispatch_rows( $link, "SELECT 1 FROM `$db`.dispatch_event
-         WHERE dispatchRequestID = ? AND reasonCode = 'job_found' LIMIT 1", 'i', array( (int) $id ) ) !== array() ) {
+   if ( $job_id === '' && ! dispatch_resolve_empty_allowed( $link, $db, $id ) ) {
       return false;
    }
    $outcome = $job_id !== ''

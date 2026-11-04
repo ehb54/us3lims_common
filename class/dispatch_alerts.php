@@ -150,6 +150,16 @@ function dispatch_alert_scan( $link, $gdb, array $dbs )
       }
    }
 
+   ## The database item stands only while a request is held for it.
+   $held_for_database = false;
+   foreach ( $dbs as $db ) {
+      $held_for_database = $held_for_database || dispatch_rows_checked( $link, "SELECT 1 FROM `$db`.dispatch_request
+         WHERE state = 'WAITING' AND reasonCode = 'dispatch_unavailable' LIMIT 1" ) !== array();
+   }
+   if ( ! $held_for_database ) {
+      dispatch_alert_resolve( $link, $gdb, 'dispatch_database', 'no request is waiting on the dispatch database' );
+   }
+
    ## An unreachable destination is resolved by a later acceptance there.
    foreach ( dispatch_rows( $link, "SELECT alertID, dedupKey, destination, lastAt FROM `$gdb`.dispatch_alert
          WHERE kind = 'destination_unreachable' AND openFlag = 1" ) as $a ) {

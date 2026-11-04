@@ -14,10 +14,9 @@
 -- prediction was actually made from, and it holds numbers and category codes
 -- only.
 --
--- A NOTE ON THE JOIN KEY. The caller does not pass the scheduler's job id,
--- so gfac_id is null at insert even though sbatch has already run by then.
--- The durable key is (us3_db, request_id); gfac_id is here so a later pass can
--- fill it in, and so a row with it set can be joined directly.
+-- A NOTE ON THE JOIN KEY. The durable key is (us3_db, request_id). gfac_id is
+-- the scheduler's job id; a job number can recur across clusters, so it is not
+-- unique alone.
 
 CREATE TABLE IF NOT EXISTS `runtime_prediction` (
   `id`                        int(11)      NOT NULL AUTO_INCREMENT,

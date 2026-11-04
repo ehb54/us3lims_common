@@ -94,7 +94,8 @@ class submit_slurm extends jobsubmit
                      $this->advisoryPlan[ 'requestID' ],
                      $this->advisoryPlan[ 'plan' ],
                      $this->advisoryPlan[ 'walltime' ],
-                     $this->advisoryPlan[ 'wallmins' ]
+                     $this->advisoryPlan[ 'wallmins' ],
+                     (string) ( $this->data[ 'eprfile' ] ?? '' )
                   );
                }
                $this->message[] = "submit complete";
@@ -315,7 +316,22 @@ class submit_slurm extends jobsubmit
             $this->write_slurm_script( $cluster, $requestID, $this->workdir( $cluster, $requestID ),
                                        $this->tarfile(), $plan );
          }
-         return $this->update_db();
+         $tracked = $this->update_db();
+         ## As in submit(): only once the job is accepted and recorded. This path can repeat, so
+         ## the hook keeps it to one record per request.
+         if ( $tracked && $this->advisoryPlan !== null )
+         {
+            $this->observe_runtime_advisory(
+               $this->advisoryPlan[ 'cluster' ],
+               $this->advisoryPlan[ 'requestID' ],
+               $this->advisoryPlan[ 'plan' ],
+               $this->advisoryPlan[ 'walltime' ],
+               $this->advisoryPlan[ 'wallmins' ],
+               (string) $job_id,
+               true
+            );
+         }
+         return $tracked;
       }
       catch ( InvalidArgumentException | UnexpectedValueException $error )
       {
@@ -453,8 +469,9 @@ class submit_slurm extends jobsubmit
             $this->message[] = $note;
       }
 
-      ## Captured for observe_runtime_advisory(), called from submit() only
-      ## after sbatch and update_db() have both succeeded: not here, where a
+      ## Captured for observe_runtime_advisory(), called from submit() and
+      ## track_accepted() only after the job was accepted and update_db() has
+      ## succeeded: not here, where a
       ## fatal downstream of this point (an unread artifact, an oversized
       ## edit file) would abort a submission the advisory had no business
       ## being able to touch.
@@ -1226,17 +1243,36 @@ class submit_slurm extends jobsubmit
       return array( 'identity' => (string) $cluster, 'source' => 'fallback_alias' );
    }
 
+   ## Whether this request already has a record. A failed look counts as no, so at worst a repeat
+   ## writes a second row, which the join key shows, rather than a job going unrecorded.
+   protected function runtime_advisory_recorded( $gfac, $db, $requestID )
+   {
+      try {
+         $stmt = $gfac ? mysqli_prepare( $gfac, "SELECT 1 FROM runtime_prediction WHERE us3_db = ? AND request_id = ? LIMIT 1" ) : false;
+         if ( ! $stmt || ! mysqli_stmt_bind_param( $stmt, 'si', $db, $requestID ) || ! mysqli_stmt_execute( $stmt ) )
+         {
+            return false;
+         }
+         $res = mysqli_stmt_get_result( $stmt );
+         return $res && mysqli_num_rows( $res ) > 0;
+      } catch ( Throwable $e ) {
+         return false;
+      }
+   }
+
    /**
     * Hand the advisory path what it needs and forget about it.
     *
-    * Called from submit(), not write_slurm_script(): the job id now exists,
-    * and this only fires once update_db() has returned true, i.e. after
-    * sbatch has already run and the submission is otherwise committed. Kept
-    * off the critical path that way on purpose -- see the README for why.
+    * Called from submit() and track_accepted(), not write_slurm_script(): the
+    * job id now exists, and this only fires once update_db() has returned
+    * true, i.e. after sbatch has already run and the submission is otherwise
+    * committed. Kept off the critical path that way on purpose -- see the
+    * README for why. $once skips a request that already has a record.
     *
     * Swallows everything. An advisory failure is not a submission failure.
+    * Returns the advisory's status, or null when it did not run.
     */
-   protected function observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins )
+   protected function observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins, $job_id = '', $once = false )
    {
       ## Checked directly, not through the class, so the switch stays a single
       ## global lookup and nothing is required when it is off: that promise is
@@ -1244,7 +1280,7 @@ class submit_slurm extends jobsubmit
       ## not to the class, which cannot load itself.
       if ( empty( $GLOBALS[ 'global_runtime_advisory_enabled' ] ) )
       {
-         return;
+         return null;
       }
 
       try {
@@ -1278,7 +1314,7 @@ class submit_slurm extends jobsubmit
                     . " after loading prediction/runtime_advisory.php; advisory skipped"
                     . " for the rest of this process" );
             }
-            return;
+            return null;
          }
 
          global $dbusername, $dbpasswd, $dbhost, $dbname;
@@ -1291,11 +1327,17 @@ class submit_slurm extends jobsubmit
          $link = db_connection_pool::shared()->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
          $gfac = db_connection_pool::shared()->checkout( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
 
+         if ( $once && $this->runtime_advisory_recorded( $gfac, $dbname, $requestID ) )
+         {
+            return null;
+         }
+
          $predictionIdentity = $this->resolvePredictionClusterIdentity( $cluster );
 
          $status = runtime_advisory::observe( array(
             'us3_db'      => $dbname,
             'request_id'  => $requestID,
+            'gfac_id'     => (string) $job_id,
             ## Checked against the artifact's family: another method's request
             ## can carry enough of the same parameter names to be scored.
             'method'      => isset( $this->data[ 'method' ] ) ? $this->data[ 'method' ] : '',
@@ -1357,9 +1399,11 @@ class submit_slurm extends jobsubmit
             elog2( "runtime advisory: request $requestID status $status"
                  . ( $gfacError !== '' ? " ($gfacError)" : '' ) );
          }
+         return $status;
       } catch ( Throwable $e ) {
          ## Deliberately silent beyond the log: the job is what matters here.
          elog2( 'runtime advisory: ' . $e->getMessage() );
+         return null;
       } finally {
          ## Pooled connections, not closed: this method runs once per job on the
          ## same credentials submit()/update_db() already used, so releasing

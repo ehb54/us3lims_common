@@ -1246,6 +1246,17 @@ class submit_slurm extends jobsubmit
       return array( 'identity' => (string) $cluster, 'source' => 'fallback_alias' );
    }
 
+   ## Null when it cannot be computed, so a bad parameter costs this one column and not the record.
+   protected function advisory_maxwall_seconds( $cluster, $plan )
+   {
+      try {
+         return isset( $plan[ 'resolved_groups' ] )
+              ? (int) round( $this->maxwall( $cluster, $plan[ 'resolved_groups' ] ) * 60 ) : null;
+      } catch ( Throwable $e ) {
+         return null;
+      }
+   }
+
    /**
     * Hand the advisory path what it needs and forget about it.
     *
@@ -1347,8 +1358,7 @@ class submit_slurm extends jobsubmit
             'formula_reference_seconds' => (int) $wallmins * 60,
             ## Unscaled maxwall(), which the models' multipliers were fitted against. The
             ## live reference above can be scaled, or a cluster's whole limit.
-            'maxwall_reference_seconds' => isset( $plan[ 'resolved_groups' ] )
-                                           ? (int) round( $this->maxwall( $cluster, $plan[ 'resolved_groups' ] ) * 60 ) : null,
+            'maxwall_reference_seconds' => $this->advisory_maxwall_seconds( $cluster, $plan ),
             'emitted_directive'         => $walltime,
             'requested_ranks'           => isset( $plan[ 'total_tasks' ] ) ? $plan[ 'total_tasks' ] : null,
 

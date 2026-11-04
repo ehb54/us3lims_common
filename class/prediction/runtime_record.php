@@ -59,8 +59,7 @@ class runtime_record
 
          'us3_db'      => self::text( isset( $context[ 'us3_db' ] ) ? $context[ 'us3_db' ] : '', 64 ),
          'request_id'  => self::integer( isset( $context[ 'request_id' ] ) ? $context[ 'request_id' ] : null ),
-         ## Null unless the caller passes one: observe_runtime_advisory() does not
-         ## look the Slurm job id up, so a later pass fills this in by (us3_db, request_id).
+         ## The scheduler's job id. Not unique alone: a number can recur across clusters.
          'gfac_id'     => isset( $context[ 'gfac_id' ] ) && $context[ 'gfac_id' ] !== ''
                           ? self::text( $context[ 'gfac_id' ], 80 ) : null,
          'decided_at'  => isset( $context[ 'decided_at' ] )
@@ -86,6 +85,7 @@ class runtime_record
          'allowance_seconds'  => $ok ? self::integer( self::pick( $outcome, 'allowance_seconds' ) ) : null,
 
          'formula_reference_seconds' => self::integer( self::pick( $context, 'formula_reference_seconds' ) ),
+         'maxwall_reference_seconds' => self::integer( self::pick( $context, 'maxwall_reference_seconds' ) ),
          'formula_version'           => self::text( self::pick( $context, 'formula_version' ), 32 ),
          'emitted_directive'         => self::text( self::pick( $context, 'emitted_directive' ), 32 ),
          'requested_ranks'           => self::integer( self::pick( $context, 'requested_ranks' ) ),

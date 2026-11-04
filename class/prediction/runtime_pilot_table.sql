@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS `runtime_prediction` (
 
   -- The incumbent, recorded separately from what was actually emitted.
   `formula_reference_seconds` int(11)      DEFAULT NULL,
+  -- Unscaled maxwall(), which the multipliers were fitted against. The reference
+  -- above can be scaled, or a cluster's whole limit when it sets usemaxtime.
+  `maxwall_reference_seconds` int(11)      DEFAULT NULL,
   `formula_version`           varchar(32)  DEFAULT NULL,
   `emitted_directive`         varchar(32)  DEFAULT NULL,
   `requested_ranks`           int(11)      DEFAULT NULL,

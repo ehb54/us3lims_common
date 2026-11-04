@@ -11,7 +11,7 @@ It exists for one evaluation window and is meant to be removed afterwards.
 | Item | Where |
 | --- | --- |
 | The code | this directory, inside `web/common` |
-| The call sites | one statement in each of `submit_slurm::submit()` and `track_accepted()` (dispatch), after the job was accepted and `update_db()` has returned true |
+| The call sites | one statement in `submit_slurm::submit()`, after sbatch has run and `update_db()` has returned true, and `observe_accepted()`, which the dispatch worker calls once a request reaches MONITORED |
 | The models | one JSON artifact per method family, by default `/home/us3/lims/etc/runtime_advisory_<family>.json` |
 | The records | `gfac.runtime_prediction`, created from `runtime_pilot_table.sql` |
 | The switch | `$global_runtime_advisory_enabled` in `global_config.php` |

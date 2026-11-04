@@ -316,22 +316,7 @@ class submit_slurm extends jobsubmit
             $this->write_slurm_script( $cluster, $requestID, $this->workdir( $cluster, $requestID ),
                                        $this->tarfile(), $plan );
          }
-         $tracked = $this->update_db();
-         ## As in submit(): only once the job is accepted and recorded. This path can repeat, so
-         ## the hook keeps it to one record per request.
-         if ( $tracked && $this->advisoryPlan !== null )
-         {
-            $this->observe_runtime_advisory(
-               $this->advisoryPlan[ 'cluster' ],
-               $this->advisoryPlan[ 'requestID' ],
-               $this->advisoryPlan[ 'plan' ],
-               $this->advisoryPlan[ 'walltime' ],
-               $this->advisoryPlan[ 'wallmins' ],
-               (string) $job_id,
-               true
-            );
-         }
-         return $tracked;
+         return $this->update_db();
       }
       catch ( InvalidArgumentException | UnexpectedValueException $error )
       {
@@ -342,6 +327,24 @@ class submit_slurm extends jobsubmit
       {
          chdir( $savedir );
       }
+   }
+
+   /**
+    * The runtime advisory for a job the worker just moved to MONITORED, which happens once
+    * per request. Run there, not in track_accepted(): that can repeat, and a fatal in the
+    * advisory would then keep the request from ever being monitored.
+    */
+   public function observe_accepted( $job_id )
+   {
+      if ( $this->advisoryPlan === null )
+         return null;
+      return $this->observe_runtime_advisory(
+         $this->advisoryPlan[ 'cluster' ],
+         $this->advisoryPlan[ 'requestID' ],
+         $this->advisoryPlan[ 'plan' ],
+         $this->advisoryPlan[ 'walltime' ],
+         $this->advisoryPlan[ 'wallmins' ],
+         (string) $job_id );
    }
 
    ## The --comment value carrying a dispatch attempt token; no personal data.
@@ -470,7 +473,7 @@ class submit_slurm extends jobsubmit
       }
 
       ## Captured for observe_runtime_advisory(), called from submit() and
-      ## track_accepted() only after the job was accepted and update_db() has
+      ## observe_accepted() only after the job was accepted and update_db() has
       ## succeeded: not here, where a
       ## fatal downstream of this point (an unread artifact, an oversized
       ## edit file) would abort a submission the advisory had no business
@@ -1243,36 +1246,19 @@ class submit_slurm extends jobsubmit
       return array( 'identity' => (string) $cluster, 'source' => 'fallback_alias' );
    }
 
-   ## Whether this request already has a record. A failed look counts as no, so at worst a repeat
-   ## writes a second row, which the join key shows, rather than a job going unrecorded.
-   protected function runtime_advisory_recorded( $gfac, $db, $requestID )
-   {
-      try {
-         $stmt = $gfac ? mysqli_prepare( $gfac, "SELECT 1 FROM runtime_prediction WHERE us3_db = ? AND request_id = ? LIMIT 1" ) : false;
-         if ( ! $stmt || ! mysqli_stmt_bind_param( $stmt, 'si', $db, $requestID ) || ! mysqli_stmt_execute( $stmt ) )
-         {
-            return false;
-         }
-         $res = mysqli_stmt_get_result( $stmt );
-         return $res && mysqli_num_rows( $res ) > 0;
-      } catch ( Throwable $e ) {
-         return false;
-      }
-   }
-
    /**
     * Hand the advisory path what it needs and forget about it.
     *
-    * Called from submit() and track_accepted(), not write_slurm_script(): the
+    * Called from submit() and observe_accepted(), not write_slurm_script(): the
     * job id now exists, and this only fires once update_db() has returned
     * true, i.e. after sbatch has already run and the submission is otherwise
     * committed. Kept off the critical path that way on purpose -- see the
-    * README for why. $once skips a request that already has a record.
+    * README for why.
     *
     * Swallows everything. An advisory failure is not a submission failure.
     * Returns the advisory's status, or null when it did not run.
     */
-   protected function observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins, $job_id = '', $once = false )
+   protected function observe_runtime_advisory( $cluster, $requestID, $plan, $walltime, $wallmins, $job_id = '' )
    {
       ## Checked directly, not through the class, so the switch stays a single
       ## global lookup and nothing is required when it is off: that promise is
@@ -1327,11 +1313,6 @@ class submit_slurm extends jobsubmit
          $link = db_connection_pool::shared()->checkout( $dbhost, $dbusername, $dbpasswd, $dbname );
          $gfac = db_connection_pool::shared()->checkout( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
 
-         if ( $once && $this->runtime_advisory_recorded( $gfac, $dbname, $requestID ) )
-         {
-            return null;
-         }
-
          $predictionIdentity = $this->resolvePredictionClusterIdentity( $cluster );
 
          $status = runtime_advisory::observe( array(
@@ -1364,6 +1345,10 @@ class submit_slurm extends jobsubmit
 
             ## The incumbent, and what is actually being emitted, recorded apart.
             'formula_reference_seconds' => (int) $wallmins * 60,
+            ## Unscaled maxwall(), which the models' multipliers were fitted against. The
+            ## live reference above can be scaled, or a cluster's whole limit.
+            'maxwall_reference_seconds' => isset( $plan[ 'resolved_groups' ] )
+                                           ? (int) round( $this->maxwall( $cluster, $plan[ 'resolved_groups' ] ) * 60 ) : null,
             'emitted_directive'         => $walltime,
             'requested_ranks'           => isset( $plan[ 'total_tasks' ] ) ? $plan[ 'total_tasks' ] : null,
 

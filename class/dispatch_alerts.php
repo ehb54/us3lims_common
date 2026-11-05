@@ -55,6 +55,19 @@ function dispatch_alert_close( $link, $gdb, $alert_id, $resolution )
          openFlag = NULL WHERE alertID = ? AND openFlag = 1", 'si', array( $resolution, (int) $alert_id ) ) === 1;
 }
 
+## Whether the worker can read and write gfac's coordination tables. WHERE 1 = 0 checks the table and privilege and touches no row.
+function dispatch_gfac_tables_usable( $link, $gdb )
+{
+   foreach ( array( 'dispatch_controller_claim' => 'controller', 'dispatch_rotation' => 'scopeKey' ) as $table => $key ) {
+      if ( dispatch_rows_checked( $link, "SELECT 1 FROM `$gdb`.`$table` LIMIT 1" ) === null
+           || dispatch_affected( $link, "INSERT INTO `$gdb`.`$table` SELECT * FROM `$gdb`.`$table` WHERE 1 = 0" ) < 0
+           || dispatch_affected( $link, "UPDATE `$gdb`.`$table` SET $key = $key WHERE 1 = 0" ) < 0 ) {
+         return false;
+      }
+   }
+   return true;
+}
+
 ## Close $db's open items of the kinds in $seen whose condition this scan did not find.
 function dispatch_alert_scan_close( $link, $gdb, $db, array $open, array $seen )
 {
@@ -159,14 +172,13 @@ function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null )
 
    $open_kinds = array_column( $open, 'kind' );
 
-   ## The database item stands only while a request is held for it.
-   $held_for_database = ! in_array( 'dispatch_database', $open_kinds, true );
-   foreach ( $busy as $db ) {
-      $held_for_database = $held_for_database || dispatch_rows_checked( $link, "SELECT 1 FROM `$db`.dispatch_request
-         WHERE state = 'WAITING' AND reasonCode = 'dispatch_unavailable' LIMIT 1" ) !== array();
-   }
-   if ( ! $held_for_database ) {
-      dispatch_alert_resolve( $link, $gdb, 'dispatch_database', 'no request is waiting on the dispatch database' );
+   ## The database item stands while its cause does, whoever is waiting. Held requests go as soon as it ends.
+   if ( in_array( 'dispatch_database', $open_kinds, true ) && dispatch_gfac_tables_usable( $link, $gdb ) ) {
+      dispatch_alert_resolve( $link, $gdb, 'dispatch_database', 'the dispatch tables can be used again' );
+      foreach ( $busy as $db ) {
+         dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET retryAt = UTC_TIMESTAMP()
+            WHERE state = 'WAITING' AND reasonCode = 'dispatch_unavailable'" );
+      }
    }
 
    ## An unreachable destination is resolved by a later acceptance there.
@@ -253,6 +265,25 @@ function dispatch_notify_blocked( callable $send, $db, array $req, $reason, $sub
                         : "is held for an administrator:\n\n$reason\n\n"
                           . ( $told ? "The site administrator has been told; it runs once they clear the cause.\n"
                                     : "It runs once an administrator clears the cause.\n" ) ), $submitter_email );
+   }
+}
+
+## A pool made inactive failed these requests: one notice to the site admin, and one to each submitter.
+## $submitters is dispatch_request_submitters()'s result.
+function dispatch_notify_pool_disabled( callable $send, $db, $reason, array $submitters )
+{
+   $lines = array();
+   foreach ( $submitters as $id => $who ) {
+      $lines[] = "request $id (HPC request {$who[1]}, {$who[0]})";
+   }
+   $told = $send( "UltraScan dispatch: " . count( $submitters ) . " request(s) failed in $db",
+                  "These dispatch requests in $db failed:\n\n$reason\n\n" . implode( "\n", $lines ) . "\n" );
+   foreach ( $submitters as $who ) {
+      if ( $who[ 0 ] !== '' ) {
+         $send( "US3 job submission failed",
+                "Your analysis (HPC request {$who[1]}) in $db was not run:\n\n$reason\n\n"
+                . ( $told ? "The system administrator has been notified. " : '' ) . "Resubmit it if you still need it.\n", $who[ 0 ] );
+      }
    }
 }
 

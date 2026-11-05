@@ -45,15 +45,17 @@ function dispatch_tx( $link, callable $fn )
 ## A failure is logged, since callers treat it as no rows or no change.
 function dispatch_exec( $link, $sql, $types = '', array $args = array() )
 {
-   $log = function ( $error ) use ( $sql ) {
+   $log = function ( $error, $errno ) use ( $sql ) {
       dispatch_last_error( $error );
+      dispatch_last_errno( $errno );
       error_log( 'dispatch ledger: ' . $error . ' in: ' . preg_replace( '/\s+/', ' ', substr( $sql, 0, 160 ) ) );
    };
    dispatch_last_error( '' );
+   dispatch_last_errno( 0 );
    try {
       $stmt = mysqli_prepare( $link, $sql );
       if ( ! $stmt ) {
-         $log( mysqli_error( $link ) );
+         $log( mysqli_error( $link ), mysqli_errno( $link ) );
          return false;
       }
       if ( $types !== '' ) {
@@ -64,7 +66,7 @@ function dispatch_exec( $link, $sql, $types = '', array $args = array() )
          call_user_func_array( 'mysqli_stmt_bind_param', $refs );
       }
       if ( ! mysqli_stmt_execute( $stmt ) ) {
-         $log( mysqli_stmt_error( $stmt ) );
+         $log( mysqli_stmt_error( $stmt ), mysqli_stmt_errno( $stmt ) );
          mysqli_stmt_close( $stmt );
          return false;
       }
@@ -72,7 +74,7 @@ function dispatch_exec( $link, $sql, $types = '', array $args = array() )
    }
    ## Error: on PHP 8 a connection left by a failed reconnect throws it rather than failing.
    catch ( mysqli_sql_exception | Error $e ) {
-      $log( $e->getMessage() );
+      $log( $e->getMessage(), $e->getCode() );
       return false;
    }
 }
@@ -85,6 +87,23 @@ function dispatch_last_error( $set = null )
       $last = (string) $set;
    }
    return $last;
+}
+
+## The number of that error; 0 when it has none, such as a connection left by a failed reconnect.
+function dispatch_last_errno( $set = null )
+{
+   static $last = 0;
+   if ( $set !== null ) {
+      $last = (int) $set;
+   }
+   return $last;
+}
+
+## A missing table or column, a denied privilege or a read-only server stays until someone fixes it.
+## Anything else, a lock wait, a deadlock or a lost connection among them, can pass by itself.
+function dispatch_error_is_lasting( $errno )
+{
+   return in_array( (int) $errno, array( 1036, 1044, 1049, 1054, 1109, 1142, 1143, 1146, 1227, 1290 ), true );
 }
 
 function dispatch_query( $link, $sql )

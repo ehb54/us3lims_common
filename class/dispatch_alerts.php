@@ -55,13 +55,14 @@ function dispatch_alert_close( $link, $gdb, $alert_id, $resolution )
          openFlag = NULL WHERE alertID = ? AND openFlag = 1", 'si', array( $resolution, (int) $alert_id ) ) === 1;
 }
 
-/** Open item keys of a kind, for resolving the ones whose condition has ended. */
-function dispatch_alert_open_keys( $link, $gdb, $kind, $instance = null )
+## Close $db's open items of the kinds in $seen whose condition this scan did not find.
+function dispatch_alert_scan_close( $link, $gdb, $db, array $open, array $seen )
 {
-   $sql = "SELECT dedupKey FROM `$gdb`.dispatch_alert WHERE kind = ? AND openFlag = 1";
-   $rows = $instance === null ? dispatch_rows( $link, $sql, 's', array( $kind ) )
-                              : dispatch_rows( $link, "$sql AND instanceDb = ?", 'ss', array( $kind, $instance ) );
-   return array_column( $rows, 'dedupKey' );
+   foreach ( $open as $item ) {
+      if ( $item[ 'instanceDb' ] === $db && isset( $seen[ $item[ 'kind' ] ] ) && ! isset( $seen[ $item[ 'kind' ] ][ $item[ 'dedupKey' ] ] ) ) {
+         dispatch_alert_resolve( $link, $gdb, $item[ 'dedupKey' ], 'condition cleared' );
+      }
+   }
 }
 
 /**
@@ -74,14 +75,26 @@ function dispatch_alert_open_keys( $link, $gdb, $kind, $instance = null )
  *   configuration                   requests blocked by pool configuration, fit or permission
  *   local_failure                   requests waiting because staging fails on this server
  * Routine capacity waiting raises nothing.
+ *
+ * $busy lists the instances with an unfinished request (null: all of $dbs). The others can hold no
+ * such condition, so their requests are not read and their open items close.
  */
-function dispatch_alert_scan( $link, $gdb, array $dbs )
+function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null )
 {
-   ## The request lists below come from GROUP_CONCAT, cut at 1024 bytes by default.
-   @mysqli_query( $link, 'SET SESSION group_concat_max_len = 1048576' );
+   $busy = $busy === null ? $dbs : array_values( array_intersect( $dbs, $busy ) );
+   $open = dispatch_rows( $link, "SELECT dedupKey, kind, instanceDb FROM `$gdb`.dispatch_alert WHERE openFlag = 1" );
+   if ( $busy ) {
+      ## The request lists below come from GROUP_CONCAT, cut at 1024 bytes by default.
+      @mysqli_query( $link, 'SET SESSION group_concat_max_len = 1048576' );
+   }
    foreach ( $dbs as $db ) {
       $seen = array( 'unresolved_submission' => array(), 'untracked_acceptance' => array(), 'configuration' => array(),
                      'local_failure' => array() );
+
+      if ( ! in_array( $db, $busy, true ) ) {
+         dispatch_alert_scan_close( $link, $gdb, $db, $open, $seen );
+         continue;
+      }
 
       $held = dispatch_rows( $link, "SELECT r.dispatchRequestID, r.selectedCluster, r.reason,
             (SELECT COUNT(*) FROM `$db`.dispatch_event e WHERE e.dispatchRequestID = r.dispatchRequestID
@@ -131,13 +144,7 @@ function dispatch_alert_scan( $link, $gdb, array $dbs )
             array( $db => explode( ',', $r[ 'ids' ] ) ) );
       }
 
-      foreach ( $seen as $kind => $keys ) {
-         foreach ( dispatch_alert_open_keys( $link, $gdb, $kind, $db ) as $key ) {
-            if ( ! isset( $keys[ $key ] ) ) {
-               dispatch_alert_resolve( $link, $gdb, $key, 'condition cleared' );
-            }
-         }
-      }
+      dispatch_alert_scan_close( $link, $gdb, $db, $open, $seen );
 
       $unreachable = dispatch_rows( $link, "SELECT COALESCE(selectedCluster, pool) destination,
             GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
@@ -150,9 +157,11 @@ function dispatch_alert_scan( $link, $gdb, array $dbs )
       }
    }
 
+   $open_kinds = array_column( $open, 'kind' );
+
    ## The database item stands only while a request is held for it.
-   $held_for_database = false;
-   foreach ( $dbs as $db ) {
+   $held_for_database = ! in_array( 'dispatch_database', $open_kinds, true );
+   foreach ( $busy as $db ) {
       $held_for_database = $held_for_database || dispatch_rows_checked( $link, "SELECT 1 FROM `$db`.dispatch_request
          WHERE state = 'WAITING' AND reasonCode = 'dispatch_unavailable' LIMIT 1" ) !== array();
    }
@@ -161,8 +170,10 @@ function dispatch_alert_scan( $link, $gdb, array $dbs )
    }
 
    ## An unreachable destination is resolved by a later acceptance there.
-   foreach ( dispatch_rows( $link, "SELECT alertID, dedupKey, destination, lastAt FROM `$gdb`.dispatch_alert
-         WHERE kind = 'destination_unreachable' AND openFlag = 1" ) as $a ) {
+   $unreachable_items = ! in_array( 'destination_unreachable', $open_kinds, true ) ? array()
+      : dispatch_rows( $link, "SELECT alertID, dedupKey, destination, lastAt FROM `$gdb`.dispatch_alert
+         WHERE kind = 'destination_unreachable' AND openFlag = 1" );
+   foreach ( $unreachable_items as $a ) {
       foreach ( $dbs as $db ) {
          $worked = dispatch_rows( $link, "SELECT 1 FROM `$db`.dispatch_attempt t JOIN `$db`.dispatch_request r USING (dispatchRequestID)
             WHERE t.phase = 'ACCEPTED' AND t.resolvedAt > ? AND (t.cluster = ? OR r.pool = ?) LIMIT 1",

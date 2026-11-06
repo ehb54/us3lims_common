@@ -182,12 +182,21 @@ function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null )
 
    $open_kinds = array_column( $open, 'kind' );
 
-   ## The database item stands while its cause does, whoever is waiting. Held requests go as soon as it ends.
+   ## The database item stands while its cause does, whoever is waiting. When the tables check out, held
+   ## requests go at once; it closes when none is held any more, so a cause the check cannot see, such as
+   ## a full table, keeps one item instead of a new one and a new mail at each scan.
    if ( in_array( 'dispatch_database', $open_kinds, true ) && dispatch_tables_usable( $link, $gdb, $busy ) ) {
-      dispatch_alert_resolve( $link, $gdb, 'dispatch_database', 'the dispatch tables can be used again' );
+      $held = false;
       foreach ( $busy as $db ) {
-         dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET retryAt = UTC_TIMESTAMP()
-            WHERE state = 'WAITING' AND reasonCode = 'dispatch_unavailable'" );
+         if ( dispatch_rows_checked( $link, "SELECT 1 FROM `$db`.dispatch_request
+               WHERE state = 'WAITING' AND reasonCode = 'dispatch_unavailable' LIMIT 1" ) !== array() ) {
+            $held = true;
+            dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET retryAt = UTC_TIMESTAMP()
+               WHERE state = 'WAITING' AND reasonCode = 'dispatch_unavailable'" );
+         }
+      }
+      if ( ! $held ) {
+         dispatch_alert_resolve( $link, $gdb, 'dispatch_database', 'the dispatch tables can be used again' );
       }
    }
 

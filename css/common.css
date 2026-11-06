@@ -12,10 +12,12 @@
  *   #C7BA99 light brown
  */
 
+@import url("utilities.css");
+
 body {
   margin                : 0px;
   padding               : 0px;
-  background-color      : #4E4E4E;      /* Outer frame color */
+  background-color      : #5A5A5A;      /* Outer frame color */
   font-family           : Georgia, "Times New Roman", Times, serif;
   font-size             : 13px;
 }
@@ -56,6 +58,17 @@ p, ul, ol, dd, div, td, input, textarea, select {
   line-height           : 1.5;
 }
 
+input[type="submit"], input[type="button"], input[type="reset"] {
+  background            : linear-gradient(#9CC4E4, #7FA9CC);
+  border                : 1px solid #2B4E72;
+  border-radius         : 4px;
+  transition            : background-color 0.15s ease;
+}
+
+input[type="submit"]:hover, input[type="button"]:hover, input[type="reset"]:hover {
+  background            : linear-gradient(#AFD2EC, #2790B0);
+}
+
 ul {
   list-style-type :square;
 }
@@ -72,13 +85,20 @@ table.style1 {
   border                : 5px groove #2B4E72;
   width                 : 98%;
   margin                : 2em 1em;
+  border-radius         : 4px;
+  overflow              : hidden;
+}
+
+/* Outranks table.style1 so list tables keep their former inline 95% width. */
+table.style1.w-95p {
+  width                 : 95%;
 }
 
 table.style1 thead th {
   font-family           : Arial, Helvetica, sans-serif;
   font-size             : 14px;
   font-weight           : bold;
-  background-color      : #2B4E72;
+  background            : linear-gradient(#2B4E72, #1B325F);
   color                 : white;
   line-height           : 1.5;
 }
@@ -92,6 +112,11 @@ table.style1 tbody th {
   text-align            : left;
 }
 
+/* Zebra striping for readability on dense tables. */
+table.style1 tbody tr:nth-child(even) {
+  background-color      : #F2F2F2;
+}
+
 table.noborder td {
   border                : 0px;
 }
@@ -100,6 +125,7 @@ a  {
   text-decoration       : none;
   color                 : #000099;
   font-weight           : bold;
+  transition            : background-color 0.15s ease, color 0.15s ease;
 }
 
 a:hover {
@@ -107,7 +133,12 @@ a:hover {
 }
 
 a:visited {
-  color                 : #551a8b;
+  color                 : #5B3A8E;
+}
+
+a:focus, input:focus, select:focus, textarea:focus {
+  outline               : 2px solid #2790B0;
+  outline-offset        : 1px;
 }
 
 a.block {
@@ -137,7 +168,7 @@ a.block:hover {
 .message {
   font-size             : 110%;
   font-weight           : bold;
-  color                 : #FF0000;        /* red */
+  color                 : #CC3333;        /* red, softened from pure #FF0000 */
 }
 
 .toggle {
@@ -153,6 +184,7 @@ a.block:hover {
   border                : solid black;
   border-width          : 10px 2px 0px 2px;
   border-width          : 5px 0px 5px 0px;
+  box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 #header img, #header table, #header td {
@@ -211,6 +243,7 @@ a.block:hover {
   font-weight           : bold;
   text-decoration       : none;
   height                : 37px;
+  transition            : background-color 0.15s ease, color 0.15s ease;
 }
 
 #globalnav li.separator {
@@ -268,6 +301,7 @@ a.block:hover {
   background            : #FFFFFF  url(../images/links_background.gif) repeat-y;
   border                : solid black;
   border-width          : 0px 0px 0px 0px;
+  box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 #search_page {
@@ -286,6 +320,11 @@ div#sidebar {
   background            : #7F7F7F url(../images/black-grey-gradient.png) repeat-x;
   padding               : 1em 12px 2em;   /* a minimum spacing all round */
   color                 : white;
+}
+
+/* Outranks div#sidebar so the utility class replaces the former inline style. */
+div#sidebar.pb-30em {
+  padding-bottom        : 30em;
 }
 
 div#sidebar h4 {
@@ -309,6 +348,8 @@ div#sidebar a {
   font-size             : 13px;
   font-weight           : bold;
   text-decoration       : none;
+  border-radius         : 3px;
+  transition            : background-color 0.15s ease, color 0.15s ease;
 }
 
 #sidebar a:hover {
@@ -381,6 +422,8 @@ div#content p
 
 fieldset.option_value {
   background            : #eeeeee;
+  border                : 1px solid #cccccc;
+  border-radius         : 4px;
 }
 
 /* Footer */
@@ -395,6 +438,7 @@ fieldset.option_value {
   font-size             : 85%;
   text-align            : center;
   background            : #FFFFFF  url(../images/links_background.gif) repeat-y;
+  box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 #info {
@@ -435,6 +479,19 @@ fieldset#clusters td.cluster
 fieldset#clusters tr.subheader th
 {
   font-size  : x-small;
+}
+
+.submit-progress {
+  color                 : darkblue;
+  background            : white;
+  font-family           : monospace;
+  font-size             : 20px;
+  text-align            : center;
+}
+
+/* Only the newest progress line shows; all are hidden once the page follows */
+.submit-progress:has(~ *) {
+  display               : none;
 }
 
 #fixed {

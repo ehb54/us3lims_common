@@ -312,7 +312,8 @@ function dispatch_notify_closed( callable $send, $db, array $req, $reason, $subm
    if ( (string) $submitter_email !== '' ) {
       $send( "US3 analysis closed by an administrator",
              "Your analysis (HPC request " . (int) $req[ 'HPCAnalysisRequestID' ] . ") in $db could not be confirmed as"
-             . " submitted, and no further attempt will be made:\n\n$reason\n\nResubmit it if you still need it.\n",
+             . " submitted, and no further attempt will be made:\n\n$reason\n\nA job may still have reached the cluster."
+             . " Ask your administrator to check before you resubmit, or the analysis may run twice.\n",
              $submitter_email );
    }
 }

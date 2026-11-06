@@ -55,13 +55,23 @@ function dispatch_alert_close( $link, $gdb, $alert_id, $resolution )
          openFlag = NULL WHERE alertID = ? AND openFlag = 1", 'si', array( $resolution, (int) $alert_id ) ) === 1;
 }
 
-## Whether the worker can read and write gfac's coordination tables. WHERE 1 = 0 checks the table and privilege and touches no row.
-function dispatch_gfac_tables_usable( $link, $gdb )
+## Whether the worker can use the tables it decides with: gfac's coordination tables and the request
+## tables of $busy. WHERE 1 = 0 checks each table, column and privilege and touches no row.
+function dispatch_tables_usable( $link, $gdb, array $busy )
 {
-   foreach ( array( 'dispatch_controller_claim' => 'controller', 'dispatch_rotation' => 'scopeKey' ) as $table => $key ) {
-      if ( dispatch_rows_checked( $link, "SELECT 1 FROM `$gdb`.`$table` LIMIT 1" ) === null
-           || dispatch_affected( $link, "INSERT INTO `$gdb`.`$table` SELECT * FROM `$gdb`.`$table` WHERE 1 = 0" ) < 0
+   $gfac = array( 'dispatch_controller_claim' => 'controller, claimOwner, claimGeneration, claimExpiresAt',
+                  'dispatch_rotation' => 'scopeKey, stateJson, updatedAt' );
+   foreach ( $gfac as $table => $columns ) {
+      $key = strtok( $columns, ',' );
+      if ( dispatch_affected( $link, "INSERT INTO `$gdb`.`$table` ($columns) SELECT $columns FROM `$gdb`.`$table` WHERE 1 = 0" ) < 0
            || dispatch_affected( $link, "UPDATE `$gdb`.`$table` SET $key = $key WHERE 1 = 0" ) < 0 ) {
+         return false;
+      }
+   }
+   foreach ( $busy as $db ) {
+      if ( dispatch_rows_checked( $link, "SELECT 1 FROM `$db`.dispatch_attempt LIMIT 1" ) === null
+           || dispatch_rows_checked( $link, "SELECT 1 FROM `$db`.dispatch_event LIMIT 1" ) === null
+           || dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET state = state WHERE 1 = 0" ) < 0 ) {
          return false;
       }
    }
@@ -173,7 +183,7 @@ function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null )
    $open_kinds = array_column( $open, 'kind' );
 
    ## The database item stands while its cause does, whoever is waiting. Held requests go as soon as it ends.
-   if ( in_array( 'dispatch_database', $open_kinds, true ) && dispatch_gfac_tables_usable( $link, $gdb ) ) {
+   if ( in_array( 'dispatch_database', $open_kinds, true ) && dispatch_tables_usable( $link, $gdb, $busy ) ) {
       dispatch_alert_resolve( $link, $gdb, 'dispatch_database', 'the dispatch tables can be used again' );
       foreach ( $busy as $db ) {
          dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET retryAt = UTC_TIMESTAMP()

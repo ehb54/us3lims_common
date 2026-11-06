@@ -99,11 +99,11 @@ function dispatch_last_errno( $set = null )
    return $last;
 }
 
-## A missing table or column, a denied privilege or a read-only server stays until someone fixes it.
-## Anything else, a lock wait, a deadlock or a lost connection among them, can pass by itself.
-function dispatch_error_is_lasting( $errno )
+## A lock wait, a deadlock, a lost connection or a busy server can pass by itself, as can a connection
+## with no error number. Anything else stays until someone fixes it.
+function dispatch_error_can_pass( $errno )
 {
-   return in_array( (int) $errno, array( 1036, 1044, 1049, 1054, 1109, 1142, 1143, 1146, 1227, 1290 ), true );
+   return in_array( (int) $errno, array( 0, 1040, 1053, 1158, 1159, 1160, 1161, 1203, 1205, 1213, 1226, 1927, 2002, 2006, 2013 ), true );
 }
 
 function dispatch_query( $link, $sql )

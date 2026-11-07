@@ -88,6 +88,36 @@ function dispatch_alert_scan_close( $link, $gdb, $db, array $open, array $seen )
    }
 }
 
+## $db's open items as one value, so a scan can tell whether any opened or closed since the last one.
+function dispatch_alert_open_mark( array $items, $db )
+{
+   $keys = array();
+   foreach ( $items as $item ) {
+      if ( $item[ 'instanceDb' ] === $db ) {
+         $keys[] = $item[ 'dedupKey' ];
+      }
+   }
+   sort( $keys );
+   return md5( implode( "\n", $keys ) );
+}
+
+## $db's items open once a scan that found $seen has raised and closed its own: those of other kinds stay.
+function dispatch_alert_scan_left( array $open, $db, array $seen )
+{
+   $left = array();
+   foreach ( $open as $item ) {
+      if ( $item[ 'instanceDb' ] === $db && ! isset( $seen[ $item[ 'kind' ] ] ) ) {
+         $left[] = $item;
+      }
+   }
+   foreach ( $seen as $keys ) {
+      foreach ( array_keys( $keys ) as $key ) {
+         $left[] = array( 'dedupKey' => $key, 'instanceDb' => $db );
+      }
+   }
+   return $left;
+}
+
 /**
  * Raise and resolve alert items from the ledger, deduplicated by condition:
  *   unresolved_submission (urgent)  acceptance still unknown after the automatic checks
@@ -101,15 +131,16 @@ function dispatch_alert_scan_close( $link, $gdb, $db, array $open, array $seen )
  *
  * $busy lists the instances with an unfinished request (null: all of $dbs). The others can hold no
  * such condition, so their requests are not read and their open items close.
+ *
+ * $sigs gives a busy instance's request signature (dispatch_worker_agenda()'s sig). An instance whose
+ * signature and open items are as its last scan left them, recorded in $scanned, is not read again.
+ * Returns the instances whose requests held for the database were released, due now.
  */
-function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null )
+function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null, array $sigs = array(), array &$scanned = null )
 {
    $busy = $busy === null ? $dbs : array_values( array_intersect( $dbs, $busy ) );
    $open = dispatch_rows( $link, "SELECT dedupKey, kind, instanceDb FROM `$gdb`.dispatch_alert WHERE openFlag = 1" );
-   if ( $busy ) {
-      ## The request lists below come from GROUP_CONCAT, cut at 1024 bytes by default.
-      @mysqli_query( $link, 'SET SESSION group_concat_max_len = 1048576' );
-   }
+   $long_concat = false;
    foreach ( $dbs as $db ) {
       $seen = array( 'unresolved_submission' => array(), 'untracked_acceptance' => array(), 'configuration' => array(),
                      'local_failure' => array() );
@@ -118,8 +149,29 @@ function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null )
          dispatch_alert_scan_close( $link, $gdb, $db, $open, $seen );
          continue;
       }
+      $mark = isset( $sigs[ $db ] ) ? $sigs[ $db ] . '#' . dispatch_alert_open_mark( $open, $db ) : null;
+      if ( $mark !== null && isset( $scanned[ $db ] ) && $scanned[ $db ] === $mark ) {
+         continue;
+      }
+      unset( $scanned[ $db ] );
+      $failed = false;
+      $rows = function ( $sql, $types = '', array $args = array() ) use ( $link, &$failed ) {
+         $r = dispatch_rows_checked( $link, $sql, $types, $args );
+         $failed = $failed || $r === null;
+         return (array) $r;
+      };
+      $raise = function ( ...$args ) use ( $link, $gdb, &$failed ) {
+         $id = dispatch_alert_raise( $link, $gdb, ...$args );
+         $failed = $failed || ! $id;
+         return $id;
+      };
+      if ( ! $long_concat ) {
+         ## The request lists below come from GROUP_CONCAT, cut at 1024 bytes by default.
+         @mysqli_query( $link, 'SET SESSION group_concat_max_len = 1048576' );
+         $long_concat = true;
+      }
 
-      $held = dispatch_rows( $link, "SELECT r.dispatchRequestID, r.selectedCluster, r.reason,
+      $held = $rows( "SELECT r.dispatchRequestID, r.selectedCluster, r.reason,
             (SELECT COUNT(*) FROM `$db`.dispatch_event e WHERE e.dispatchRequestID = r.dispatchRequestID
               AND e.fromState = 'SUBMISSION_UNKNOWN' AND e.toState = 'SUBMISSION_UNKNOWN') AS checks
          FROM `$db`.dispatch_request r WHERE r.state = 'SUBMISSION_UNKNOWN'" );
@@ -127,56 +179,59 @@ function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null )
          if ( (int) $r[ 'checks' ] >= DISPATCH_RECONCILE_ALERT_AFTER ) {
             $key = "unresolved_submission|$db|{$r['dispatchRequestID']}";
             $seen[ 'unresolved_submission' ][ $key ] = true;
-            dispatch_alert_raise( $link, $gdb, $key, 'unresolved_submission', 'urgent', $r[ 'selectedCluster' ], $db,
+            $raise( $key, 'unresolved_submission', 'urgent', $r[ 'selectedCluster' ], $db,
                "acceptance of request {$r['dispatchRequestID']} at {$r['selectedCluster']} is unresolved: {$r['reason']}",
                array( $db => array( $r[ 'dispatchRequestID' ] ) ) );
          }
       }
 
-      $untracked = dispatch_rows( $link, "SELECT dispatchRequestID, selectedCluster, reason FROM `$db`.dispatch_request
+      $untracked = $rows( "SELECT dispatchRequestID, selectedCluster, reason FROM `$db`.dispatch_request
          WHERE state = 'ACCEPTED' AND updatedAt < UTC_TIMESTAMP() - INTERVAL ? SECOND",
          'i', array( DISPATCH_UNTRACKED_ALERT_SECONDS ) );
       foreach ( $untracked as $r ) {
          $key = "untracked_acceptance|$db|{$r['dispatchRequestID']}";
          $seen[ 'untracked_acceptance' ][ $key ] = true;
-         dispatch_alert_raise( $link, $gdb, $key, 'untracked_acceptance', 'urgent', $r[ 'selectedCluster' ], $db,
+         $raise( $key, 'untracked_acceptance', 'urgent', $r[ 'selectedCluster' ], $db,
             "request {$r['dispatchRequestID']} was accepted but is not tracked: {$r['reason']}",
             array( $db => array( $r[ 'dispatchRequestID' ] ) ) );
       }
 
-      $blocked = dispatch_rows( $link, "SELECT pool, reasonCode, GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
+      $blocked = $rows( "SELECT pool, reasonCode, GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
          FROM `$db`.dispatch_request WHERE state = 'BLOCKED' AND reasonCode IN ('configuration','no_fit','no_permission','input')
          GROUP BY pool, reasonCode" );
       foreach ( $blocked as $r ) {
          $key = "configuration|$db|{$r['pool']}|{$r['reasonCode']}";
          $seen[ 'configuration' ][ $key ] = true;
-         dispatch_alert_raise( $link, $gdb, $key, 'configuration', 'normal', $r[ 'pool' ], $db,
+         $raise( $key, 'configuration', 'normal', $r[ 'pool' ], $db,
             "requests for '{$r['pool']}' are blocked ({$r['reasonCode']}): {$r['reason']}",
             array( $db => explode( ',', $r[ 'ids' ] ) ) );
       }
 
       ## Staging that keeps failing on this server (a full or unwritable disk) waits without contacting
       ## any member, so nothing else would tell the operator.
-      $local = dispatch_rows( $link, "SELECT GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
+      $local = $rows( "SELECT GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
          FROM `$db`.dispatch_request WHERE state = 'WAITING' AND reasonCode = 'local_failure' HAVING ids IS NOT NULL" );
       foreach ( $local as $r ) {
          $key = "local_failure|$db";
          $seen[ 'local_failure' ][ $key ] = true;
-         dispatch_alert_raise( $link, $gdb, $key, 'local_failure', 'normal', null, $db,
+         $raise( $key, 'local_failure', 'normal', null, $db,
             "requests in $db cannot be prepared for submission on this server: {$r['reason']}",
             array( $db => explode( ',', $r[ 'ids' ] ) ) );
       }
 
       dispatch_alert_scan_close( $link, $gdb, $db, $open, $seen );
 
-      $unreachable = dispatch_rows( $link, "SELECT COALESCE(selectedCluster, pool) destination,
+      $unreachable = $rows( "SELECT COALESCE(selectedCluster, pool) destination,
             GROUP_CONCAT(dispatchRequestID) ids, MAX(reason) reason
          FROM `$db`.dispatch_request WHERE state = 'WAITING' AND reasonCode = 'unreachable'
          GROUP BY COALESCE(selectedCluster, pool)" );
       foreach ( $unreachable as $r ) {
-         dispatch_alert_raise( $link, $gdb, "destination_unreachable|{$r['destination']}", 'destination_unreachable',
+         $raise( "destination_unreachable|{$r['destination']}", 'destination_unreachable',
             'normal', $r[ 'destination' ], null, "{$r['destination']} could not be reached: {$r['reason']}",
             array( $db => explode( ',', $r[ 'ids' ] ) ) );
+      }
+      if ( $mark !== null && ! $failed ) {
+         $scanned[ $db ] = $sigs[ $db ] . '#' . dispatch_alert_open_mark( dispatch_alert_scan_left( $open, $db, $seen ), $db );
       }
    }
 
@@ -185,12 +240,14 @@ function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null )
    ## The database item stands while its cause does, whoever is waiting. When the tables check out, held
    ## requests go at once; it closes when none is held any more, so a cause the check cannot see, such as
    ## a full table, keeps one item instead of a new one and a new mail at each scan.
+   $released = array();
    if ( in_array( 'dispatch_database', $open_kinds, true ) && dispatch_tables_usable( $link, $gdb, $busy ) ) {
       $held = false;
       foreach ( $busy as $db ) {
          if ( dispatch_rows_checked( $link, "SELECT 1 FROM `$db`.dispatch_request
                WHERE state = 'WAITING' AND reasonCode = 'dispatch_unavailable' LIMIT 1" ) !== array() ) {
             $held = true;
+            $released[] = $db;
             dispatch_affected( $link, "UPDATE `$db`.dispatch_request SET retryAt = UTC_TIMESTAMP()
                WHERE state = 'WAITING' AND reasonCode = 'dispatch_unavailable'" );
          }
@@ -215,6 +272,7 @@ function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null )
          }
       }
    }
+   return $released;
 }
 
 /**

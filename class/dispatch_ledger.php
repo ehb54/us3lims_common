@@ -1210,19 +1210,22 @@ function dispatch_close_finished( $link, $db )
  * never-submitted failure or expiry, canceled for a cancellation before
  * acceptance, each with the user message. Accepted stages are left to the
  * existing submission and monitor path, and an existing failure report is
- * kept. Returns the rows changed.
+ * kept. Returns the rows changed, or null when a read or a write failed.
  */
 function dispatch_mirror_autoflow( $link, $db )
 {
    include_once __DIR__ . '/dispatch_messages.php';
-   $exists = dispatch_rows( $link, "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'autoflowAnalysis'",
+   $exists = dispatch_rows_checked( $link, "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'autoflowAnalysis'",
                             's', array( $db ) );
+   if ( $exists === null ) {
+      return null;
+   }
    if ( ! $exists ) {
       return 0;
    }
    $statuses = array( DISPATCH_SUBMISSION_UNKNOWN => 'SUBMIT_TIMEOUT', DISPATCH_BLOCKED => 'BLOCKED',
                       DISPATCH_EXPIRED => 'failed', DISPATCH_FAILED => 'failed', DISPATCH_CANCELLED => 'canceled' );
-   $rows = dispatch_rows( $link, "SELECT a.requestID, a.status, a.statusMsg, r.state, r.reasonCode, r.selectedCluster,
+   $rows = dispatch_rows_checked( $link, "SELECT a.requestID, a.status, a.statusMsg, r.state, r.reasonCode, r.selectedCluster,
          r.retryAt, r.notifiedAt, r.cancelRequested
       FROM `$db`.autoflowAnalysis a
       JOIN `$db`.dispatch_request r ON r.autoflowAnalysisID = a.requestID AND r.HPCAnalysisRequestID = a.currentHPCARID
@@ -1230,15 +1233,21 @@ function dispatch_mirror_autoflow( $link, $db )
                         'EXPIRED','FAILED','CANCELLED')
         AND (a.currentGfacID IS NULL OR a.currentGfacID = '')
         AND LOWER(a.status) NOT IN ('failed','error','canceled','complete','done','finished')" );
+   if ( $rows === null ) {
+      return null;
+   }
    $changed = 0;
+   $failed = false;
    foreach ( $rows as $r ) {
       $status = isset( $statuses[ $r[ 'state' ] ] ) ? $statuses[ $r[ 'state' ] ] : 'READY';
       $msg = dispatch_public_message( $r );
       if ( $status === $r[ 'status' ] && $msg === $r[ 'statusMsg' ] ) {
          continue;
       }
-      $changed += max( 0, dispatch_affected( $link, "UPDATE `$db`.autoflowAnalysis SET status = ?, statusMsg = ?
-         WHERE requestID = ? AND (currentGfacID IS NULL OR currentGfacID = '')", 'ssi', array( $status, $msg, (int) $r[ 'requestID' ] ) ) );
+      $n = dispatch_affected( $link, "UPDATE `$db`.autoflowAnalysis SET status = ?, statusMsg = ?
+         WHERE requestID = ? AND (currentGfacID IS NULL OR currentGfacID = '')", 'ssi', array( $status, $msg, (int) $r[ 'requestID' ] ) );
+      $failed = $failed || $n < 0;
+      $changed += max( 0, $n );
    }
-   return $changed;
+   return $failed ? null : $changed;
 }

@@ -107,6 +107,11 @@ class runtime_features
                   . self::describe( $source ) );
             }
 
+            if ( ! $model->knows_level( $name, $coded ) )
+            {
+               return self::unfitted_level( $name, $source );
+            }
+
             $features[ $name ] = $coded;
             continue;
          }
@@ -135,6 +140,11 @@ class runtime_features
                "'$name' is not numeric: " . self::describe( $source ) );
          }
 
+         if ( ! $model->knows_level( $name, $value ) )
+         {
+            return self::unfitted_level( $name, $source );
+         }
+
          $features[ $name ] = $value;
       }
 
@@ -144,6 +154,13 @@ class runtime_features
          'missing'  => $missing,
          'reason'   => null,
       );
+   }
+
+   /** A categorical value the model has no indicator for; scoring it would set every indicator to zero. */
+   private static function unfitted_level( $name, $source )
+   {
+      return self::failure( 'input_error',
+         "'$name' is not one of the levels this model was fitted with: " . self::describe( $source ) );
    }
 
    /** A dataset property, by the model's name less the prefix. */

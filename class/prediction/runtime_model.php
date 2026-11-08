@@ -389,13 +389,33 @@ class runtime_model
              || strpos( $name, 'ds0.' ) === 0;
    }
 
+   /** Is a categorical input's value one of its fitted levels? True for a numeric input. */
+   public function knows_level( $name, $value )
+   {
+      if ( ! isset( $this->categorical[ $name ] ) )
+      {
+         return true;
+      }
+
+      foreach ( $this->spec[ 'encoding' ][ 'vocabulary' ][ $name ] as $level )
+      {
+         if ( (float) $level === (float) $value )
+         {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
    /**
     * Was this cluster code one of the training levels?
     *
     * The name-to-code step lives in runtime_cluster_map, but the artifact is
     * what decides whether a code means anything: a map claiming a code this
     * model has no indicator for is a mismatch to refuse, not something to
-    * score with every indicator at zero.
+    * score with every indicator at zero. Kept apart from knows_level()
+    * because an unknown cluster is unsupported, not an input error.
     */
    public function knows_cluster_code( $code )
    {

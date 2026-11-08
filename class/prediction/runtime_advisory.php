@@ -83,6 +83,9 @@ class runtime_advisory
    ## family mismatch in the loaded file means. Filled in alongside the model.
    private static $per_family = array();
 
+   ## Whether the last observe() wrote its row; null when it did not try.
+   private static $last_stored = null;
+
    /**
     * Record a recommendation for one submission. Never throws, never alters
     * the submission, and returns a short status for the caller's log.
@@ -94,6 +97,8 @@ class runtime_advisory
     *                       edit_filename the first dataset's edit filename
     *                       link         the instance database
     *                       gfac_link    the global database, where records go
+    *                       started_ns   the call site's clock() reading, so
+    *                                    evaluate_us includes its own work
     */
    public static function observe( array $context )
    {
@@ -102,7 +107,9 @@ class runtime_advisory
          return 'disabled';
       }
 
-      $started = self::clock();
+      self::$last_stored = null;
+      $started = isset( $context[ 'started_ns' ] ) && is_int( $context[ 'started_ns' ] )
+                 ? $context[ 'started_ns' ] : self::clock();
 
       try {
          return self::run( $context, $started );
@@ -172,6 +179,15 @@ class runtime_advisory
    public static function enabled()
    {
       return ! empty( $GLOBALS[ 'global_runtime_advisory_enabled' ] );
+   }
+
+   /**
+    * Whether the last observe() wrote its row: false when the write failed,
+    * whatever status it returned, so the caller can log the database's reason.
+    */
+   public static function last_record_stored()
+   {
+      return self::$last_stored;
    }
 
    /** Forget the cached artifacts. For tests, and for a long-lived worker. */
@@ -293,6 +309,7 @@ class runtime_advisory
          isset( $context[ 'gfac_link' ] ) ? $context[ 'gfac_link' ] : null,
          runtime_record::row( $context, $built, $outcome )
       );
+      self::$last_stored = $stored;
 
       ## A lost record costs coverage, which the readout counts. It must still be
       ## visible, or a window with no records looks like a window with no jobs.
@@ -379,7 +396,7 @@ class runtime_advisory
    {
       $context[ 'evaluate_us' ] = self::elapsed_us( $started );
 
-      runtime_record::insert(
+      self::$last_stored = runtime_record::insert(
          isset( $context[ 'gfac_link' ] ) ? $context[ 'gfac_link' ] : null,
          runtime_record::row(
             $context,
@@ -392,7 +409,8 @@ class runtime_advisory
    }
 
    /**
-    * A clock reading, in nanoseconds where one is available.
+    * A clock reading, in nanoseconds where one is available. submit_slurm
+    * repeats this expression, since it starts the clock before this class loads.
     *
     * hrtime() is monotonic and is what this wants, but it arrived in PHP 7.3
     * and the appliances run 7.2: calling it there is a fatal Error, thrown

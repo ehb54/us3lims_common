@@ -146,6 +146,16 @@ class runtime_record
     */
    public static function insert( $link, array $row )
    {
+      try {
+         return self::write( $link, $row );
+      } catch ( Throwable $e ) {
+         ## mysqli throws instead of returning false under MYSQLI_REPORT_STRICT.
+         return false;
+      }
+   }
+
+   private static function write( $link, array $row )
+   {
       if ( ! $link )
       {
          return false;

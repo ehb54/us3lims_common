@@ -1280,6 +1280,10 @@ class submit_slurm extends jobsubmit
          return null;
       }
 
+      ## The same clock as runtime_advisory::clock(), started before the load and
+      ## connection checkouts so evaluate_us is the hook's whole cost but the write.
+      $started = function_exists( 'hrtime' ) ? hrtime( true ) : (int) round( microtime( true ) * 1e9 );
+
       try {
          ## include_once, not require_once: a missing file here is the same
          ## "advisory unusable" case this whole call swallows, not a reason
@@ -1362,19 +1366,16 @@ class submit_slurm extends jobsubmit
             'emitted_directive'         => $walltime,
             'requested_ranks'           => isset( $plan[ 'total_tasks' ] ) ? $plan[ 'total_tasks' ] : null,
 
-            'link'      => $link,
-            'gfac_link' => $gfac,
+            'link'       => $link,
+            'gfac_link'  => $gfac,
+            'started_ns' => $started,
          ) );
 
-         ## Captured before the close below: runtime_record::insert() is the
-         ## only thing that can produce 'record_error', and it always does so
-         ## against $gfac (see observe()'s own 'gfac_link' => $gfac), so this
-         ## is the connection whose error actually explains it -- an existing
-         ## pilot table missing the newer columns reads here as "Unknown
-         ## column 'prediction_cluster'" (8.2) instead of a bare status with
-         ## no way to tell a missing column from any other reason the insert
-         ## could have failed.
-         $gfacError = ( $gfac && $status === 'record_error' ) ? mysqli_error( $gfac ) : '';
+         ## A failed write on any status, not only record_error, is explained by
+         ## $gfac's error: a missing table or column is named in the log rather
+         ## than leaving a status with no row behind it.
+         $stored    = runtime_advisory::last_record_stored();
+         $gfacError = ( $gfac && $stored === false ) ? mysqli_error( $gfac ) : '';
 
          ## Not closed here: both are pooled connections (see the finally
          ## block below), and this class never closes a pooled connection
@@ -1386,12 +1387,13 @@ class submit_slurm extends jobsubmit
          ## next checkout() got handed a dead connection and every query
          ## on it silently failed.
          ##
-         ## A row was still written for every one of these; this is the one
-         ## place that notices when it was not 'ok', so a run of artifact or
-         ## input trouble is visible without querying gfac.runtime_prediction.
-         if ( $status !== 'ok' )
+         ## The one place that notices a status other than 'ok' or a lost row, so
+         ## artifact, input or table trouble is visible without querying
+         ## gfac.runtime_prediction.
+         if ( $status !== 'ok' || $stored === false )
          {
             elog2( "runtime advisory: request $requestID status $status"
+                 . ( $stored === false ? '; record not written' : '' )
                  . ( $gfacError !== '' ? " ($gfacError)" : '' ) );
          }
          return $status;

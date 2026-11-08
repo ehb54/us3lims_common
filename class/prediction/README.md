@@ -105,13 +105,19 @@ reconstruction job. Collect the records first; they cannot be rebuilt.
 | --- | --- |
 | `ok` | a recommendation was produced |
 | `unsupported` | not served: another family, no artifact for this family, or a destination with no cluster code |
-| `input_error` | an operand the model was fitted with was absent or not a value it was fitted with |
+| `input_error` | an operand the model was fitted with was absent, not numeric, or a category level it was not fitted with |
 | `artifact_error` | the artifact for this family could not be read, or holds another family's model |
-| `record_error` | everything worked and the row could not be written |
+| `record_error` | a recommendation was produced and the row could not be written |
 | `advisory_error` | an unexpected failure, caught |
 
 A row that is not `ok` is still a row. A window with no records would otherwise
 be indistinguishable from a window with no jobs.
+
+A row that could not be written, whatever its status, is logged to `elog2` as
+`record not written` with the database's error. On the dispatch path a request
+with no frozen plan, or a worker that stops between marking it monitored and
+running the advisory, has no row; the readout counts those as submissions
+without a record.
 
 ## Operating notes
 
@@ -121,6 +127,9 @@ be indistinguishable from a window with no jobs.
   per submission. Replacing an artifact while the window is open changes the
   recorded content hash, which the readout reports as more than one model for
   that family rather than averaging over it.
+- `evaluate_us` runs from the call site, after the switch, through the
+  evaluation: it includes loading the classes and artifact, the connection
+  checkouts and the database reads, and leaves out only the record write.
 - Two database reads per submission, both on the instance database: the edited
   data row for a dataset and the raw data header it refers to.
 - No request XML, no researcher identity and no scientific result content is

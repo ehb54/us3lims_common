@@ -98,7 +98,7 @@ function dispatch_alert_open_mark( array $items, $db )
       }
    }
    sort( $keys );
-   return md5( implode( "\n", $keys ) );
+   return hash( 'sha256', implode( "\n", $keys ) );
 }
 
 ## $db's items open once a scan that found $seen has raised and closed its own: those of other kinds stay.

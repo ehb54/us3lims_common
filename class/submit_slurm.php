@@ -67,6 +67,7 @@ class submit_slurm extends jobsubmit
       try
       {
          chdir( $this->data[ 'job' ][ 'directory' ] );
+         $this->require_request_column();
 
          if ( ! $this->stage_files() ) {
             ## Persist staging failure for autoflow requests.
@@ -142,6 +143,7 @@ class submit_slurm extends jobsubmit
       try
       {
          chdir( $this->data[ 'job' ][ 'directory' ] );
+         $this->require_request_column();
          $envelope = $this->finalize_envelope( $plan[ 'cluster' ] );
          if ( $envelope[ 'error' ] !== '' )
          {
@@ -1026,6 +1028,29 @@ class submit_slurm extends jobsubmit
    ## Record the job in both databases and launch jobmonitor.
    ## After sbatch accepted the job, problems are WARNING: (the job is running);
    ## ERROR: is kept for submissions that did not happen.
+   ## gfac.analysis must name each job's request: a job number alone is shared across clusters.
+   ## Checked before anything is staged; a connection failure is left to the later steps.
+   private function require_request_column()
+   {
+      global $globaldbuser, $globaldbpasswd, $globaldbhost, $globaldbname;
+
+      $pool = db_connection_pool::shared();
+      $gfac = $pool->checkout( $globaldbhost, $globaldbuser, $globaldbpasswd, $globaldbname );
+      if ( ! $gfac )
+         return;
+      try
+      {
+         $res = mysqli_query( $gfac, "SHOW COLUMNS FROM analysis LIKE 'HPCAnalysisRequestID'" );
+      }
+      finally
+      {
+         $pool->release( $gfac );
+      }
+      if ( $res && mysqli_num_rows( $res ) === 0 )
+         throw new UnexpectedValueException( "gfac.analysis has no HPCAnalysisRequestID column, which this release needs"
+            . " to track a job; as root run php ~us3/lims/database/utils/uslims_upgrade.php --apply" );
+   }
+
    public function update_db()
    {
       $ok = true;
@@ -1103,28 +1128,22 @@ class submit_slurm extends jobsubmit
          $metaCluster = isset( $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] )
                       ? $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] : null;
 
-         ## The request link fixes this job when two clusters reuse a job number;
-         ## written only where the 4.3.0 upgrade has added the column.
-         $has_request_column = mysqli_query( $gfac_link, "SHOW COLUMNS FROM analysis LIKE 'HPCAnalysisRequestID'" );
-
          $query = "INSERT INTO analysis SET "
                 . "gfacID='$slurm_id', "
                 . "autoflowAnalysisID='$autoflowID', "
                 . "cluster='$cluster', "
-                . ( $has_request_column && mysqli_num_rows( $has_request_column ) > 0
-                    ? "HPCAnalysisRequestID='" . (int) $requestID . "', " : "" )
+                . "HPCAnalysisRequestID='" . (int) $requestID . "', "
                 . ( $metaCluster !== null
                     ? "metaschedulerClusterExecuting='" . mysqli_real_escape_string( $gfac_link, $metaCluster ) . "', "
                     : "" )
                 . "us3_db='$dbname'";
-         ## Replay-safe: the same job at the same execution cluster is one row; with the request
-         ## column, for the same request too, since a reset controller reuses job numbers.
-         $with_request = $has_request_column && mysqli_num_rows( $has_request_column ) > 0;
+         ## Replay-safe: the same job of the same request at the same execution cluster is one row,
+         ## since a reset controller reuses job numbers.
          $result = $this->row_exists( $gfac_link, "SELECT 1 FROM analysis WHERE gfacID=? AND us3_db=? "
                                     . "AND COALESCE(NULLIF(metaschedulerClusterExecuting,''),cluster)=? "
-                                    . ( $with_request ? "AND HPCAnalysisRequestID=? " : "" ) . "LIMIT 1",
-                                    array_merge( array( $slurm_id, $dbname, $metaCluster !== null ? $metaCluster : $cluster ),
-                                                 $with_request ? array( (int) $requestID ) : array() ) )
+                                    . "AND HPCAnalysisRequestID=? LIMIT 1",
+                                    array( $slurm_id, $dbname, $metaCluster !== null ? $metaCluster : $cluster,
+                                           (int) $requestID ) )
                 || mysqli_query( $gfac_link, $query );
          if ( ! $result ) {
             $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "

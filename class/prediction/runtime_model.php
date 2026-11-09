@@ -103,6 +103,23 @@ class runtime_model
    {
       $n = (int) $this->spec[ 'encoding' ][ 'n_columns' ];
 
+      foreach ( array_keys( $this->categorical ) as $name )
+      {
+         $levels = array_values( (array) ( $this->spec[ 'encoding' ][ 'vocabulary' ][ $name ] ?? array() ) );
+         foreach ( $levels as $i => $level )
+         {
+            for ( $k = $i + 1; $k < count( $levels ); $k++ )
+            {
+               if ( self::is_level( $level, $levels[ $k ] ) )
+               {
+                  throw new RuntimeException( "runtime_model: $name's vocabulary lists one level twice ('"
+                                              . self::level_label( $level ) . "' and '"
+                                              . self::level_label( $levels[ $k ] ) . "'): $path" );
+               }
+            }
+         }
+      }
+
       foreach ( array( 'imputer_statistics', 'scaler_mean', 'scaler_scale', 'coef' ) as $key )
       {
          if ( count( $this->spec[ $key ] ) !== $n )
@@ -211,8 +228,7 @@ class runtime_model
          {
             foreach ( $this->spec[ 'encoding' ][ 'vocabulary' ][ $name ] as $level )
             {
-               ## Loose comparison on purpose: a level of 10.0 must match '10'.
-               $x = ( ! $missing && $value == $level ) ? 1.0 : 0.0;
+               $x = ( ! $missing && self::is_level( $value, $level ) ) ? 1.0 : 0.0;
                $z += self::contribution( $x, $mean[ $j ], $scale[ $j ], $coef[ $j ] );
                $j++;
             }
@@ -399,13 +415,24 @@ class runtime_model
 
       foreach ( $this->spec[ 'encoding' ][ 'vocabulary' ][ $name ] as $level )
       {
-         if ( (float) $level === (float) $value )
+         if ( self::is_level( $value, $level ) )
          {
             return true;
          }
       }
 
       return false;
+   }
+
+   /** The one level match the check and the score share: numbers as numbers ('10' is 10.0), anything else exactly. */
+   private static function is_level( $value, $level )
+   {
+      if ( is_numeric( $value ) && is_numeric( $level ) )
+      {
+         return (float) $value === (float) $level;
+      }
+
+      return ! is_numeric( $value ) && ! is_numeric( $level ) && (string) $value === (string) $level;
    }
 
    /**
@@ -426,7 +453,7 @@ class runtime_model
 
       foreach ( $this->spec[ 'encoding' ][ 'vocabulary' ][ 'cluster' ] as $level )
       {
-         if ( (float) $level === (float) $code )
+         if ( self::is_level( $code, $level ) )
          {
             return true;
          }

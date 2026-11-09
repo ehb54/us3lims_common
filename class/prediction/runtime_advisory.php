@@ -313,7 +313,7 @@ class runtime_advisory
 
       ## A lost record costs coverage, which the readout counts. It must still be
       ## visible, or a window with no records looks like a window with no jobs.
-      return $stored ? $built[ 'status' ] : 'record_error';
+      return $stored || $built[ 'status' ] !== 'ok' ? $built[ 'status' ] : 'record_error';
    }
 
    /**

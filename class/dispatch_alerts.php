@@ -185,8 +185,11 @@ function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null, array
          }
       }
 
-      $untracked = $rows( "SELECT dispatchRequestID, selectedCluster, reason FROM `$db`.dispatch_request
-         WHERE state = 'ACCEPTED' AND updatedAt < UTC_TIMESTAMP() - INTERVAL ? SECOND",
+      ## Timed from the acceptance: each failed tracking repair's release touches updatedAt.
+      $untracked = $rows( "SELECT r.dispatchRequestID, r.selectedCluster, r.reason FROM `$db`.dispatch_request r
+         WHERE r.state = 'ACCEPTED' AND COALESCE( ( SELECT MAX( e.createdAt ) FROM `$db`.dispatch_event e
+               WHERE e.dispatchRequestID = r.dispatchRequestID AND e.toState = 'ACCEPTED' ), r.updatedAt )
+               < UTC_TIMESTAMP() - INTERVAL ? SECOND",
          'i', array( DISPATCH_UNTRACKED_ALERT_SECONDS ) );
       foreach ( $untracked as $r ) {
          $key = "untracked_acceptance|$db|{$r['dispatchRequestID']}";

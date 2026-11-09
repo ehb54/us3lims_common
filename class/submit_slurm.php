@@ -300,7 +300,7 @@ class submit_slurm extends jobsubmit
     * own per-job lock refuses a second copy. $plan renders the job script when
     * this process did not stage it (receipt recovery). Returns update_db().
     */
-   public function track_accepted( $job_id, $plan = null )
+   public function track_accepted( $job_id, $plan = null, ?array $host_clusters = null )
    {
       if ( $plan !== null )
          $this->set_metascheduler_cluster_executing( $plan[ 'cluster' ] );
@@ -308,10 +308,16 @@ class submit_slurm extends jobsubmit
       $savedir = getcwd();
       try
       {
+         ## The job already runs there: a member the instance hides or the host marks inactive is still tracked.
+         $cluster = $this->execution_cluster();
+         if ( ! isset( $this->grid[ $cluster ] ) && is_array( $host_clusters[ $cluster ] ?? null )
+              && ! isset( $host_clusters[ $cluster ][ 'clusters' ] ) )
+            $this->grid[ $cluster ] = $host_clusters[ $cluster ];
          chdir( $this->data[ 'job' ][ 'directory' ] );
          if ( empty( $this->data[ 'jobfile' ] ) && $plan !== null )
          {
-            $cluster = $this->execution_cluster();
+            if ( ! isset( $this->grid[ $cluster ] ) )
+               throw new UnexpectedValueException( "cluster $cluster is not in global_config.php's \$cluster_details" );
             $requestID = $this->data[ 'job' ][ 'requestID' ];
             $this->write_slurm_script( $cluster, $requestID, $this->workdir( $cluster, $requestID ),
                                        $this->tarfile(), $plan );

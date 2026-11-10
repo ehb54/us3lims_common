@@ -337,6 +337,15 @@ class submit_slurm extends jobsubmit
       }
    }
 
+   /** Why the last tracking failed, as its WARNING says, for the dispatch request's reason; '' when none was given. */
+   public function tracking_failure()
+   {
+      foreach ( array_reverse( $this->message ) as $line )
+         if ( strpos( $line, 'WARNING: ' ) === 0 )
+            return substr( $line, strlen( 'WARNING: ' ) );
+      return '';
+   }
+
    /**
     * The runtime advisory for a job the worker just moved to MONITORED, which happens once
     * per request. Run there, not in track_accepted(): that can repeat, and a fatal in the
@@ -1145,7 +1154,13 @@ class submit_slurm extends jobsubmit
                                     array( $slurm_id, $dbname, $metaCluster !== null ? $metaCluster : $cluster,
                                            (int) $requestID ) )
                 || mysqli_query( $gfac_link, $query );
-         if ( ! $result ) {
+         if ( ! $result && mysqli_errno( $gfac_link ) === 1054 ) {
+            ## The column went after the request was staged: the ALTER needs no idle host, and the next repair tracks the job.
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis has no HPCAnalysisRequestID column, so the job is"
+                             . " not tracked. As root run mysql -u root -p -e 'ALTER TABLE `$globaldbname`.analysis ADD COLUMN"
+                             . " HPCAnalysisRequestID int(11) DEFAULT NULL AFTER us3_db'; tracking resumes at the next repair";
+            $ok = false;
+         } elseif ( ! $result ) {
             $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis insert failed - job will not be tracked or "
                              . "cleaned up: " . mysqli_error( $gfac_link );
             $ok = false;

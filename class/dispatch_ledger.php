@@ -945,6 +945,12 @@ function dispatch_reconcile_checks( $link, $db, $id )
    return $rows ? (int) $rows[ 0 ][ 'n' ] : 0;
 }
 
+## A Slurm job number, the only job ID a Resolve records.
+function dispatch_job_id_valid( $job_id )
+{
+   return preg_match( '/^[0-9]{1,18}\z/', (string) $job_id ) === 1;
+}
+
 /**
  * Operator resolution of an uncertain submission: a scheduler job ID, with
  * evidence, records the acceptance. An empty check never establishes that
@@ -955,7 +961,8 @@ function dispatch_resolve_unknown( $link, $db, $id, $job_id, $evidence )
    $req = dispatch_get( $link, $db, $id );
    $attempt = dispatch_latest_attempt( $link, $db, $id );
    $job_id = trim( (string) $job_id );
-   if ( ! $req || $req[ 'state' ] !== DISPATCH_SUBMISSION_UNKNOWN || ! $attempt || $job_id === '' || trim( (string) $evidence ) === '' ) {
+   if ( ! $req || $req[ 'state' ] !== DISPATCH_SUBMISSION_UNKNOWN || ! $attempt || ! dispatch_job_id_valid( $job_id )
+        || trim( (string) $evidence ) === '' ) {
       return false;
    }
    return dispatch_record_outcome( $link, $db, $attempt[ 'attemptToken' ],

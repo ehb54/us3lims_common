@@ -401,6 +401,14 @@ class submit_slurm extends jobsubmit
 
       $this->message[] = "stage_files: cluster=$cluster login=$login workdir=$workdir";
 
+      ## The work directory and input name reach the cluster's shell and the job script unquoted.
+      if ( ! preg_match( '#^[A-Za-z0-9._/-]+\z#', "$workdir/$tarfile" ) ) {
+         $this->message[] = "stage_files: work directory or input name '$workdir/$tarfile' has characters other than"
+                          . " letters, digits, '.', '_', '-' and '/'; check the cluster's workdir and the instance's database and host names";
+         $this->stage_error = 'work directory refused';
+         return false;
+      }
+
       ## Generate (and check) the slurm script locally before touching the cluster
       $slufile = $this->write_slurm_script( $cluster, $requestID, $workdir, $tarfile, $this->frozenPlan );
       if ( $slufile === false ) {
@@ -710,6 +718,14 @@ class submit_slurm extends jobsubmit
           && mysqli_stmt_execute( $stmt )
           && mysqli_stmt_store_result( $stmt )
           && mysqli_stmt_num_rows( $stmt ) > 0;
+   }
+
+   private function exec_bound( $link, $sql, array $args )
+   {
+      $stmt = mysqli_prepare( $link, $sql );
+      return $stmt
+          && mysqli_stmt_bind_param( $stmt, str_repeat( 's', count( $args ) ), ...$args )
+          && mysqli_stmt_execute( $stmt );
    }
 
    protected function pause( $seconds )
@@ -1084,16 +1100,12 @@ class submit_slurm extends jobsubmit
 
       try
       {
-         $jobfile = mysqli_real_escape_string( $link, $this->data[ 'jobfile' ] );
          ## Replay-safe: a repeated call for the same accepted job keeps its row.
          $result = $this->row_exists( $link, "SELECT 1 FROM HPCAnalysisResult WHERE "
                                     . "HPCAnalysisRequestID=? AND gfacID=? LIMIT 1", array( $requestID, $slurm_id ) );
          if ( ! $result ) {
-            $query = "INSERT INTO HPCAnalysisResult SET "
-                   . "HPCAnalysisRequestID='$requestID', "
-                   . "jobfile='$jobfile', "
-                   . "gfacID='$slurm_id'";
-            $result = mysqli_query( $link, $query );
+            $result = $this->exec_bound( $link, "INSERT INTO HPCAnalysisResult SET HPCAnalysisRequestID=?, jobfile=?, gfacID=?",
+                                         array( $requestID, $this->data[ 'jobfile' ], $slurm_id ) );
          }
          if ( ! $result ) {
             $this->message[] = "WARNING: job {$this->data['eprfile']}: HPCAnalysisResult insert failed - job is running but "
@@ -1102,13 +1114,9 @@ class submit_slurm extends jobsubmit
          }
 
          if ( $autoflowID > 0 ) {
-            $query = "UPDATE autoflowAnalysis SET "
-                   . "currentGfacID='$slurm_id', "
-                   . "currentHPCARID='$requestID', "
-                   . "status='SUBMITTED', "
-                   . "statusMsg='Job submitted' "
-                   . "WHERE requestID='$autoflowID'";
-            $result = mysqli_query( $link, $query );
+            $result = $this->exec_bound( $link, "UPDATE autoflowAnalysis SET currentGfacID=?, currentHPCARID=?, "
+                                         . "status='SUBMITTED', statusMsg='Job submitted' WHERE requestID=?",
+                                         array( $slurm_id, $requestID, $autoflowID ) );
             if ( ! $result ) {
                $this->message[] = "WARNING: job {$this->data['eprfile']}: autoflowAnalysis update failed - the pipeline will not "
                                 . "advance: " . mysqli_error( $link );
@@ -1137,15 +1145,10 @@ class submit_slurm extends jobsubmit
          $metaCluster = isset( $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] )
                       ? $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] : null;
 
-         $query = "INSERT INTO analysis SET "
-                . "gfacID='$slurm_id', "
-                . "autoflowAnalysisID='$autoflowID', "
-                . "cluster='$cluster', "
-                . "HPCAnalysisRequestID='" . (int) $requestID . "', "
-                . ( $metaCluster !== null
-                    ? "metaschedulerClusterExecuting='" . mysqli_real_escape_string( $gfac_link, $metaCluster ) . "', "
-                    : "" )
-                . "us3_db='$dbname'";
+         $columns = array( 'gfacID' => $slurm_id, 'autoflowAnalysisID' => $autoflowID, 'cluster' => $cluster,
+                           'HPCAnalysisRequestID' => (int) $requestID )
+                  + ( $metaCluster !== null ? array( 'metaschedulerClusterExecuting' => $metaCluster ) : array() )
+                  + array( 'us3_db' => $dbname );
          ## Replay-safe: the same job of the same request at the same execution cluster is one row,
          ## since a reset controller reuses job numbers.
          $result = $this->row_exists( $gfac_link, "SELECT 1 FROM analysis WHERE gfacID=? AND us3_db=? "
@@ -1153,7 +1156,8 @@ class submit_slurm extends jobsubmit
                                     . "AND HPCAnalysisRequestID=? LIMIT 1",
                                     array( $slurm_id, $dbname, $metaCluster !== null ? $metaCluster : $cluster,
                                            (int) $requestID ) )
-                || mysqli_query( $gfac_link, $query );
+                || $this->exec_bound( $gfac_link, "INSERT INTO analysis SET " . implode( ', ', array_map(
+                       function ( $c ) { return "$c=?"; }, array_keys( $columns ) ) ), array_values( $columns ) );
          if ( ! $result && mysqli_errno( $gfac_link ) === 1054 ) {
             ## The column went after the request was staged: the ALTER needs no idle host, and the next repair tracks the job.
             $this->message[] = "WARNING: job {$this->data['eprfile']}: gfac.analysis has no HPCAnalysisRequestID column, so the job is"

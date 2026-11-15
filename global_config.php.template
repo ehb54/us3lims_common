@@ -287,6 +287,7 @@ $default_local_cluster = 'us3iab-node0';
 ##   active    bool    enable the cluster globally
 ##   name      string  hostname; SSH defaults to us3@name
 ##   workdir   string  remote directory prefix for per-request directories
+##                     (letters, digits, '.', '_', '-' and '/' only; submission refuses any other)
 ##   sshport   int     SSH port
 ##   queue     string  Slurm partition
 ##   maxtime   int     walltime limit in minutes; 0 means unlimited

@@ -948,7 +948,7 @@ function dispatch_reconcile_checks( $link, $db, $id )
 ## A Slurm job number, the only job ID a Resolve records.
 function dispatch_job_id_valid( $job_id )
 {
-   return preg_match( '/^[0-9]{1,18}\z/', (string) $job_id ) === 1;
+   return preg_match( '/^[1-9][0-9]{0,17}\z/', (string) $job_id ) === 1;
 }
 
 /**

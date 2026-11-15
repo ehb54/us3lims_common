@@ -28,6 +28,14 @@ class jobsubmit
            error_log( $emsg );
        };
 
+       ## A pool-definition finding, not a refusal of this submission: callers that scan the output
+       ## (gridctl) fail a stage on ERROR: only.
+       $warning_msg = function( $msg ) {
+           $wmsg = "WARNING: class/jobsubmit.php : $msg";
+           echo "$wmsg<br>";
+           error_log( $wmsg );
+       };
+
        ## anonymous info message function - local in scope
 
        $debug_msg = function( $msg, $debug ) {
@@ -57,16 +65,27 @@ class jobsubmit
            return;
        }
 
-       ## dbinst specific configs
+       ## Match lib/utility.php: instance, site, then newlims configuration.
+       ## Use the first existing file; configurations do not merge.
 
-       $dbinst_config_file = '$full_path/cluster_config.php';
+       $dbinst_config_candidates = array(
+           rtrim( $full_path, '/' ) . '/cluster_config.php'
+           ,'../cluster_config.php'
+           ,'../uslims3_newlims/cluster_config.php'
+           );
 
-       if ( !file_exists( $dbinst_config_file ) ) {
-           $dbinst_config_file = '../uslims3_newlims/cluster_config.php';
-           if ( !file_exists( $dbinst_config_file ) ) {
-               $error_msg( "no cluster_config.php file found" );
-               return;
+       $dbinst_config_file = null;
+
+       foreach ( $dbinst_config_candidates as $candidate ) {
+           if ( file_exists( $candidate ) ) {
+               $dbinst_config_file = $candidate;
+               break;
            }
+       }
+
+       if ( $dbinst_config_file === null ) {
+           $error_msg( "no cluster_config.php file found" );
+           return;
        }
 
        ## global configs
@@ -104,14 +123,10 @@ class jobsubmit
            return;
        }
 
+       ## Required keys for SSH-Slurm cluster entries.
        $reqkey = [
            'active'
-           ,'airavata'
            ,'name'
-           ,'submithost'
-           ,'userdn'
-           ,'submittype'
-           ,'httpport'
            ,'workdir'
            ,'sshport'
            ,'queue'
@@ -124,19 +139,36 @@ class jobsubmit
         $reqkey_metascheduler = [
             'active'
             ,'name'
-            ,'airavata'
             ,'clusters'
             ];
 
        foreach ( $cluster_details as $k => $v ) {
            $ok = true;
 
-           ## do all required keys exist for this cluster?
-
            if ( array_key_exists( 'active', $v ) && !$v['active'] ) {
                $debug_msg( "cluster $k not active", $debug );
                continue;
            }
+
+           ## Only accept clusters enabled in both global and instance configuration.
+
+           if ( !array_key_exists( $k, $cluster_configuration ) ) {
+               $debug_msg( "cluster $k not present in \$cluster_configuration", $debug );
+               continue;
+           }
+
+           if ( !is_array( $cluster_configuration[ $k ] ) ) {
+               $error_msg( "cluster configuration for cluster $k is not an array" );
+               continue;
+           }
+
+           if ( !array_key_exists( 'active', $cluster_configuration[ $k ] )
+                || !$cluster_configuration[ $k ][ 'active' ] ) {
+               $debug_msg( "cluster $k inactive in \$cluster_configuration", $debug );
+               continue;
+           }
+
+           ## do all required keys exist for this cluster?
 
            foreach ( array_key_exists( "clusters", $v )
                      ? $reqkey_metascheduler
@@ -153,9 +185,78 @@ class jobsubmit
                continue;
            }
 
-           if ( $v['airavata'] ) {
-               $debug_msg( "cluster $k airavata, skipped", $debug );
-               continue;
+           ## A metascheduler pool whose 'clusters' list names a key that
+           ## does not exist in $cluster_details at all (a typo, a renamed
+           ## or removed cluster) must fail loudly here rather than silently
+           ## shrinking the pool -- the dispatch selector itself only sees the
+           ## candidate list it is handed and has no way to tell "this name
+           ## was never configured anywhere" from "this real cluster just
+           ## happens to be inactive right now".
+           ##
+           ## This validation accepted a 'clusters'
+           ## value that was not an array at all (foreach on a string warns
+           ## and iterates zero times, so the pool entry was silently kept
+           ## with an unusable member list), an empty array (a pool with
+           ## nothing to ever choose from), a pool naming itself as its own
+           ## member, another pool nested inside this one's member list
+           ## (the dispatch selector expects real clusters only), and a member that
+           ## exists in $cluster_details but is not actually enabled for
+           ## this instance (the same active/present checks already run
+           ## for the pool entry itself above, never run per-member).
+           if ( array_key_exists( "clusters", $v ) ) {
+               if ( !is_array( $v[ 'clusters' ] ) ) {
+                   $warning_msg( "metascheduler '$k' has a 'clusters' value that is not an array" );
+                   $ok = false;
+               } elseif ( count( $v[ 'clusters' ] ) === 0 ) {
+                   $warning_msg( "metascheduler '$k' has an empty 'clusters' list" );
+                   $ok = false;
+               } else {
+                   foreach ( $v[ 'clusters' ] as $member ) {
+                       if ( $member === $k ) {
+                           $warning_msg( "metascheduler '$k' lists itself in its own 'clusters'" );
+                           $ok = false;
+                           continue;
+                       }
+                       if ( !array_key_exists( $member, $cluster_details ) ) {
+                           $warning_msg( "metascheduler '$k' lists '$member' in its 'clusters', "
+                                     . "but no such cluster exists in \$cluster_details" );
+                           $ok = false;
+                           continue;
+                       }
+                       if ( is_array( $cluster_details[ $member ] )
+                            && array_key_exists( 'clusters', $cluster_details[ $member ] ) ) {
+                           $warning_msg( "metascheduler '$k' lists another pool ('$member') in its"
+                                     . " 'clusters', not a real cluster" );
+                           $ok = false;
+                           continue;
+                       }
+                       ## The per-instance check below (cluster_configuration) is not
+                       ## the same thing as this host-level one: a cluster the
+                       ## upgrade retired ($cluster_details
+                       ## ['active'] => false, e.g. a dead Airavata entry) can still
+                       ## be enabled in a given instance's own cluster_configuration,
+                       ## which never gets revisited once a cluster is retired.
+                       if ( !is_array( $cluster_details[ $member ] )
+                            || empty( $cluster_details[ $member ][ 'active' ] ) ) {
+                           $warning_msg( "metascheduler '$k' lists '$member' in its 'clusters', but it"
+                                     . " is not active in \$cluster_details" );
+                           $ok = false;
+                           continue;
+                       }
+                       if ( !array_key_exists( $member, $cluster_configuration )
+                            || !is_array( $cluster_configuration[ $member ] )
+                            || empty( $cluster_configuration[ $member ][ 'active' ] ) ) {
+                           $warning_msg( "metascheduler '$k' lists '$member' in its 'clusters', but it"
+                                     . " is not enabled for this instance (missing or inactive in"
+                                     . " \$cluster_configuration)" );
+                           $ok = false;
+                           continue;
+                       }
+                   }
+               }
+               if ( !$ok ) {
+                   continue;
+               }
            }
 
            ## go with entry
@@ -179,11 +280,36 @@ class jobsubmit
       $this->xmlfile = "";
    }
 
+   ## Record the real cluster a metascheduler pseudo-cluster submission
+   ## resolved to, so update_db() can write it to gfac.analysis separately
+   ## from cluster_shortname (which stays the pseudo name). Call after
+   ## parse_input()/clear(), since clear() wipes $data. A direct submission
+   ## to a real cluster never calls this, so the field stays unset/NULL.
+   public function set_metascheduler_cluster_executing( $cluster )
+   {
+      $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ] = $cluster;
+   }
+
+   ## The real $this->grid[...] entry to read for every execution-time
+   ## config lookup (workdir, queue, sshport, maxtime, ppn/ppbj/maxproc,
+   ## login, ...): metaschedulerClusterExecuting when a metascheduler
+   ## pseudo-cluster has been resolved to a real one, else cluster_shortname
+   ## itself for a direct submission. cluster_shortname is still what gets
+   ## written to gfac.analysis and shown to the user -- this is only for
+   ## "which real machine do we actually run this on".
+   public function execution_cluster()
+   {
+      return $this->data[ 'job' ][ 'metaschedulerClusterExecuting' ]
+             ?? $this->data[ 'job' ][ 'cluster_shortname' ];
+   }
+
    ## Request status
    function status()
    {
       if ( isset( $this->data['dataset']['status'] ) )
+      {
          return $this->data['dataset']['status'];
+      }
 
       return 'Status unavailable';
    }
@@ -241,7 +367,9 @@ class jobsubmit
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'job' )
+         {
               break;
+         }
 
          if ( $parser->nodeType == XMLReader::ELEMENT )
          {
@@ -297,7 +425,9 @@ class jobsubmit
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'database' )
+         {
               break;
+         }
 
          if ( $parser->nodeType == XMLReader::ELEMENT )
          {
@@ -329,18 +459,56 @@ class jobsubmit
 
    function parse_jobParameters( &$parser, &$job )
    {
-      $parameters = array();
+      $parameters  = array();
+      $occurrences = array();
 
       while ( $parser->read() )
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'jobParameters' )
+         {
               break;
+         }
 
          $tag = $parser->name;
-         if ( $tag == "#text" ) continue;
+         if ( $tag == "#text" )
+         { continue;
+         }
 
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
+         $occurrences[ $tag ] = isset( $occurrences[ $tag ] ) ? $occurrences[ $tag ] + 1 : 1;
+
+         ## A few elements carry their meaning in further attributes rather than
+         ## in 'value': GA's bucket_fixed records which axes are held fixed in
+         ## fixedtype, xtype and ytype. Keeping only 'value' discarded those,
+         ## so anything reading this array could not tell a fixed axis from a
+         ## free one. Named "<tag>_<attribute>", which is how the historical
+         ## extraction names them, so one spelling serves both.
+         foreach ( array( 'fixedtype', 'xtype', 'ytype' ) as $attribute )
+         {
+            $value = $parser->getAttribute( $attribute );
+
+            if ( $value !== null )
+            {
+               $parameters[ $tag . '_' . $attribute ] = $value;
+            }
+         }
+      }
+
+      ## A repeated element carries its meaning in how many there are rather
+      ## than in any one of them: GA's buckets are written as one <bucket> each
+      ## with no count element anywhere, and only the last of them survives the
+      ## assignment above. Named "<tag>_count", which is how the historical
+      ## extraction names it, and never written over an element that already
+      ## holds that name, so a real vars_count stays the request's own value.
+      foreach ( $occurrences as $tag => $seen )
+      {
+         $key = $tag . '_count';
+
+         if ( ! array_key_exists( $key, $parameters ) )
+         {
+            $parameters[ $key ] = $seen;
+         }
       }
 
       $job[ 'jobParameters' ] = $parameters;
@@ -350,13 +518,17 @@ class jobsubmit
    {
       $dataset = array();
 
-      if ( ! isset( $this->data[ 'dataset' ] ) ) $this->data[ 'dataset' ] = array();
+      if ( ! isset( $this->data[ 'dataset' ] ) )
+      { $this->data[ 'dataset' ] = array();
+      }
 
       while ( $parser->read() )
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'dataset' )
+         {
               break;
+         }
 
          $tag = $parser->name;
 
@@ -383,7 +555,9 @@ class jobsubmit
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'files' )
+         {
               break;
+         }
 
          $tag = $parser->name;
 
@@ -393,8 +567,20 @@ class jobsubmit
             case 'auc'       :
             case 'edit'      :
             case 'model'     :
+               ## Keyed by role, not positional: a <files> block names each of
+               ## these at most once, and callers (the runtime advisory) need
+               ## the filename for a specific role, not the Nth one present.
+               $files[ $tag ] = $parser->getAttribute( 'filename' );
+              break;
+
             case 'noise'     :
-               array_push( $files, $parser->getAttribute( 'filename' ) );
+               ## Unlike the roles above, dbinst writes one <noise> per noise
+               ## file (ri and ti noise can both be in use), so this is a list.
+               if ( ! isset( $files[ 'noise' ] ) )
+               {
+                  $files[ 'noise' ] = array();
+               }
+               $files[ 'noise' ][] = $parser->getAttribute( 'filename' );
               break;
          }
       }
@@ -404,29 +590,54 @@ class jobsubmit
    function parse_parameters( &$parser, &$dataset )
    {
       $parameters = array();
+      $speedsteps = array();
 
       while ( $parser->read() )
       {
          if ( $parser->nodeType == XMLReader::END_ELEMENT &&
               $parser->name     == 'parameters' )
+         {
               break;
+         }
 
          $tag = $parser->name;
-         if ( $tag == "#text" ) continue;
+         if ( $tag == "#text" )
+         { continue;
+         }
+
+         ## <speedstep> repeats, one per step, and carries its own attributes
+         ## rather than a single "value" like every other parameter tag.
+         if ( $tag == 'speedstep' )
+         {
+            array_push( $speedsteps, array(
+               'rotorspeed'    => $parser->getAttribute( 'rotorspeed' ),
+               'duration_hrs'  => $parser->getAttribute( 'duration_hrs' ),
+               'duration_mins' => $parser->getAttribute( 'duration_mins' ),
+            ) );
+            continue;
+         }
 
          $parameters[ $tag ] = $parser->getAttribute( 'value' );
       }
 
-      $dataset[ 'parameters' ] = $parameters;
+      $dataset[ 'parameters' ]  = $parameters;
+      $dataset[ 'speedsteps' ]  = $speedsteps;
    }
 
-   function maxwall()
+   ## Estimated wall minutes for one candidate. $cluster and $mgroupcount
+   ## default to the selected execution cluster and the published group count.
+   public function maxwall( $cluster = null, $mgroupcount = null )
    {
       $parameters = $this->data[ 'job' ][ 'jobParameters' ];
-      $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
+      ## execution_cluster(), not cluster_shortname directly: a metascheduler
+      ## pool submission resolves to a real cluster whose maxtime/ppn/maxproc
+      ## can differ sharply from the pool's own pseudo-entry -- reading
+      ## cluster_shortname here instead used the pool's own (often
+      ## unconfigured/default) wall-time limit, confirmed giving a CG job 44
+      ## minutes instead of the real cluster's 176.
+      $cluster    = $cluster === null ? $this->execution_cluster() : $cluster;
       $queue      = $this->data[ 'job' ][ 'cluster_queue' ];
       $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
-      $max_time   = $this->grid[ $cluster ][ 'maxtime' ];
       $ti_noise   = isset( $parameters[ 'tinoise_option' ] )
                     ? $parameters[ 'tinoise_option' ] > 0
                     : false;
@@ -454,7 +665,7 @@ class jobsubmit
          $time  = (int)( ($time + 59) / 60 ); ## Round up to minutes
       }
 
-      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )  ## PCSA
+      elseif ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )  ## PCSA
       {  ## PCSA
          $vsize      = isset( $parameters[ 'vars_count' ] )
                        ? $parameters[ 'vars_count' ]
@@ -466,10 +677,16 @@ class jobsubmit
                        ? $parameters[ 'curve_type' ]
                        : "SL";
          if ( preg_match( "/HL/", $curvtype ) )
+         {
             $time       = $vsize * $gfiters;
+         }
          else
+         {
             $time       = $vsize * $vsize * $gfiters;
-         if ( $ti_noise || $ri_noise ) $time *= 2;
+         }
+         if ( $ti_noise || $ri_noise )
+         { $time *= 2;
+         }
          $time       = $time / 4;        ## Base time is 15 seconds
          $time       = max( $time, 30 ); ## Minimum PCSA time is 30 minutes
       }
@@ -488,15 +705,23 @@ class jobsubmit
                {  ## If fitting both meniscus and bottom, multiply again
                   $fselect    = $parameters[ 'fit_mb_select' ];
                   if ( $fselect == 3 )
+                  {
                      $time      *= $points;
+                  }
                }
             }
          }
 
-         if ( $ti_noise || $ri_noise ) $time *= 2;
+         if ( $ti_noise || $ri_noise )
+         { $time *= 2;
+         }
          ## Double time for each noise option used
-         if ( $ti_noise )  $time *= 2;
-         if ( $ri_noise )  $time *= 2;
+         if ( $ti_noise )
+         {  $time *= 2;
+         }
+         if ( $ri_noise )
+         {  $time *= 2;
+         }
 
          if (  isset( $parameters[ 's_grid_points' ] )  &&
                isset( $parameters[ 'ff0_grid_points' ] ) )
@@ -505,17 +730,25 @@ class jobsubmit
             $gpts_k     = $parameters[ 'ff0_grid_points' ];
             $gpts_t     = $gpts_s * $gpts_k;
             if ( $gpts_t > 200000 )
+            {
                $time      *= 8;
-            else if ( $gpts_t > 100000 )
+            }
+            elseif ( $gpts_t > 100000 )
+            {
                $time      *= 4;
-            else if ( $gpts_t > 50000 )
+            }
+            elseif ( $gpts_t > 50000 )
+            {
                $time      *= 2;
+            }
          }
 
          if ( isset( $dsparams[ 'simpoints' ] ) )
          {
             $simpts     = $dsparams[ 'simpoints' ];
-            if ( $simpts < 1 ) $simpts = 1;
+            if ( $simpts < 1 )
+            { $simpts = 1;
+            }
             $spfact     = (int)( ( $simpts + 999 ) / 1000 );
             $time      *= $spfact;
          }
@@ -523,9 +756,15 @@ class jobsubmit
          if ( preg_match( "/CG/", $this->data[ 'method' ] ) )
          {
             $time *= 8;
-            if ( preg_match( "/us3iab/", $cluster ) )
-               $time *= 4;
-            else if ( $mxiters > 0 )  $time *= 2;
+            ## Apply the configured custom-grid slowdown for fixed-capacity clusters.
+            $fixed_capacity = (bool) $this->cluster_opt( $cluster, 'fixed_capacity', false );
+            if ( $fixed_capacity )
+            {
+               $time *= (float) $this->cluster_opt( $cluster, 'cg_time_multiplier', 4.0 );
+            }
+            elseif ( $mxiters > 0 )
+            {  $time *= 2;
+            }
          }
       }
 
@@ -534,10 +773,14 @@ class jobsubmit
       if ( isset( $parameters[ 'mc_iterations' ] ) )
       {
          $montecarlo = $parameters[ 'mc_iterations' ];
-         if ( $montecarlo > 0 )  $time *= $montecarlo;
+         if ( $montecarlo > 0 )
+         {  $time *= $montecarlo;
+         }
       }
 
-      if ( $mxiters > 0 )  $time *= $mxiters;
+      if ( $mxiters > 0 )
+      {  $time *= $mxiters;
+      }
 
       $time *= $dset_count;                   ## times number of datasets
       $time  = (int)( ( $time * 11 ) / 10 );  ## Padding (+10%)
@@ -545,13 +788,23 @@ class jobsubmit
       ## Account for parallel group count in max walltime
       if ( $montecarlo > 1  ||  $dset_count > 1 )
       {
-         if ( isset( $this->data[ 'job' ][ 'mgroupcount' ] ) )
+         if ( $mgroupcount !== null )
+         {
+            $mgroupcount = (int) $mgroupcount;
+         }
+         elseif ( isset( $this->data[ 'job' ][ 'mgroupcount' ] ) )
+         {
             $mgroupcount = $this->data[ 'job' ][ 'mgroupcount' ];
+         }
          else
+         {
             $mgroupcount = 1;
+         }
       }
       else
+      {
          $mgroupcount = 1;
+      }
 
       $mgroupcount = max( $mgroupcount, 1 );
 
@@ -592,154 +845,499 @@ class jobsubmit
 
       $time = max( $time, 5 );         ## Minimum time is 5 minutes
 
-      ## pmg is only enabled on clusters that have it set
-
-      if ( !array_key_exists( 'pmg', $this->grid[ $cluster ] ) ||
-           !$this->grid[ $cluster ]['pmg'] ) {
-          $mgroupcount = 1;
-      }          
-
-      ## if usemaxtime is set, use the max time
-
-      if ( array_key_exists( 'usemaxtime', $this->grid[ $cluster ] ) &&
-           $this->grid[ $cluster ]['usemaxtime'] ) {
-          $time = $max_time;
-      }          
-
-      ## if ( $cluster == 'alamo' || $cluster == 'alamo-local' )
-      ## {  ## For alamo, $max_time is hardwired to 2160, and no PMG
-      ## $time        = $max_time;
-      ## ## At most 4 pm groups on alamo
-      ## $mgroupcount = min( 4, $mgroupcount );
-      ## }
-
-      ## else if ( $cluster == 'jacinto' || $cluster == 'jacinto-local' )
-      ## {  ## For jacinto, $max_time is hardwired to 2160, and no PMG
-      ## $time        = $max_time;
-      ## $mgroupcount = min( 2, $mgroupcount );
-      ## }
-
-      ## else if ( $cluster == 'bcf' || $cluster == 'bcf-local' )
-      ## {  ## For bcf, hardwire $max_time to 240 (4 hours), and no PMG
-      ## $time        = $max_time;
-      ## $mgroupcount = 1;
-      ## }
-
-      ## else
-      ## {  ## Maximum time is defined for each cluster
-      ## $time        = min( $time, $max_time );
-      ## }
-##if($time < 480) $time=480;
-
       return (int)$time;
    }
 
-   function nodes()
+   ## Size one analysis group without reducing it to fit cluster capacity.
+   ## Pure: reads $cluster's configuration and returns the GA effective ppbj
+   ## and any capacity adjustment instead of writing them back.
+   protected function tasks_per_group_plan( $cluster = null )
    {
-      $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $is_us3iab  = preg_match( "/us3iab/", $cluster );
-      $parameters = $this->data[ 'job' ][ 'jobParameters' ];
-      $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
-      $ppn        = $this->grid[ $cluster ][ 'ppn'     ];
-      $ppbj       = $this->grid[ $cluster ][ 'ppbj'    ];
+      $cluster       = $cluster === null ? $this->execution_cluster() : $cluster;
+      $cfg           = $this->grid[ $cluster ];
+      $parameters    = $this->data[ 'job' ][ 'jobParameters' ];
+      $fixed         = (bool) $this->cluster_opt( $cluster, 'fixed_capacity', false );
+      $tasks_per_node = max( 1, (int) $cfg[ 'ppn' ] );
+      $ppbj          = max( 1, (int) $cfg[ 'ppbj' ] );
+      $effective_ppbj = $ppbj;
+      $ppmg          = max( 1, (int) $this->cluster_opt( $cluster, 'procs_per_mgroup', 16 ) );
+      $minimum       = $fixed ? min( $ppmg, $tasks_per_node ) : 1;
+      $adjustments   = [];
 
-      if ( $is_us3iab )
-      {  ## It is "us3iab"
-         $mgroup     = 1;
-         $dset_count = $this->data[ 'job' ][ 'datasetCount' ];
-         $montecarlo = $parameters[ 'mc_iterations' ];
-
-         if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
-         {  ## GA or DMGA
-            if ( $montecarlo < 2 )
-            {  ## Non-MC GA
-               $ppn        = 16;
-            }
-            else
-            {  ## GA-MC
-               if ( isset( $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] ) )
-               {
-                  $mgroup     = $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ];
-                  if ( $mgroup > 1 )
-                     $ppn     = (int)( $max_procs / $mgroup );
-                  $ppn        = max( $ppn, 16 );
-               }
-               else
-               {
-                  $mgroup     = 1;
-                  $ppn        = 16;
-                  $this->data[ 'job' ][ 'jobParameters' ][ 'req_mgroupcount' ] = $mgroup;
-               }
-               $this->data[ 'job' ][ 'mgroupcount' ] = $mgroup;
-            }
-         }
-
-         $max_procs  = $ppn;
-         $this->grid[ $cluster ][ 'maxproc' ] = $max_procs;
-         $this->grid[ $cluster ][ 'ppn'     ] = $ppn;
-      }  ## End: us3iab
-
+      ## What one intact group asks for; refused below if it cannot fit.
       if ( preg_match( "/GA/", $this->data[ 'method' ] ) )
-      {  ## GA: procs is demes+1 rounded to procs-per-node
-         $demes = $parameters[ 'demes' ];
-         if ( $demes == 1 )
-         {
-            $demes = $ppbj - 1;
-            if ( $is_us3iab )
-               $demes = max( 15, $demes );
-            if ( $ppbj == 9 )
-               $demes = max( 17, $demes );
-            $ppbj  = $demes + 1;
-            $this->grid[ $cluster ][ 'ppbj' ] = $ppbj;
-         }
-         $procs = $demes + $ppbj;                  ## Procs = demes+1
-         $procs = (int)( $procs / $ppbj ) * $ppbj;  ## Rounded to procs-per-basejob
+      {
+         list( $method_demand, $effective_ppbj ) = $this->gaTasksPerGroup( $parameters, $ppbj, $fixed, $minimum );
       }
-      else if ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
-      {  ## 2DSA:  procs is max_procs, but no more than subgrid count
-         $gsize = $parameters[ 'uniform_grid' ];
-         $gsize = $gsize * $gsize;           ## Subgrid count
-         $procs = min( $ppbj, $gsize );      ## Procs = base or subgrid count
+      elseif ( preg_match( "/2DSA/", $this->data[ 'method' ] ) )
+      {
+         $gsize = (int) $parameters[ 'uniform_grid' ];
+         $method_demand = min( $ppbj, $gsize * $gsize );
       }
-      else if ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
-      {  ## PCSA:  procs is max_procs, but no more than vars_count
-         $vsize = $parameters[ 'vars_count' ];
+      elseif ( preg_match( "/PCSA/", $this->data[ 'method' ] ) )
+      {
+         $vsize = (int) $parameters[ 'vars_count' ];
          if ( $parameters[ 'curve_type' ] != 'HL' )
-            $vsize = $vsize * $vsize;        ## Variations count
-         $procs = min( $ppbj, $vsize );      ## Procs = base or subgrid count
+         {
+            $vsize *= $vsize;
+         }
+         $method_demand = min( $ppbj, $vsize );
+      }
+      else
+      {
+         $method_demand = $ppbj;
       }
 
-      $procs = max( $procs, $ppbj );          ## Minimum procs is procs-per-node
-      $procs = min( $procs, $max_procs );    ## Maximum procs depends on cluster
+      $method_demand = max( $method_demand, $ppbj );
+      $desired       = max( $method_demand, $minimum );
 
-      $nodes = (int)$procs / $ppn;    ## Return nodes, procs divided by procs-per-node
-      $nodes = max( 1, $nodes );
-      return $nodes;
+      ## GA: one MPI rank per deme plus the master. More demes than the cluster
+      ## permits are limited to its capacity, as the GA page says, not refused.
+      $maxproc = (int) $cfg[ 'maxproc' ];
+      if ( preg_match( "/GA/", $this->data[ 'method' ] )  &&  $maxproc > 1  &&  $desired > $maxproc )
+      {
+         $adjustments[] = "GA limited to $maxproc tasks (" . ( $maxproc - 1 ) . " demes) on cluster $cluster";
+         $desired = $maxproc;
+      }
+
+      return [
+         'minimum'      => (int) $minimum,
+         'desired'      => (int) $desired,
+         'tasks_per_node' => (int) $tasks_per_node,
+         'ppbj'         => (int) $effective_ppbj,
+         'adjustments'  => $adjustments,
+      ];
    }
 
-   function max_mgroupcount()
+   ## GA tasks per group and the effective ppbj, without changing configuration.
+   private function gaTasksPerGroup( $parameters, $ppbj, $fixed, $minimum )
    {
-      $cluster    = $this->data[ 'job' ][ 'cluster_shortname' ];
-      $max_procs  = $this->grid[ $cluster ][ 'maxproc' ];
-      $parameters = $this->data[ 'job' ][ 'jobParameters' ];
-      $mciters    = $parameters[ 'mc_iterations' ];
-      $max_groups = 32;
+      $demes = isset( $parameters[ 'demes' ] ) ? (int) $parameters[ 'demes' ] : 1;
+      $auto  = ( $demes == 1 );    ## the user left the deme count to the system
+      if ( $demes == 1 )
+      {
+         $demes = $ppbj - 1;
+         if ( $fixed )
+         {
+            $demes = max( $minimum - 1, $demes );
+         }
+         if ( $ppbj == 9 )
+         {
+            $demes = max( 17, $demes );
+         }
+         $ppbj = $demes + 1;
+      }
+      $tasks = (int)( ( $demes + $ppbj ) / $ppbj ) * $ppbj;
 
-      if ( preg_match( "/SA/", $this->data[ 'method' ] ) )
-      {  ## For 2DSA/PCSA, PMGs is always 1
-         $max_groups = 1;
+      ## As on main: with the deme count left to the system and fewer than 16
+      ## tasks per base job, GA runs twice the ranks. Several small demes evolve
+      ## better than one large one, where a dominant trait can eliminate
+      ## competitors before they are fully expressed. An explicit count is kept.
+      if ( $auto  &&  $ppbj < 16 )
+      {
+         $tasks *= 2;
+      }
+      return [ $tasks, $ppbj ];
+   }
+
+   ## Return the selected cluster's resource plan, or false with an error when
+   ## it cannot fit, and publish procs/mgroupcount for the submission. Integer
+   ## fields describe per-group demand, requested/resolved group counts,
+   ## allocated ranks per group, total MPI tasks, node capacity and node count.
+   public function resource_plan()
+   {
+      $plan = $this->candidate_plan( $this->execution_cluster(), [ 'sizing_only' => true ] );
+      if ( ! $plan[ 'ok' ] )
+      {
+         $this->message[] = $plan[ 'error' ];
+         return false;
       }
 
-      else if ( preg_match( "/us3iab/", $cluster ) )
-      {   ## Us3iab PMGs limited by max procs available
-         $max_groups = $max_procs / 16;
+      foreach ( $plan[ 'sizing_adjustments' ] as $note )
+      {
+         if ( ! in_array( $note, $this->message, true ) )
+            $this->message[] = $note;
       }
 
-      else if ( $mciters > 1 )
-      {  ## No more PMGs than half of MC iterations
-         $max_groups = min( $max_groups, ( $mciters / 2 ) );
+      $this->data[ 'job' ][ 'procs' ]       = $plan[ 'allocated_tasks_per_group' ];
+      $this->data[ 'job' ][ 'mgroupcount' ] = $plan[ 'resolved_groups' ];
+      $this->data[ 'job' ][ 'resource_plan' ] = $plan;
+
+      return $plan;
+   }
+
+   ## Why a cluster entry's sbatch_directives and structured keys would refuse every submission to it,
+   ## or ''. For checking a configuration before the first submission (uslims_upgrade.php step 8).
+   public static function site_directive_error( $cluster, array $cfg )
+   {
+      list( , $error ) = self::plan_directive_fields( $cluster, $cfg );
+      return preg_replace( '/^ERROR:\s*/', '', (string) $error );
+   }
+
+   ## Whether a site directive sets what the plan itself owns: a short option with its value
+   ## attached or not (-t60, -n 8), or a long option or an abbreviation sbatch accepts (--part).
+   protected static function plan_owned_directive( $directive )
+   {
+      if ( ! preg_match( '/^#SBATCH\s+(?:-([A-Za-z])|--([A-Za-z][A-Za-z-]*))/', $directive, $m ) )
+         return false;
+      if ( isset( $m[ 2 ] ) && $m[ 2 ] !== '' )
+      {
+         foreach ( [ 'partition', 'job-name', 'nodes', 'ntasks', 'ntasks-per-node', 'time', 'output', 'error', 'nice' ] as $owned )
+         {
+            if ( strpos( $owned, $m[ 2 ] ) === 0 )
+               return true;
+         }
+         return false;
+      }
+      return strpos( 'pJNntoe', $m[ 1 ] ) !== false;
+   }
+
+   /**
+    * The canonical plan for one explicit candidate cluster. Pure: it never
+    * changes $this->grid, $this->data or the message list, so evaluating
+    * candidates in any order gives the same plans. Returns ok => false with
+    * an error when the job cannot run there. $options:
+    *   priority_directive  the request's own #SBATCH --nice block, if any
+    *   sizing_only         size only: skip site directives and wall time
+    */
+   public function candidate_plan( $cluster, array $options = [] )
+   {
+      if ( ! isset( $this->grid[ $cluster ] ) || ! is_array( $this->grid[ $cluster ] ) )
+      {
+         return [ 'ok' => false, 'cluster' => $cluster, 'error' => "ERROR: cluster $cluster is not configured" ];
       }
 
-      return $max_groups;
+      $cfg           = $this->grid[ $cluster ];
+      $parameters    = $this->data[ 'job' ][ 'jobParameters' ];
+      $single        = (bool) $this->cluster_opt( $cluster, 'single_node', false );
+      $maxproc       = max( 0, (int) $cfg[ 'maxproc' ] );
+      $configured_ppn = (int) $cfg[ 'ppn' ];
+
+      $fail = function ( $error ) use ( $cluster )
+      {
+         return [ 'ok' => false, 'cluster' => $cluster, 'error' => $error ];
+      };
+
+      if ( $configured_ppn < 1 )
+      {
+         return $fail( "ERROR: cluster $cluster has an invalid tasks-per-node capacity" );
+      }
+      if ( $single  &&  $maxproc > $configured_ppn )
+      {
+         return $fail( "ERROR: single-node cluster $cluster permits $maxproc tasks per job,"
+                     . " but only $configured_ppn tasks on its node" );
+      }
+
+      $group_plan    = $this->tasks_per_group_plan( $cluster );
+      $minimum       = $group_plan[ 'minimum' ];
+      $desired       = $group_plan[ 'desired' ];
+      $tasks_per_node = $group_plan[ 'tasks_per_node' ];
+
+      $requested = max( 1, (int)( $parameters[ 'req_mgroupcount' ] ?? 1 ) );
+      $resolved  = min( $requested, $this->group_ceiling( $desired, $maxproc, $cluster ) );
+
+      if ( $resolved < 1 )
+      {
+         return $fail( "ERROR: one intact analysis group needs $desired tasks,"
+                     . " but cluster $cluster permits at most $maxproc" );
+      }
+
+      $allocated = $desired;
+      $total     = $allocated * $resolved;
+      if ( $total % $resolved !== 0  ||  $total > max( $maxproc, $allocated ) )
+      {
+         return $fail( "ERROR: $total ranks cannot be split into $resolved intact groups within $maxproc on $cluster" );
+      }
+
+      ## Sizing alone never depends on site directives (resource_plan()).
+      list( $directive_fields, $directive_error ) = empty( $options[ 'sizing_only' ] )
+         ? $this->plan_directive_fields( $cluster, $cfg )
+         : $this->plan_directive_fields( $cluster, [ 'sbatch_directives' => [] ] );
+      if ( $directive_error !== '' )
+      {
+         return [ 'error_kind' => 'configuration' ] + $fail( $directive_error );
+      }
+
+      $priority = isset( $options[ 'priority_directive' ] ) ? (string) $options[ 'priority_directive' ] : '';
+      foreach ( $priority === '' ? [] : explode( "\n", $priority ) as $line )
+      {
+         if ( $line !== '' && $line[ 0 ] !== '#' )
+         {
+            return $fail( "ERROR: priority directive for $cluster contains a non-directive line" );
+         }
+      }
+
+      list( $walltime, $wallmins, $wall_note ) = empty( $options[ 'sizing_only' ] )
+         ? $this->resolve_walltime( $cfg, $cluster, $resolved )
+         : [ '', 0, '' ];
+
+      $plan = [
+         ## Legacy resource_plan() fields, unchanged.
+         'minimum_tasks_per_group'   => (int) $minimum,
+         'desired_tasks_per_group'   => (int) $desired,
+         'requested_groups'          => (int) $requested,
+         'resolved_groups'           => (int) $resolved,
+         'allocated_tasks_per_group' => (int) $allocated,
+         'total_tasks'               => (int) $total,
+         'tasks_per_node'            => (int) $tasks_per_node,
+         'node_count'                => max( 1, (int) ceil( $total / $tasks_per_node ) ),
+
+         ## Canonical plan fields.
+         'ok'                 => true,
+         'cluster'            => $cluster,
+         'profile'            => $cluster,
+         'method'             => (string) $this->data[ 'method' ],
+         'groups'             => (int) $resolved,
+         'ranks'              => (int) $total,
+         'cpus_per_task'      => 1,
+         'nodes'              => max( 1, (int) ceil( $total / $tasks_per_node ) ),
+         'single_node'        => $single,
+         'effective_ppbj'     => (int) $group_plan[ 'ppbj' ],
+         'walltime'           => $walltime,
+         'walltime_minutes'   => (int) $wallmins,
+         'partition'          => (string)( $cfg[ 'queue' ] ?? '' ),
+         'launcher'           => (string)( $cfg[ 'mpi_launcher' ] ?? 'mpirun' ),
+         'runtime_version'    => (string)( $cfg[ 'runtime_version' ] ?? '' ),
+         'priority_directive' => $priority,
+         'sizing_adjustments' => $group_plan[ 'adjustments' ],
+         'adjustments'        => array_values( array_filter( array_merge(
+                                    $group_plan[ 'adjustments' ], [ $wall_note ] ) ) ),
+      ] + $directive_fields;
+
+      $plan[ 'hash' ] = self::plan_hash( $plan );
+      return $plan;
+   }
+
+   ## Plan every child of a batch on one cluster before pinning the batch
+   ## there: ok only when every child fits. Returns
+   ## [ 'ok' => bool, 'plans' => [ index => plan ], 'failed' => [ index => error ] ].
+   public static function batch_preflight( array $children, $cluster, array $options = [] )
+   {
+      $plans  = [];
+      $failed = [];
+      foreach ( $children as $index => $child )
+      {
+         $plan = $child->candidate_plan( $cluster, $options );
+         $plans[ $index ] = $plan;
+         if ( ! $plan[ 'ok' ] )
+            $failed[ $index ] = $plan[ 'error' ];
+      }
+      return [ 'ok' => ! $failed && $children, 'plans' => $plans, 'failed' => $failed ];
+   }
+
+   ## A stable fingerprint of a plan's contents, excluding the hash itself.
+   public static function plan_hash( array $plan )
+   {
+      unset( $plan[ 'hash' ] );
+      ksort( $plan );
+      return substr( sha1( json_encode( $plan ) ), 0, 16 );
+   }
+
+   ## Wall time for one candidate: [ 'HH:MM:SS', minutes, clamp note or '' ].
+   public function resolve_walltime( $cfg, $cluster, $mgroupcount )
+   {
+      ## usemaxtime: skip computed estimate, use the configured cluster maximum
+      if ( ! empty( $cfg[ 'usemaxtime' ] ) ) {
+         $max_time = (int) $cfg[ 'maxtime' ];
+         if ( $max_time === 0 )
+         {
+            return [ "00:00:00", 999999, '' ];
+         }  ## maxtime=0 means no limit
+         $hours    = (int)( $max_time / 60 );
+         $mins     = (int)( $max_time % 60 );
+         return [ sprintf( "%02d:%02d:00", $hours, $mins ), $max_time, '' ];
+      }
+
+      $wall = $this->maxwall( $cluster, $mgroupcount ) * 3.0;
+
+      if ( ! empty( $cfg[ 'wall_override' ] ) )
+      {
+         $wall = (float) $cfg[ 'wall_override' ];
+      }
+
+      ## Clamp to the cluster's queue limit; maxtime = 0 means unlimited
+      $note = '';
+      $max_time = isset( $cfg[ 'maxtime' ] ) ? (int) $cfg[ 'maxtime' ] : 0;
+      if ( $max_time > 0  &&  $wall > $max_time ) {
+         $note = "NOTE: walltime " . (int)$wall . " min exceeds cluster maxtime $max_time min; clamped to $max_time";
+         $wall = (float) $max_time;
+      }
+
+      $hours    = (int)( $wall / 60 );
+      $mins     = (int)( $wall % 60 );
+      return [ sprintf( "%02d:%02d:00", $hours, $mins ), $hours * 60 + $mins, $note ];
+   }
+
+   ## Resolve site sbatch_directives and structured keys into plan fields:
+   ## [ fields, error ]. A directive may not set what the plan owns, and a
+   ## structured key and a directive may not disagree.
+   protected static function plan_directive_fields( $cluster, array $cfg )
+   {
+      $directives = (array)( $cfg[ 'sbatch_directives' ] ?? [] );
+      $fields = [ 'account' => '', 'qos' => '', 'constraint' => '', 'reservation' => '',
+                  'exclusive' => false, 'memory_basis' => 'none', 'memory_value' => '',
+                  'site_directives' => [] ];
+
+      $named = [ 'account' => '/^#SBATCH\s+(?:--account=|-A\s*)(\S+)$/',
+                 'qos' => '/^#SBATCH\s+--qos=(\S+)$/',
+                 'constraint' => '/^#SBATCH\s+(?:--constraint=|-C\s*)(\S+)$/',
+                 'reservation' => '/^#SBATCH\s+--reservation=(\S+)$/' ];
+
+      foreach ( $directives as $directive )
+      {
+         if ( ! is_string( $directive )
+              || strpos( $directive, "\n" ) !== false
+              || strpos( $directive, "\r" ) !== false
+              || strpos( $directive, '#SBATCH ' ) !== 0 )
+         {
+            return [ [], "invalid sbatch directive for cluster $cluster" ];
+         }
+         if ( self::plan_owned_directive( $directive ) )
+         {
+            return [ [], "ERROR: sbatch directive '$directive' on cluster $cluster overrides a planned resource" ];
+         }
+
+         foreach ( $named as $field => $pattern )
+         {
+            if ( preg_match( $pattern, $directive, $m ) )
+               $fields[ $field ] = $m[ 1 ];
+         }
+         if ( preg_match( '/^#SBATCH\s+--exclusive(=\S+)?$/', $directive ) )
+         {
+            $fields[ 'exclusive' ] = true;
+         }
+         if ( preg_match( '/^#SBATCH\s+--mem(-per-cpu)?(?:=|\s+)(\S+)$/', $directive, $m ) )
+         {
+            $basis = $m[ 1 ] !== '' ? 'per_cpu' : 'per_node';
+            if ( $fields[ 'memory_basis' ] !== 'none' )
+            {
+               return [ [], "ERROR: cluster $cluster sets memory more than once in sbatch_directives" ];
+            }
+            $fields[ 'memory_basis' ] = $basis;
+            $fields[ 'memory_value' ] = $m[ 2 ];
+         }
+         $fields[ 'site_directives' ][] = $directive;
+      }
+
+      ## Fall back to mempercore only when no batch directives are configured.
+      if ( ! $directives  &&  isset( $cfg[ 'mempercore' ] ) )
+      {
+         $fields[ 'memory_basis' ] = 'per_cpu';
+         $fields[ 'memory_value' ] = (string)(int) $cfg[ 'mempercore' ];
+         $fields[ 'site_directives' ][] = '#SBATCH --mem-per-cpu=' . (int) $cfg[ 'mempercore' ];
+      }
+
+      foreach ( [ 'account', 'qos', 'constraint', 'reservation' ] as $field )
+      {
+         if ( ! isset( $cfg[ $field ] ) || (string) $cfg[ $field ] === '' )
+            continue;
+         $value = (string) $cfg[ $field ];
+         if ( $fields[ $field ] !== '' && $fields[ $field ] !== $value )
+         {
+            return [ [], "ERROR: cluster $cluster sets $field to '$value' and to '{$fields[$field]}' in sbatch_directives" ];
+         }
+         if ( $fields[ $field ] === '' )
+         {
+            $fields[ $field ] = $value;
+            $fields[ 'site_directives' ][] = "#SBATCH --$field=$value";
+         }
+      }
+      if ( ! empty( $cfg[ 'exclusive' ] ) && ! $fields[ 'exclusive' ] )
+      {
+         $fields[ 'exclusive' ] = true;
+         $fields[ 'site_directives' ][] = '#SBATCH --exclusive';
+      }
+
+      ## A profile's declared sharing policy: shared execution needs a memory
+      ## request, so an unknown one cannot look like a fit; exclusive asks for
+      ## whole nodes. A profile that declares neither keeps its current behavior.
+      if ( isset( $cfg[ 'sharing' ] ) )
+      {
+         if ( $cfg[ 'sharing' ] === 'exclusive' && ! $fields[ 'exclusive' ] )
+         {
+            $fields[ 'exclusive' ] = true;
+            $fields[ 'site_directives' ][] = '#SBATCH --exclusive';
+         }
+         elseif ( $cfg[ 'sharing' ] === 'shared' && $fields[ 'exclusive' ] )
+         {
+            return [ [], "ERROR: cluster $cluster is set for shared execution but also requests exclusive nodes" ];
+         }
+         elseif ( $cfg[ 'sharing' ] === 'shared' && $fields[ 'memory_basis' ] === 'none' )
+         {
+            return [ [], "ERROR: cluster $cluster is set for shared execution but requests no memory;"
+                         . " set mempercore or a --mem directive, or use exclusive execution" ];
+         }
+         elseif ( ! in_array( $cfg[ 'sharing' ], [ 'shared', 'exclusive' ], true ) )
+         {
+            return [ [], "ERROR: cluster $cluster sharing must be 'shared' or 'exclusive'" ];
+         }
+      }
+
+      return [ $fields, '' ];
+   }
+
+   ## Return the planned node count, or zero when sizing fails.
+   public function nodes()
+   {
+      $plan = $this->resource_plan();
+      return $plan === false ? 0 : $plan[ 'node_count' ];
+   }
+
+   ## Read a per-cluster tuning key, falling back to $default when absent.
+   protected function cluster_opt( $cluster, $key, $default )
+   {
+      if ( ! array_key_exists( $cluster, $this->grid ) )
+      {
+         return $default;
+      }
+
+      return array_key_exists( $key, $this->grid[ $cluster ] )
+             ? $this->grid[ $cluster ][ $key ]
+             : $default;
+   }
+
+   ## How many groups this job may run, ignoring what was requested. The
+   ## ceiling is the lower of what the method allows and what the cluster's
+   ## rank budget holds, and is 0 when one intact group does not fit at all.
+   protected function group_ceiling( $desired, $maxproc, $cluster = null )
+   {
+      $mciters = (int)( $this->data[ 'job' ][ 'jobParameters' ][ 'mc_iterations' ] ?? 1 );
+      $limit   = 32;
+
+      $cluster = $cluster === null ? $this->execution_cluster() : $cluster;
+      if ( ! $this->cluster_opt( $cluster, 'pmg', false )
+           || preg_match( "/SA/", $this->data[ 'method' ] ) )
+      {
+         $limit = 1;
+      }
+      elseif ( $mciters > 1 )
+      {
+         $limit = min( $limit, max( 1, (int)( $mciters / 2 ) ) );
+      }
+
+      ## Parallel masters needs at least three ranks per group. Below that,
+      ## force one group so the standard single-master path runs instead.
+      if ( $desired < 3 )
+      {
+         $limit = 1;
+      }
+
+      return min( $limit, $desired > 0 ? (int)( $maxproc / $desired ) : 0 );
+   }
+
+   ## Return the group ceiling before applying the requested group count.
+   public function max_mgroupcount()
+   {
+      $cluster = $this->execution_cluster();
+      $group_plan = $this->tasks_per_group_plan( $cluster );
+      foreach ( $group_plan[ 'adjustments' ] as $note )
+      {
+         if ( ! in_array( $note, $this->message, true ) )
+            $this->message[] = $note;
+      }
+
+      return $this->group_ceiling(
+         $group_plan[ 'desired' ],
+         max( 0, (int) $this->grid[ $cluster ][ 'maxproc' ] ), $cluster );
    }
 }

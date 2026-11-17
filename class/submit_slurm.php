@@ -543,6 +543,86 @@ class submit_slurm extends jobsubmit
                      . " -mgroupcount $mgroupcount $tarfile";
       }
 
+      ## Capture compute-side provenance while the allocation still exists.
+      ## Slurm accounting is not available on every deployment (including the
+      ## local Docker stack), so querying scontrol/sstat after the job has left
+      ## the queue is too late.  The EXIT trap runs before Slurm releases the
+      ## allocation and adds these small text records to the ordinary result
+      ## tar.  Older cleanup code ignores unknown result members safely.
+      ## The tar is replaced by rename, never appended in place: cleanup may fetch it once 'Finished' arrives.
+      ## GNU time sees the launch node only; resource_usage_scope says when the ranks ran elsewhere.
+      $provenance_script = <<<'BASH'
+us3_job_started_epoch="$(date -u +%s)"
+us3_job_started_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+us3_write_provenance() {
+  us3_exit_code="$?"
+  trap - EXIT
+  us3_job_ended_epoch="$(date -u +%s)"
+  us3_job_ended_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  us3_hostname="$(hostname -f 2>/dev/null || true)"
+  if [ -z "$us3_hostname" ]; then us3_hostname="$(uname -n 2>/dev/null || true)"; fi
+  us3_engine_path="$(command -v us_mpi_analysis 2>/dev/null || true)"
+  us3_engine_sha256=""
+  if [ -n "$us3_engine_path" ] && [ -f "$us3_engine_path" ]; then
+    if command -v sha256sum >/dev/null 2>&1; then
+      us3_engine_sha256="$(sha256sum "$us3_engine_path" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+      us3_engine_sha256="$(shasum -a 256 "$us3_engine_path" | awk '{print $1}')"
+    fi
+  fi
+  us3_engine_build_token="$(awk '/Us_Mpi_Analysis/{print $2; exit}' stderr 2>/dev/null || true)"
+  us3_limit=""
+  if command -v timeout >/dev/null 2>&1; then us3_limit="timeout 20"; fi
+  $us3_limit scontrol show job "${SLURM_JOB_ID:-}" -o > slurm_job.txt 2> slurm_job.stderr || true
+  $us3_limit sstat -a -j "${SLURM_JOB_ID:-}" --noheader --parsable2 \
+    -o JobID,AveCPU,MaxRSS,MaxVMSize,AveRSS,AveVMSize \
+    > slurm_step_statistics.psv 2> slurm_step_statistics.stderr || true
+  if [ "$us3_launcher" = mpirun ] && [ "${SLURM_NNODES:-1}" = 1 ]; then
+    us3_scope=whole_job
+  else
+    us3_scope=launch_node_only
+  fi
+  {
+    printf 'schema_version=1\n'
+    printf 'job_started_epoch=%s\n' "$us3_job_started_epoch"
+    printf 'job_started_utc=%s\n' "$us3_job_started_utc"
+    printf 'job_ended_epoch=%s\n' "$us3_job_ended_epoch"
+    printf 'job_ended_utc=%s\n' "$us3_job_ended_utc"
+    printf 'elapsed_seconds=%s\n' "$((us3_job_ended_epoch - us3_job_started_epoch))"
+    printf 'exit_code=%s\n' "$us3_exit_code"
+    printf 'hostname=%s\n' "$us3_hostname"
+    printf 'kernel=%s\n' "$(uname -srvmo 2>/dev/null || uname -a)"
+    printf 'slurm_job_id=%s\n' "${SLURM_JOB_ID:-}"
+    printf 'slurm_job_name=%s\n' "${SLURM_JOB_NAME:-}"
+    printf 'slurm_cluster_name=%s\n' "${SLURM_CLUSTER_NAME:-}"
+    printf 'slurm_partition=%s\n' "${SLURM_JOB_PARTITION:-}"
+    printf 'slurm_node_list=%s\n' "${SLURM_JOB_NODELIST:-}"
+    printf 'slurm_nnodes=%s\n' "${SLURM_NNODES:-}"
+    printf 'slurm_ntasks=%s\n' "${SLURM_NTASKS:-}"
+    printf 'slurm_cpus_per_task=%s\n' "${SLURM_CPUS_PER_TASK:-}"
+    printf 'slurm_cpus_on_node=%s\n' "${SLURM_CPUS_ON_NODE:-}"
+    printf 'slurm_mem_per_cpu=%s\n' "${SLURM_MEM_PER_CPU:-}"
+    printf 'slurm_mem_per_node=%s\n' "${SLURM_MEM_PER_NODE:-}"
+    printf 'engine_path=%s\n' "$us3_engine_path"
+    printf 'engine_sha256=%s\n' "$us3_engine_sha256"
+    printf 'engine_build_token=%s\n' "$us3_engine_build_token"
+    printf 'launcher=%s\n' "$us3_launcher"
+    printf 'resource_usage_scope=%s\n' "$us3_scope"
+  } > job_provenance.env
+  if [ -f output/analysis-results.tar ]; then
+    us3_tar_tmp=output/.analysis-results.tar.provenance
+    cp -p output/analysis-results.tar "$us3_tar_tmp" \
+      && tar -rf "$us3_tar_tmp" job_provenance.env job_resource_usage.txt slurm_job.txt \
+           slurm_job.stderr slurm_step_statistics.psv slurm_step_statistics.stderr 2>>stderr \
+      && mv -f "$us3_tar_tmp" output/analysis-results.tar \
+      || rm -f "$us3_tar_tmp"
+  fi
+  exit "$us3_exit_code"
+}
+trap us3_write_provenance EXIT
+trap 'exit 143' TERM
+BASH;
+
       $script =
          "#!/bin/bash\n"
          . implode( "\n", self::plan_directives( $plan, $requestID, $workdir ) ) . "\n"
@@ -551,7 +631,14 @@ class submit_slurm extends jobsubmit
          . $ompi_mca
          . "export QT_LOGGING_RULES='*.debug=true'\n\n"
          . "cd $workdir\n\n"
-         . "$launch_cmd\n";
+         . "us3_launcher=$launcher\n"
+         . $provenance_script . "\n"
+         . ": > job_resource_usage.txt\n"
+         . "if /usr/bin/time -v -o job_resource_usage.txt true >/dev/null 2>&1; then\n"
+         . "  /usr/bin/time -v -o job_resource_usage.txt $launch_cmd\n"
+         . "else\n"
+         . "  $launch_cmd\n"
+         . "fi\n";
 
       ## Held for update_db(), which writes it to HPCAnalysisResult.jobfile.
       $this->data[ 'jobfile' ] = $script;

@@ -136,7 +136,7 @@ function dispatch_alert_scan_left( array $open, $db, array $seen )
  * signature and open items are as its last scan left them, recorded in $scanned, is not read again.
  * Returns the instances whose requests held for the database were released, due now.
  */
-function dispatch_alert_scan( $link, $gdb, array $dbs, array $busy = null, array $sigs = array(), array &$scanned = null )
+function dispatch_alert_scan( $link, $gdb, array $dbs, ?array $busy = null, array $sigs = array(), ?array &$scanned = null )
 {
    $busy = $busy === null ? $dbs : array_values( array_intersect( $dbs, $busy ) );
    $open = dispatch_rows( $link, "SELECT dedupKey, kind, instanceDb FROM `$gdb`.dispatch_alert WHERE openFlag = 1" );

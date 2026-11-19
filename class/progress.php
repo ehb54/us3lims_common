@@ -13,7 +13,7 @@ function submit_progress( $msg )
     $styled = true;
   }
 
-  echo "<div class='submit-progress'>" . htmlspecialchars( $msg ) . "</div>\n";
+  echo "<div class='submit-progress'>" . htmlspecialchars( $msg, ENT_COMPAT | ENT_HTML401 ) . "</div>\n";
 
   // A buffer not started with PHP_OUTPUT_HANDLER_FLUSHABLE (e.g. gridctl
   // submitone.php's) raises a notice on ob_flush(); ob_get_level() alone

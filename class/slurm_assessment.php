@@ -251,7 +251,7 @@ function slurm_observation_is_fresh( array $obs, $now, $max_age )
  * in this cycle share one query. Candidates left when the cycle budget is spent
  * are UNKNOWN. $clock returns the local time, for the budget only.
  */
-function slurm_assess_candidates( callable $run, array $plans, array $opts = array(), callable $clock = null )
+function slurm_assess_candidates( callable $run, array $plans, array $opts = array(), ?callable $clock = null )
 {
    $clock     = $clock !== null ? $clock : 'time';
    $allowance = isset( $opts[ 'allowance' ] ) ? (int) $opts[ 'allowance' ] : 0;

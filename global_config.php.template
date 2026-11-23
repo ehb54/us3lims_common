@@ -278,6 +278,8 @@ $single_tenant_deployment = false;
 $default_local_cluster = 'us3iab-node0';
 
 ## Define cluster connection details and resource limits here.
+## TODO marks a site's own login, work directory or module lines, which stay out of this file;
+## uslims_upgrade.php --cluster-values sets them from a private one.
 ## Instance cluster_config.php selects which clusters may be used; loaders
 ## fall back to ../cluster_config.php, then ../uslims3_newlims/cluster_config.php.
 ## The first existing file wins. A cluster must be active in both configurations.
@@ -354,22 +356,22 @@ $cluster_details =
      'anvil' => [
          'active'              => false
          ,'name'               => 'anvil.rcac.purdue.edu'
-         ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
-         ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
+         ,'login'              => 'TODO@anvil.rcac.purdue.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
          ,'maxtime'            => 5760
          ,'ppn'                => 32
          ,'ppbj'               => 32
          ,'maxproc'            => 32
-         ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for x-us3 account"
+         ,'mpi_launcher'       => 'mpirun'
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules"
      ]
      ,'anvil-bigmem' => [
          'active'              => false
          ,'name'               => 'anvil.rcac.purdue.edu'
-         ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
-         ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
+         ,'login'              => 'TODO@anvil.rcac.purdue.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'highmem'
          ,'maxtime'            => 1440
@@ -377,14 +379,14 @@ $cluster_details =
          ,'ppbj'               => 32
          ,'maxproc'            => 32
          ,'sbatch_directives'  => [ '#SBATCH --mem-per-cpu=3000' ]
-         ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for x-us3 account"
+         ,'mpi_launcher'       => 'mpirun'
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules"
      ]
      ,'anvil-gamc' => [
          'active'              => false
          ,'name'               => 'anvil.rcac.purdue.edu'
-         ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
-         ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
+         ,'login'              => 'TODO@anvil.rcac.purdue.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'wholenode'
          ,'maxtime'            => 5760
@@ -393,14 +395,14 @@ $cluster_details =
          ,'maxproc'            => 2048
          ,'pmg'                => true
          ,'pmgonly'            => true
-         ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for x-us3 account"
+         ,'mpi_launcher'       => 'mpirun'
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules"
      ]
      ,'anvil-gamc-bigmem' => [
          'active'              => false
          ,'name'               => 'anvil.rcac.purdue.edu'
-         ,'login'              => 'x-us3@anvil.rcac.purdue.edu'
-         ,'workdir'            => '/anvil/projects/x-mcb070039n/us3'
+         ,'login'              => 'TODO@anvil.rcac.purdue.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'highmem'
          ,'maxtime'            => 1440
@@ -409,8 +411,8 @@ $cluster_details =
          ,'maxproc'            => 2048
          ,'pmg'                => true
          ,'pmgonly'            => true
-         ,'mpi_launcher'       => 'srun'
-         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for x-us3 account"
+         ,'mpi_launcher'       => 'mpirun'
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules"
      ]
      ## Bridges-2: configure MPI and UltraScan modules before activation.
      ## Keep airavata-workdirs until the remote directory is migrated; changing
@@ -418,21 +420,22 @@ $cluster_details =
      ,'bridges2' => [
          'active'              => false
          ,'name'               => 'bridges2.psc.edu'
-         ,'login'              => 'us3@bridges2.psc.edu'
-         ,'workdir'            => '/ocean/projects/mcb210002p/us3/airavata-workdirs'
+         ,'login'              => 'TODO@bridges2.psc.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'RM-shared'
          ,'maxtime'            => 2880
          ,'ppn'                => 32
          ,'ppbj'               => 32
-         ,'maxproc'            => 1024
-         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for us3 account"
+         ,'maxproc'            => 32
+         ,'single_node'        => true
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules"
      ]
      ,'bridges2-gamc' => [
          'active'              => false
          ,'name'               => 'bridges2.psc.edu'
-         ,'login'              => 'us3@bridges2.psc.edu'
-         ,'workdir'            => '/ocean/projects/mcb210002p/us3/airavata-workdirs'
+         ,'login'              => 'TODO@bridges2.psc.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'RM'
          ,'maxtime'            => 2880
@@ -441,7 +444,7 @@ $cluster_details =
          ,'maxproc'            => 1024
          ,'pmg'                => true
          ,'pmgonly'            => true
-         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules for us3 account"
+         ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules"
      ]
      ## Chinook (U Montana HPC).
      ,'chinook-local' => [
@@ -493,8 +496,8 @@ $cluster_details =
      ,'expanse' => [
          'active'              => false
          ,'name'               => 'expanse.sdsc.edu'
-         ,'login'              => 'us3@login.expanse.sdsc.edu'
-         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
+         ,'login'              => 'TODO@login.expanse.sdsc.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
          ,'maxtime'            => 2880
@@ -507,8 +510,8 @@ $cluster_details =
      ,'expanse-bigmem' => [
          'active'              => false
          ,'name'               => 'expanse.sdsc.edu'
-         ,'login'              => 'us3@login.expanse.sdsc.edu'
-         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
+         ,'login'              => 'TODO@login.expanse.sdsc.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'shared'
          ,'maxtime'            => 2880
@@ -522,8 +525,8 @@ $cluster_details =
      ,'expanse-gamc' => [
          'active'              => false
          ,'name'               => 'expanse.sdsc.edu'
-         ,'login'              => 'us3@login.expanse.sdsc.edu'
-         ,'workdir'            => '/expanse/lustre/scratch/us3/temp_project/airavata-workingdirs'
+         ,'login'              => 'TODO@login.expanse.sdsc.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'compute'
          ,'maxtime'            => 2880
@@ -540,8 +543,8 @@ $cluster_details =
      ,'lonestar6-gamc' => [
          'active'              => false
          ,'name'               => 'ls6.tacc.utexas.edu'
-         ,'login'              => 'us3@ls6.tacc.utexas.edu'
-         ,'workdir'            => '/work/01623/us3/ls6/us3'
+         ,'login'              => 'TODO@ls6.tacc.utexas.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'normal'
          ,'maxtime'            => 2880
@@ -559,8 +562,8 @@ $cluster_details =
      ,'umontana-local' => [
          'active'              => false
          ,'name'               => 'login.gscc.umt.edu'
-         ,'login'              => 'bd142854e@login.gscc.umt.edu'
-         ,'workdir'            => '/home/bd142854e/cluster/work/'
+         ,'login'              => 'TODO@login.gscc.umt.edu'
+         ,'workdir'            => '/TODO'
          ,'sshport'            => 22
          ,'queue'              => 'griz_partition'
          ,'maxtime'            => 0
@@ -568,7 +571,7 @@ $cluster_details =
          ,'ppn'                => 72
          ,'ppbj'               => 36
          ,'maxproc'            => 144
-         ,'env_script_lines'   => "module use /home/bd142854e/local/modulefiles\nmodule load rocks/openmpi\nmodule load qt5\nexport LD_LIBRARY_PATH=/home/bd142854e/cluster/lib:\$LD_LIBRARY_PATH\nexport PATH=/home/bd142854e/cluster/bin:\$PATH"
+         ,'env_script_lines'   => "module purge\n## TODO: load the OpenMPI and Qt/UltraScan modules"
      ]
      ## -----------------------------------------------------------------------
      ## USiaB appliance clusters

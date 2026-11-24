@@ -446,50 +446,6 @@ $cluster_details =
          ,'pmgonly'            => true
          ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules"
      ]
-     ## Chinook (U Montana HPC).
-     ,'chinook-local' => [
-         'active'              => false
-         ,'name'               => 'chinook.hs.umt.edu'
-         ,'workdir'            => '/home/us3/lims/work/'
-         ,'sshport'            => 22
-         ,'queue'              => 'batch'
-         ,'maxtime'            => 0
-         ,'usemaxtime'         => true
-         ,'ppn'                => 64
-         ,'ppbj'               => 8
-         ,'maxproc'            => 64
-         ,'env_script_lines'   => "export LD_LIBRARY_PATH=/home/us3/cluster/lib:/opt/qt/lib:\$LD_LIBRARY_PATH\nexport PATH=/home/us3/cluster/bin:\$PATH"
-     ]
-     ,'demeler1-local' => [
-         'active'              => false
-         ,'name'               => 'demeler1.uleth.ca'
-         ,'login'              => 'us3@demeler1.uleth.ca'
-         ,'workdir'            => '/home/us3/lims/work/'
-         ,'sshport'            => 22
-         ,'queue'              => 'batch'
-         ,'maxtime'            => 0
-         ,'usemaxtime'         => true
-         ,'ppn'                => 128
-         ,'ppbj'               => 8
-         ,'maxproc'            => 128
-         ,'pmg'                => true
-         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
-     ]
-     ,'demeler9-local' => [
-         'active'              => false
-         ,'name'               => 'demeler9.uleth.ca'
-         ,'login'              => 'us3@demeler9.uleth.ca'
-         ,'workdir'            => '/home/us3/lims/work/'
-         ,'sshport'            => 22
-         ,'queue'              => 'batch'
-         ,'maxtime'            => 0
-         ,'usemaxtime'         => true
-         ,'ppn'                => 128
-         ,'ppbj'               => 8
-         ,'maxproc'            => 128
-         ,'pmg'                => true
-         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
-     ]
      ## Expanse: preserve the module environment; module purge removes srun from PATH.
      ## Keep airavata-workingdirs until the remote directory is migrated; changing
      ## only this template breaks staging and result collection.
@@ -538,60 +494,9 @@ $cluster_details =
          ,'mpi_launcher'       => 'srun'
          ,'env_script_lines'   => "module purge\n## TODO: module use the project modulefile path first; SDSC provides no ultrascan module\nmodule load ultrascan3/4.0"
      ]
-     ## Lonestar6: verify the allocation work directory and configure modules
-     ## before activation. ibrun reads the task count from Slurm.
-     ,'lonestar6-gamc' => [
-         'active'              => false
-         ,'name'               => 'ls6.tacc.utexas.edu'
-         ,'login'              => 'TODO@ls6.tacc.utexas.edu'
-         ,'workdir'            => '/TODO'
-         ,'sshport'            => 22
-         ,'queue'              => 'normal'
-         ,'maxtime'            => 2880
-         ,'ppn'                => 128
-         ,'ppbj'               => 32
-         ,'maxproc'            => 8192
-         ,'pmg'                => true
-         ,'pmgonly'            => true
-         ,'mpi_launcher'       => 'ibrun'
-         ,'env_script_lines'   => "module purge\n## TODO: load correct Qt/UltraScan modules; ibrun does not need explicit MPI exports"
-     ]
-     ## -----------------------------------------------------------------------
-     ## U Montana (Grizzly)
-     ## -----------------------------------------------------------------------
-     ,'umontana-local' => [
-         'active'              => false
-         ,'name'               => 'login.gscc.umt.edu'
-         ,'login'              => 'TODO@login.gscc.umt.edu'
-         ,'workdir'            => '/TODO'
-         ,'sshport'            => 22
-         ,'queue'              => 'griz_partition'
-         ,'maxtime'            => 0
-         ,'usemaxtime'         => true
-         ,'ppn'                => 72
-         ,'ppbj'               => 36
-         ,'maxproc'            => 144
-         ,'env_script_lines'   => "module purge\n## TODO: load the OpenMPI and Qt/UltraScan modules"
-     ]
      ## -----------------------------------------------------------------------
      ## USiaB appliance clusters
      ## -----------------------------------------------------------------------
-     ,'us3iab-devel' => [
-         'active'              => false
-         ,'name'               => 'us3iab-devel.attlocal.net'
-         ,'login'              => 'us3@us3iab-devel.attlocal.net'
-         ,'fixed_capacity'     => true
-         ,'workdir'            => '/export/home/us3/lims/work/'
-         ,'sshport'            => 22
-         ,'queue'              => 'normal'
-         ,'maxtime'            => 0
-         ,'ppn'                => 8
-         ,'ppbj'               => 8
-         ,'maxproc'            => 8
-         ,'single_node'        => true
-         ,'usemaxtime'         => true
-         ,'env_script_lines'   => "module purge\nmodule load mpi/mpich-x86_64\nmodule load ultrascan/mpi"
-     ]
      ## Set ppn, ppbj and maxproc to the appliance capacity at installation.
      ## ppn must match Slurm CPUTot.
      ##

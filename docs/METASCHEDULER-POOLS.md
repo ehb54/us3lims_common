@@ -1,19 +1,71 @@
-# Setting up a metascheduler pool
+# Metascheduler pools
+
+Let users submit to a group of clusters instead of choosing one. The dispatch
+worker picks a cluster for each request, by rules you set.
+
+## Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+  - [Members](#members)
+  - [Pool entry](#pool-entry)
+  - [Dispatch settings](#dispatch-settings)
+  - [Instances and accounts](#instances-and-accounts)
+- [Examples](#examples)
+- [Usage](#usage)
+  - [Check the policy](#check-the-policy)
+  - [Test a pool](#test-a-pool)
+  - [Turn a pool off](#turn-a-pool-off)
+- [Troubleshooting](#troubleshooting)
+- [Related files](#related-files)
+
+## Overview
 
 A pool is one destination on the submit page that stands for several clusters.
-The dispatch worker, part of `submitctl.php`, chooses a member for each request.
-A pool is off until a site adds one. Choosing a named cluster never uses a pool.
+A request to it is recorded, and the dispatch worker (part of `submitctl.php`)
+chooses a member, submits the job and follows it. Choosing a named cluster
+submits directly and never uses a pool.
 
-The names below (`campus`, `lab`, `center`, `pool`) are examples. Keep accounts,
+No pool exists until a site adds one.
+
+The names `campus`, `lab`, `center` and `pool` below are examples. Keep accounts,
 logins and work directories out of public files.
 
-## Getting started
+## Features
 
-A pool of one local cluster, for a site that has `campus` working by name:
+| Feature | Use it to |
+| --- | --- |
+| Round robin | share requests evenly |
+| Weighted round robin | send more requests to larger clusters |
+| Ordered | always prefer one cluster |
+| Overflow | use a second group only when the first cannot take or start the job |
+| Waiting | hold a request until a cluster can start it |
 
-1. `php <instance>/tools/check_installation.php --deep` passes its "Dispatch
-   service" section.
-2. In `global_config.php`, outside the `uslims_upgrade.php` block:
+## Requirements
+
+- LIMS 4.3.0 or later, with `submitctl.php` running.
+- The dispatch tables and worker in order. The "Dispatch service" section of this
+  check must pass:
+
+  ```sh
+  php <instance>/tools/check_installation.php --deep
+  ```
+
+- The heartbeat check in cron. A host upgraded by hand needs the line that
+  `uslims_upgrade.php` prints at the end of its run.
+- At least one Slurm cluster that already works when it is chosen by name.
+
+While the tables are missing, the submit pages refuse a pool and submit nothing.
+
+## Quick start
+
+A pool of one local cluster, `campus`.
+
+1. In `global_config.php`, after `$cluster_details` and outside the block between
+   `## BEGIN uslims_upgrade.php settings` and `## END uslims_upgrade.php settings`:
 
    ```php
    $cluster_details[ 'campus' ][ 'tier' ] = 'local';
@@ -24,54 +76,97 @@ A pool of one local cluster, for a site that has `campus` working by name:
    ];
    ```
 
-   Set the tier in the `--cluster-values` file instead when that file manages
-   `campus`.
-3. In the instance's `$cluster_configuration`, add `'pool' => [ 'active' => true ]`.
+   If a `--cluster-values` file manages `campus`, set its tier there instead.
+
+2. In the instance's `$cluster_configuration`, add `'pool' => [ 'active' => true ]`.
    `campus` must be active there too.
-4. Add `pool` and `campus` to your own account's cluster authorizations.
-5. `php ~us3/lims/bin/dispatch_policy_check.php` reports `pool: ACTIVE`.
-6. Log in again, submit one job to `pool`, and follow it on the queue page.
+3. Add `pool` and `campus` to your account's cluster authorizations.
+4. Check the policy. It must report `pool: ACTIVE`:
 
-To stop, set the pool's `'active'` to false. The sections below explain each step
-and the larger configurations.
+   ```sh
+   php ~us3/lims/bin/dispatch_policy_check.php
+   ```
 
-## 1. Check that the dispatch service is ready
+5. Log in again, submit one job to `pool`, and follow it on the queue page.
 
-    php <instance>/tools/check_installation.php --deep
+To undo it, set the pool's `'active'` to false.
 
-The "Dispatch service" section must pass: the dispatch tables in `gfac` and in
-every instance database, a recent worker heartbeat and no urgent alerts. A host
-upgraded by hand also needs the heartbeat line in `/etc/crontab`, which
-`uslims_upgrade.php` prints at the end of its run.
+## Configuration
 
-While the tables are missing, the submit pages refuse the pool and submit
-nothing.
+### Members
 
-## 2. Prepare the members
+Each member is a Slurm entry in `$cluster_details` with:
 
-Each member is a Slurm entry in `global_config.php` that already works when it
-is chosen by name. It also needs:
+| Key | Value |
+| --- | --- |
+| `active` | `true` |
+| `tier` | `'local'` or `'national'`. Any other value, or none, makes it ineligible. |
+| `controller` | Optional. The scheduler it belongs to; default is `name`. |
 
-- `'active' => true`.
-- `'tier' => 'local'` or `'national'`. Any other value, or none, makes it
-  ineligible. With a version of `uslims_upgrade.php` whose `--cluster-values`
-  accepts `tier`, set it in that file; do not edit an entry the file manages.
-- Its own destination. Two members with the same `controller` (default: `name`)
-  and `queue` are one destination, and the pool stays inactive. A `-gamc` entry
-  on the same host and queue as its plain entry is the usual case.
+Two members with the same `controller` and `queue` are one destination, and the
+pool stays inactive. A `-gamc` entry on the host and queue of its plain entry is
+the usual case.
 
-Each member must also be active in the instance's cluster list, step 4.
+Do not edit an entry that a `--cluster-values` file manages. Set `tier` in that
+file, with a version of `uslims_upgrade.php` that accepts it.
 
-## 3. Add the pool entry
+### Pool entry
 
-Add it to `global_config.php` by hand, **outside** the block between
-`## BEGIN uslims_upgrade.php settings` and `## END uslims_upgrade.php settings`,
-which the upgrade rewrites. Put it after `$cluster_details` is defined.
+Add it to `global_config.php` by hand, outside the `uslims_upgrade.php` block,
+which the upgrade rewrites.
 
-Start with `'active' => false`, as in these examples, and turn it on in step 5.
-Each one is a complete entry.
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `active` | yes | `false` refuses new requests |
+| `name` | yes | the name shown to users |
+| `clusters` | yes | the members, as a list |
+| `dispatch` | no | see below |
+| `pmg` | no | `true` offers the pool for parallel (GA-MC) jobs |
+| `pmgonly` | no | `true` offers it only for those jobs |
 
-**One local cluster**
+Without `dispatch`, local members take turns and national members are listed as
+overflow but not used. A pool with only national members needs `dispatch`.
+
+### Dispatch settings
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `primary` | required | the preferred group: `members`, `strategy`, `weights` |
+| `overflow` | none | a second group, used only with `'enabled' => true` |
+| `admission` | `queue` | `queue`: use normal Slurm queueing. `start_within_allowance`: prefer a member that can start in time. |
+| `wait_allowance_seconds` | `0` | how soon "in time" is |
+| `fallback` | see below | when no member can start in time and overflow does not take the job: `queue_preferred` queues it at a primary member, `wait_for_dispatch` holds it and tries again |
+| `overflow_on_assessment_unknown` | `false` | whether overflow may be used when a primary member's queue could not be read |
+
+| Strategy | Choice |
+| --- | --- |
+| `ordered` (default) | the first member that can take the job |
+| `round_robin` | each member in turn |
+| `weighted_round_robin` | in turn by `weights`, one positive integer per member |
+
+- With `queue` admission, overflow is used only when no primary member can take
+  the job.
+- `fallback` is `wait_for_dispatch` by default for a rotating primary group with
+  `start_within_allowance` and no overflow, else `queue_preferred`.
+- A member may be in one group only.
+- A job sent to a national member uses its allocation.
+
+### Instances and accounts
+
+- **Instance:** the pool and every member must be in the instance's
+  `$cluster_configuration` with `'active' => true`. That is `cluster_config.php`
+  in the instance, else in the site directory, else in `uslims3_newlims`. It is
+  not gridctl's `cluster_config.php`, which holds the status probes. A pool needs
+  no probe.
+- **Account:** level 2 or above, with the pool **and** its members in the
+  account's cluster authorizations. A member marked `'localhost' => true` needs no
+  entry.
+
+## Examples
+
+Each is a complete entry, off until you set `'active' => true`.
+
+### One cluster
 
 ```php
 $cluster_details[ 'pool' ] = [
@@ -81,9 +176,9 @@ $cluster_details[ 'pool' ] = [
 ];
 ```
 
-**Round robin**: each request goes to the next member. With no `dispatch` key this
-is already what local members do; national members are listed as overflow and not
-used.
+### Round robin
+
+Each request goes to the next member.
 
 ```php
 $cluster_details[ 'pool' ] = [
@@ -96,8 +191,10 @@ $cluster_details[ 'pool' ] = [
 ];
 ```
 
-**Weighted round robin**: of every four requests, three go to `campus` and one to
-`lab`.
+### Weighted round robin
+
+Of every four requests, three go to `campus` and one to `lab`, while both can take
+work.
 
 ```php
 $cluster_details[ 'pool' ] = [
@@ -112,7 +209,9 @@ $cluster_details[ 'pool' ] = [
 ];
 ```
 
-**Ordered**: `campus` whenever it can take the job, else `lab`.
+### Ordered
+
+`campus` whenever it can take the job, else `lab`.
 
 ```php
 $cluster_details[ 'pool' ] = [
@@ -125,8 +224,10 @@ $cluster_details[ 'pool' ] = [
 ];
 ```
 
-**Overflow**: `center` is used when `campus` cannot start the job within ten
-minutes, or cannot take it at all. Jobs sent there use its allocation.
+### Overflow
+
+`center` is used when `campus` cannot start the job within ten minutes, or cannot
+take it at all.
 
 ```php
 $cluster_details[ 'pool' ] = [
@@ -142,7 +243,26 @@ $cluster_details[ 'pool' ] = [
 ];
 ```
 
-**National only**: the primary group has to be named.
+### Waiting instead of queueing
+
+A request waits in the LIMS until `campus` or `lab` can start it within ten
+minutes.
+
+```php
+$cluster_details[ 'pool' ] = [
+    'active'   => false,
+    'name'     => 'pool',
+    'clusters' => [ 'campus', 'lab' ],
+    'dispatch' => [
+        'primary'   => [ 'members' => [ 'campus', 'lab' ], 'strategy' => 'round_robin' ],
+        'admission' => 'start_within_allowance',
+        'wait_allowance_seconds' => 600,
+        'fallback'  => 'wait_for_dispatch',
+    ],
+];
+```
+
+### National only
 
 ```php
 $cluster_details[ 'pool' ] = [
@@ -155,18 +275,7 @@ $cluster_details[ 'pool' ] = [
 ];
 ```
 
-| Setting | Meaning |
-| --- | --- |
-| `strategy` | `ordered`: the first member that can take the job. `round_robin`: in turn. `weighted_round_robin`: in turn by `weights`, one positive integer per member. |
-| `overflow` | Used only with `'enabled' => true`. With `queue` admission, only when no primary member can take the job. Overflow to a national member spends its allocation. |
-| `admission` | `queue` (default): use normal Slurm queueing. `start_within_allowance`: prefer a member that can start within `wait_allowance_seconds`, then overflow. |
-| `fallback` | When no member can start in time and overflow does not take the job: `queue_preferred` queues it at a primary member, `wait_for_dispatch` holds it and tries again. |
-| `overflow_on_assessment_unknown` | Whether overflow may be used when a member's queue could not be read. Default false. |
-
-A member may not be in both groups.
-
-Parallel (GA-MC) jobs are offered only entries with `'pmg' => true`, and an entry
-with `'pmgonly' => true` is offered only those jobs. Make a separate pool for them:
+### Parallel (GA-MC) jobs
 
 ```php
 $cluster_details[ 'pool-gamc' ] = [
@@ -178,56 +287,59 @@ $cluster_details[ 'pool-gamc' ] = [
 ];
 ```
 
-## 4. Allow it in the instance and for accounts
+## Usage
 
-- **Instance:** add the pool and every member, with `'active' => true`, to the
-  instance's `$cluster_configuration`: `cluster_config.php` in the instance, else
-  in the site directory, else in `uslims3_newlims`. This is not gridctl's
-  `cluster_config.php`, which holds the status probes. A pool needs no probe.
-- **Accounts:** level 2 or above, with the pool **and** its members in the
-  account's cluster authorizations. Being allowed to use the pool does not allow
-  its members. A member marked `'localhost' => true` needs no entry.
+### Check the policy
 
-The status the page shows comes from the members, so a new pool can look down
-until `cluster_status.php` has probed them.
+```sh
+php ~us3/lims/bin/dispatch_policy_check.php
+```
 
-## 5. Check the policy, then turn it on
+It prints each pool's policy, its ineligible members and why it is inactive, and
+exits 1 when a pool set active cannot dispatch. For a pool that is only switched
+off, the one reason is `metascheduler 'pool' is disabled (active=false)`.
 
-    php ~us3/lims/bin/dispatch_policy_check.php
+The worker and the pages read a change by themselves. No restart is needed.
 
-It prints each pool's policy, its ineligible members and the reasons it is
-inactive. With `'active' => false` the only reason should be
-`metascheduler 'pool' is disabled (active=false)`.
+### Test a pool
 
-Set the pool's `'active' => true` and run it again. It must report `ACTIVE`; it
-exits 1 when an active pool cannot dispatch. The worker and the pages read the
-change by themselves; no restart is needed.
-
-## 6. Test it
-
-1. Submit one job to the pool. The page says "Analysis received", and the queue
-   page then shows the cluster and the job number.
-2. Open the Dispatch Dashboard (administrators, Status Monitor menu). It shows
-   the chosen member and why the others were skipped.
+1. Submit one job to it. The page says "Analysis received", and the queue page then
+   shows the cluster and the job number.
+2. Open the Dispatch Dashboard (administrators, Status Monitor menu). It shows the
+   chosen member and why the others were skipped.
 3. For an autoflow site, run one stage with the pool as its cluster.
 
-A job sent to a national member uses its allocation.
+### Turn a pool off
 
-## Turning it off
+Set its `'active'` to false.
 
-Set the pool's `'active'` to false. New requests are refused with
-`metascheduler 'pool' is disabled (active=false)`. Requests still waiting fail
-with the same reason, so users can submit to a cluster they choose. A request
-already being submitted, and every accepted job, continues.
+- New requests are refused: `metascheduler 'pool' is disabled (active=false)`.
+- Waiting requests fail with the same reason, so users can choose a cluster.
+- Requests already being submitted, and accepted jobs, continue.
 
-To stop using one member, set that member inactive, or list it in
-`down_clusters.php` to hold new work from it.
+To stop using one member, set it inactive, or list it in `down_clusters.php` to
+hold new work from it.
 
-## When a request does not move
+## Troubleshooting
 
-| State | What to do |
+| Problem | What to do |
 | --- | --- |
-| Waiting | The reason is on the queue page and the dashboard. It expires after `$global_dispatch_max_wait_seconds`. |
-| Blocked | Correct the cause, then use Retry on the dashboard. |
-| Submission unknown | The job may be running. Do not resubmit; resolve it on the dashboard with evidence from the cluster. |
-| Nothing happens | Check `submitctl.php` and its log, and the heartbeat on the dashboard. |
+| The pool is not listed | Check the instance's `$cluster_configuration`, the account's authorizations, and for GA-MC jobs `pmg`. |
+| The pool is listed as down | Its status comes from its members. Check `cluster_status.php`, and that the account may use the members. |
+| `tier not configured` | Set `tier` on the member. |
+| `aliases of one destination` | Remove one of the two members. |
+| `national-only pool` | Add `dispatch` with a `primary` group. |
+| "not available on this server right now" | The dispatch tables are missing or `gfac` cannot be reached. Run `check_installation.php --deep`. |
+| A request waits | The queue page and the dashboard give the reason. It expires after `$global_dispatch_max_wait_seconds`. |
+| A request is blocked | Correct the cause, then use Retry on the dashboard. |
+| Submission unknown | The job may be running. Do not resubmit. Resolve it on the dashboard with evidence from the cluster. |
+| Nothing happens | Check `submitctl.php`, its log, and the heartbeat on the dashboard. |
+
+## Related files
+
+| File | Repository |
+| --- | --- |
+| `global_config.php.template`: every setting and its default | us3lims_common |
+| `dispatch_policy_check.php`: the policy check | us3lims_gridctl |
+| `tools/check_installation.php`, `CONFIGURATION.md` | us3lims_dbinst |
+| `uslims_upgrade.php` and its README | us3lims_dbutils |

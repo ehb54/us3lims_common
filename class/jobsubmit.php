@@ -10,6 +10,7 @@ class jobsubmit
    protected $data    = array();   ## Global parsed input
    protected $jobfile = "";        ## Global string
    protected $message = array();   ## Errors and other messages
+   protected $config_errors = array();   ## Configuration errors the constructor found
    protected $grid    = array();   ## Information about the clusters
    protected $xmlfile = "";        ## Base name of the experiment xml file
 
@@ -24,15 +25,17 @@ class jobsubmit
 
        $error_msg = function( $msg ) {
            $emsg = "ERROR: class/jobsubmit.php : $msg";
-           echo "$emsg<br>";
+           $this->config_errors[] = $msg;
+           if ( PHP_SAPI === 'cli' )
+               echo "$emsg<br>";
            error_log( $emsg );
        };
 
-       ## A pool-definition finding, not a refusal of this submission: callers that scan the output
-       ## (gridctl) fail a stage on ERROR: only.
+       ## A pool-definition finding, not a refusal of this submission.
        $warning_msg = function( $msg ) {
            $wmsg = "WARNING: class/jobsubmit.php : $msg";
-           echo "$wmsg<br>";
+           if ( PHP_SAPI === 'cli' )
+               echo "$wmsg<br>";
            error_log( $wmsg );
        };
 

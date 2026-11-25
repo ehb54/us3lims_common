@@ -84,7 +84,7 @@ class submit_slurm extends jobsubmit
    }
 
    ## One instance submits a batch, so nothing of a request may carry over to the next.
-   function clear()
+   public function clear()
    {
       parent::clear();
       $this->reset_submission();

@@ -82,11 +82,11 @@ ul ul ul {
 }
 
 table.style1 {
-  border                : 5px groove #2B4E72;
+  border                : 1px solid #cad7d4;
   width                 : 98%;
-  margin                : 2em 1em;
-  border-radius         : 4px;
-  overflow              : hidden;
+  margin                : 1em auto;
+  border-collapse       : collapse;
+  overflow-wrap         : anywhere;
 }
 
 /* Outranks table.style1 so list tables keep their former inline 95% width. */
@@ -98,23 +98,21 @@ table.style1 thead th {
   font-family           : Arial, Helvetica, sans-serif;
   font-size             : 14px;
   font-weight           : bold;
-  background            : linear-gradient(#2B4E72, #1B325F);
-  color                 : white;
+  background            : #e8f0ee;
+  color                 : #25483f;
   line-height           : 1.5;
 }
 
-table.style1 td {
-  border                : 1px solid black;
+table.style1 td, table.style1 tbody th {
+  border-bottom         : 1px solid #d9e1df;
 }
 
 table.style1 tbody th {
-  border                : 1px solid black;
   text-align            : left;
 }
 
-/* Zebra striping for readability on dense tables. */
 table.style1 tbody tr:nth-child(even) {
-  background-color      : #F2F2F2;
+  background-color      : #f6f8f7;
 }
 
 table.noborder td {
@@ -175,6 +173,14 @@ a.block:hover {
   display               : none;
 }
 
+/* Shared navigation colors, drawn from the dark banner and its teal lettering. */
+:root {
+  --lims-nav-surface: #262b2c;
+  --lims-nav-rule: #485052;
+  --lims-nav-hover: #384443;
+  --lims-nav-accent: #a6dfd4;
+}
+
 /* Header */
 
 #header {
@@ -216,7 +222,7 @@ a.block:hover {
   vertical-align        : bottom;
   width                 : 820px;      /* 1000px - the 190px padding */
   float                 : left;
-  background-color      : black;
+  background-color      : var(--lims-nav-surface);
   height                : 37px;
 }
 
@@ -238,7 +244,7 @@ a.block:hover {
   width                 : 137px;
   padding               : 0px 0px 0px 0px;
   display               : block;
-  background            : #7F7F7F url(../images/button-gradient.png) repeat-x;
+  background            : var(--lims-nav-surface);
   color                 : white;
   font-weight           : bold;
   text-decoration       : none;
@@ -250,9 +256,11 @@ a.block:hover {
   background-color      : cyan;
 }
 
-#globalnav li a:hover {
+#globalnav li a:hover,
+#globalnav li a:focus-visible {
+  background-color      : var(--lims-nav-hover);
   text-decoration       : none;
-  color                 : cyan;
+  color                 : var(--lims-nav-accent);
   font-size             : 12px;
   font-weight           : bold;
 }
@@ -276,12 +284,13 @@ a.block:hover {
   padding               : 3px 0px 0px 0px;
 }
 
-#globalnav ul.level1 li.submenu:hover ul.level2 {
+#globalnav ul.level1 li.submenu:hover ul.level2,
+#globalnav ul.level1 li.submenu:focus-within > ul.level2 {
   display               : block;
 }
 
 #globalnav ul.level1 li.submenu ul.level2 li a:hover {
-  color                 : cyan;
+  color                 : var(--lims-nav-accent);
 }
 
 #globalnav ul.level3 {
@@ -293,12 +302,31 @@ a.block:hover {
   display               : block;
 }
 
+#globalnav > ul.level1 {
+  display               : flex;
+}
+
+#globalnav > ul.level1 > li {
+  flex                  : 1;
+}
+
+#globalnav > ul.level1 > li > a {
+  width                 : auto;
+  height                : 37px;
+  padding               : 0;
+  line-height           : 37px;
+}
+
+#globalnav ul ul {
+  z-index               : 1;
+}
+
 /* Page */
 
 #page {
   width                 : 1000px;
   margin                : auto;
-  background            : #FFFFFF  url(../images/links_background.gif) repeat-y;
+  background            : linear-gradient(to right, var(--lims-nav-surface) 180px, #fff 180px);
   border                : solid black;
   border-width          : 0px 0px 0px 0px;
   box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -316,10 +344,11 @@ a.block:hover {
 
 div#sidebar {
   float                 : left;
-  width                 : 156px;                /* 180 - 12x2 in padding */
-  background            : #7F7F7F url(../images/black-grey-gradient.png) repeat-x;
-  padding               : 1em 12px 2em;   /* a minimum spacing all round */
-  color                 : white;
+  width                 : 156px; /* 180px including horizontal padding */
+  padding               : 1em 12px 2em;
+  background-color      : var(--lims-nav-surface);
+  color                 : #fff;
+  font-family           : Arial, Helvetica, sans-serif;
 }
 
 /* Outranks div#sidebar so the utility class replaces the former inline style. */
@@ -328,36 +357,41 @@ div#sidebar.pb-30em {
 }
 
 div#sidebar h4 {
-  margin                : 0;
-  padding-top           : 1em;
-  background-color      : transparent;
-  font-family           : Arial, Helvetica, Sans-serif;
-  color                 : white;
-  font-size             : 1.2em;
-  font-weight           : bold;
+  margin                : 14px 0 3px;
+  padding               : 10px 6px 0;
+  border-top            : 1px solid var(--lims-nav-rule);
+  background            : transparent;
+  color                 : var(--lims-nav-accent);
+  font                  : bold 13px/1.4 Arial, Helvetica, sans-serif;
+}
+
+div#sidebar h4:first-child {
+  margin-top            : 0;
+  padding-top           : 0;
+  border-top            : 0;
 }
 
 div#sidebar a {
-  width                 : 140px;
-  height                : 20px;
-  background            : transparent url(../images/button-gradient.png) repeat-x;
   display               : block;
-  margin                : 0;
-  padding               : 6px;
-  color                 : white;
-  font-size             : 13px;
-  font-weight           : bold;
-  text-decoration       : none;
+  padding               : 5px 6px;
   border-radius         : 3px;
-  transition            : background-color 0.15s ease, color 0.15s ease;
+  background            : transparent;
+  color                 : #fff;
+  font                  : normal 14px/1.4 Arial, Helvetica, sans-serif;
+  text-decoration       : none;
+  overflow-wrap         : anywhere;
 }
 
-#sidebar a:hover {
-  background            : white url(../images/button-gradient-hover.png) repeat-x;
-  color                 : cyan;
-  font-size             : 13px;
-  font-weight           : bold;
-  text-decoration       : none;
+div#sidebar a:hover,
+div#sidebar a:focus {
+  background-color      : var(--lims-nav-hover);
+  color                 : #fff;
+  text-decoration       : underline;
+}
+
+div#sidebar a:focus-visible {
+  outline               : 2px solid var(--lims-nav-accent);
+  outline-offset        : 0;
 }
 
 /* Content */
@@ -377,12 +411,12 @@ div#sidebar a {
 div#content p
 {
   /*padding-bottom        : 1em;*/
-  text-align            : justify;
+  text-align            : left;
 }
 
 .title {
   margin                : 0px;
-  padding               : 2em 0px 1em;
+  padding               : 1em 0 .5em;
   font-size             : 180%;
   font-weight           : bold;
   color                 : #555555;
@@ -437,8 +471,23 @@ fieldset.option_value {
   font-family           : Arial, Helvetica, sans-serif;
   font-size             : 85%;
   text-align            : center;
-  background            : #FFFFFF  url(../images/links_background.gif) repeat-y;
+  background            : linear-gradient(to right, var(--lims-nav-surface) 180px, #fff 180px);
   box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* The page already paints the sidebar and the outer shadow. */
+#footer.page-footer {
+  width                 : auto;
+  height                : auto;
+  margin                : 0;
+  padding               : 10px 25px 14px;
+  background            : transparent;
+  box-shadow            : none;
+  color                 : #50585b;
+}
+
+#page > #footer.page-footer {
+  margin-left           : 180px;
 }
 
 #info {

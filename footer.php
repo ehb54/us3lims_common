@@ -27,18 +27,9 @@ if ( $is_cli ) {
 }
 
 echo<<<HTML
-  <!-- end content -->
-  <div class='clear-both'>&nbsp;</div>
-
-  <!-- end page -->
-  <div id="footer">
-	<div id='info'>
-	</div>
-
-	  <div id='info2'><hr />Last modified on $modtime --
-         <a href='license.php'>Copyright &copy; notice and license information</a> UltraScan Project
-      </div>
- 
+  <div id="footer" class="page-footer">
+    Last modified on $modtime &ndash;
+    <a href='license.php'>Copyright &copy; notice and license information</a> UltraScan Project
   </div>
 </div>
 

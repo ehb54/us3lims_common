@@ -666,3 +666,43 @@ fieldset#clusters tr.subheader th
 #content.account-page .account-card form p label { display: block; margin-bottom: .5em; }
 #content.account-page .account-card .message:empty { display: none; }
 #content.account-page .account-card th { display: block; box-sizing: border-box; width: 100%; text-align: left; }
+
+/* Shared controls: reserve the filled treatment for an explicitly primary action. */
+#content :is(input[type=submit], input[type=button], input[type=reset], button) {
+  background: #f4f8f7; border: 1px solid #94b1ab; border-radius: 4px;
+  color: #25483f; padding: .4em .8em; cursor: pointer;
+}
+#content :is(input[type=submit], input[type=button], input[type=reset], button):hover {
+  background: #e1efeb;
+}
+#content :is(input[type=submit], input[type=button], input[type=reset], button):disabled {
+  opacity: .6; cursor: not-allowed;
+}
+#content input[type=submit][name=update], #content.account-page input[type=submit] {
+  background: #176b60; border-color: #176b60; color: #fff;
+}
+#content input[type=submit][name=update]:hover, #content.account-page input[type=submit]:hover { background: #11554c; }
+#content a { color: #176b60; }
+#content a:visited { color: #4c6078; }
+#content a:focus-visible, #content :is(input, select, textarea, button):focus-visible {
+  outline: 3px solid #72bdb0; outline-offset: 2px;
+}
+
+/* Keep the navigation available and let content fit smaller screens. */
+@media screen and (max-width: 1000px) {
+  #header, #page, #search_page, #footer { width: 100%; box-sizing: border-box; }
+  #header img { max-width: 100%; height: auto; }
+  #header table { max-width: 100%; }
+  #globalnav { box-sizing: border-box; width: 100%; height: auto; padding-left: 0; float: none; }
+  #globalnav > ul { display: flex; flex-wrap: wrap; }
+  #globalnav > ul > li { float: none; }
+  #content { width: auto; margin-left: 180px; padding: 0 1em 2em; }
+  #search_content { width: auto; margin: 0; padding: 0 1em 2em; }
+}
+@media screen and (max-width: 600px) {
+  #page { background: #fff; }
+  div#sidebar, div#sidebar.pb-30em { float: none; width: auto; padding: 1em; }
+  #content { margin-left: 0; }
+  #page > #footer.page-footer { margin-left: 0; }
+  #content :is(pre, .audit-scroll) { max-width: 100%; overflow-x: auto; }
+}

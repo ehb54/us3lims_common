@@ -632,3 +632,29 @@ fieldset#clusters tr.subheader th
 #content.diagnostic-page fieldset { border: 1px solid #c9d6d3; padding: .65em 1em; }
 #content.diagnostic-page pre { padding: .6em; background: #f6f8f7; }
 #content.workflow-page .submit { margin-block: .4em; }
+
+/* Account access: a calm, readable form shared across instances. */
+#content.account-page { background: #f5f8f7; }
+#content.account-page .account-card {
+  box-sizing: border-box; max-width: 32em; margin: 2em 0; padding: 2.25em;
+  background: #fff; border: 1px solid #dbe7e4; border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(35, 72, 62, .08); color: #203333;
+}
+#content.account-page .account-eyebrow { color: #277d71; font-size: .75em; font-weight: bold; letter-spacing: .12em; text-transform: uppercase; }
+#content.account-page .account-card .title { margin: .3em 0; color: #203333; }
+#content.account-page .account-intro { color: #536c67; margin-bottom: 1.5em; }
+#content.account-page .account-card table, #content.account-page .account-card tbody,
+#content.account-page .account-card tr, #content.account-page .account-card td { display: block; width: 100%; box-sizing: border-box; }
+#content.account-page .account-card td { padding: .3em 0; }
+#content.account-page label { color: #29443f; font-weight: bold; }
+#content.account-page input:not([type=submit]):not([type=reset]) {
+  border: 1px solid #aabfba; border-radius: 6px; padding: .7em; background: #fff; color: #203333;
+}
+#content.account-page .account-card input:not([type=submit]) { width: 100%; }
+#content.account-page input:focus-visible, #content.account-page a:focus-visible { outline: 3px solid #72bdb0; outline-offset: 2px; }
+#content.account-page input[type=submit] { padding: .75em 1.2em; background: #176b60; border-color: #176b60; border-radius: 6px; font-weight: bold; cursor: pointer; }
+#content.account-page input[type=submit]:hover { background: #11554c; }
+#content.account-page .account-card input[type=submit] { width: 100%; margin-top: .8em; }
+#content.account-page a { color: #176b60; font-weight: bold; }
+#content.account-page .account-new { border-top: 1px solid #e1eae8; padding-top: 1.4em; margin-top: 1.5em; color: #536c67; }
+@media (max-width: 600px) { #content.account-page .account-card { padding: 1.25em; margin: 1em 0; } }

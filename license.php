@@ -3,7 +3,7 @@ include 'checkinstance.php';
 
 include 'header.php';
 ?>
-<div id='content'>
+<div id='content' class='reading-page'>
 	<h1 class="title">Copyright and License information</h1>
 	<p>The <b><i>UltraScan</i></b> software is copyright protected
 	by international laws.  The copyright is owned by 

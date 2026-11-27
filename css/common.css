@@ -706,3 +706,30 @@ fieldset#clusters tr.subheader th
   #page > #footer.page-footer { margin-left: 0; }
   #content :is(pre, .audit-scroll) { max-width: 100%; overflow-x: auto; }
 }
+
+/* Shared record, selector and workflow details. */
+#content:is(.record-page, .project-page, .selector-page, .workflow-page) :is(input[type=text], input[type=password], input[type=email], input[type=number], select, textarea) {
+  border: 1px solid #aabfba; border-radius: 4px; padding: .4em .5em;
+  background-color: #fff; color: #203333;
+}
+#content:is(.record-page, .project-page, .selector-page, .workflow-page) label { color: #29443f; }
+#content:is(.record-page, .project-page, .selector-page, .workflow-page) :is(input, select, textarea):disabled {
+  background-color: #eef2f1; color: #52645f;
+}
+#content:is(.record-page, .project-page, .operations-page, .diagnostic-page) table.style1 :is(td, th) {
+  padding: .5em .65em; vertical-align: top;
+}
+#content:is(.record-page, .project-page) input[name=delete] {
+  color: #812e27; border-color: #c99c96; background: #fff8f7;
+}
+#content:is(.record-page, .project-page) input[name=delete]:hover { background: #f9e3df; }
+#content.workflow-page fieldset { border-radius: 4px; }
+#content.workflow-page legend { font-size: 1.05em; }
+@media screen and (max-width: 600px) {
+  #header table { width: 100%; }
+  #header table td:first-child { width: 100%; }
+  #header table td:not(:first-child) { display: none; }
+  #header img { display: block; max-width: 100%; height: auto; }
+  #globalnav > ul.level1 > li { flex: 1 1 33.333%; }
+  #content :is(table.style1, .summary_table) { display: block; max-width: 100%; overflow-x: auto; }
+}

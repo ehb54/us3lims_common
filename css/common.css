@@ -658,3 +658,11 @@ fieldset#clusters tr.subheader th
 #content.account-page a { color: #176b60; font-weight: bold; }
 #content.account-page .account-new { border-top: 1px solid #e1eae8; padding-top: 1.4em; margin-top: 1.5em; color: #536c67; }
 @media (max-width: 600px) { #content.account-page .account-card { padding: 1.25em; margin: 1em 0; } }
+#content.account-page .account-card-wide { max-width: 42em; }
+#content.account-page .account-card-wide th { padding: .4em 0; }
+#content.account-page .account-card-wide thead th { padding: .8em 0; border-bottom: 1px solid #e1eae8; }
+#content.account-page .account-card-wide tfoot td { padding-top: 1em; }
+#content.account-page .account-note { padding: .8em 1em; background: #edf5f3; border-left: 3px solid #72a99e; color: #29443f; }
+#content.account-page .account-card form p label { display: block; margin-bottom: .5em; }
+#content.account-page .account-card .message:empty { display: none; }
+#content.account-page .account-card th { display: block; box-sizing: border-box; width: 100%; text-align: left; }

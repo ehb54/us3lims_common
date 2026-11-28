@@ -133,8 +133,7 @@ class runtime_advisory
    /**
     * Does a request's method belong to the artifact's family?
     *
-    * A prefix match, so 2DSA-MC and 2DSA-CG count as 2DSA while GA and PCSA do
-    * not. Case-insensitive, because the method reaches here from the request.
+    * A prefix match, so 2DSA-MC counts as 2DSA while GA and PCSA do not. Case-insensitive, because the method reaches here from the request.
     */
    public static function family_matches( $family, $method )
    {
@@ -155,9 +154,15 @@ class runtime_advisory
     * The same prefix rule as family_matches(), applied to the installed
     * families: 2DSA-MC is 2DSA, GA-MC is GA, and DMGA is nothing, because the
     * match is anchored at the start of the method rather than anywhere in it.
+    * A custom grid is nothing too.
     */
    public static function family_of_method( $method )
    {
+      if ( self::is_custom_grid( $method ) )
+      {
+         return null;
+      }
+
       foreach ( self::$families as $family )
       {
          if ( self::family_matches( $family, $method ) )
@@ -167,6 +172,12 @@ class runtime_advisory
       }
 
       return null;
+   }
+
+   /** A custom grid request carries a grid model in place of the grid parameters the 2DSA model is fitted with. */
+   public static function is_custom_grid( $method )
+   {
+      return preg_match( '/^2DSA[-_]CG/i', trim( (string) $method ) ) === 1;
    }
 
    /** The families this build can serve, whatever is installed on a host. */
@@ -223,8 +234,9 @@ class runtime_advisory
       if ( $family === null )
       {
          return self::note( $context, 'unsupported',
-            "method '" . substr( $method, 0, 32 ) . "' belongs to no family"
-            . ' the advisory serves', $started );
+            "method '" . substr( $method, 0, 32 ) . "' "
+            . ( self::is_custom_grid( $method ) ? 'is a custom grid, which no model is fitted for'
+                                                : 'belongs to no family the advisory serves' ), $started );
       }
 
       $context[ 'family' ] = $family;

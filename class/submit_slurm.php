@@ -3,6 +3,7 @@
 require_once $class_dir . 'jobsubmit.php';
 require_once $class_dir . 'remote_exec.php';
 require_once $class_dir . 'db_connection_pool.php';
+require_once __DIR__ . '/us3_unit_of_work.php';
 include_once $class_dir . 'priority.php';
 include_once __DIR__ . '/dispatch_contract.php';
 
@@ -799,6 +800,63 @@ class submit_slurm extends jobsubmit
           && mysqli_stmt_num_rows( $stmt ) > 0;
    }
 
+   ## The operation for an unattended write about this job: no person, this file as the client,
+   ## and an operation ID derived from the job, so a retry resolves to the first attempt.
+   private function unattended_operation( $kind, array $parts )
+   {
+      global $dbname;
+      $version = trim( (string) @file_get_contents( dirname( __DIR__ ) . '/VERSION' ) );
+      $parts   = array_merge( array( (string) $dbname ), array_map( 'strval', $parts ) );
+      return array( 'operationID'    => us3_unit_of_work::derived_operation_id( $kind, $parts ),
+                    'kind'           => $kind,
+                    'request'        => json_encode( $parts ),
+                    'actingPersonID' => 0,
+                    'client'         => trim( "lims/submit_slurm $version" ) );
+   }
+
+   ## Takes the run lock (its autoflowStages row), then the run's analysis rows, and returns the
+   ## stage's row, or null when it does not exist.
+   private function lock_autoflow_stage( us3_unit_of_work $uow, $requestID )
+   {
+      $run = $uow->rows( "SELECT autoflowID FROM autoflowAnalysis WHERE requestID = ?", 'i', array( $requestID ) );
+      if ( ! $run )
+         return null;
+      $runID = (int) $run[ 0 ][ 'autoflowID' ];
+      $uow->lock_root( 'gmpRun', $runID );
+      $uow->lock_root( 'gmpAnalysis', $runID );
+      $row = $uow->rows( "SELECT requestID, status FROM autoflowAnalysis WHERE requestID = ? FOR UPDATE", 'i', array( $requestID ) );
+      return $row ? $row[ 0 ] : null;
+   }
+
+   ## A stage status no later step may overwrite, as the dispatch mirror also treats them.
+   private function stage_has_ended( $status )
+   {
+      return in_array( strtolower( (string) $status ), array( 'failed', 'error', 'canceled', 'complete', 'done', 'finished' ), true );
+   }
+
+   ## Sets one autoflow stage's status as a unit of work, unless its status has ended.
+   ## [ true or why not, whether $link may still be used ]. Each call is its own event, so its
+   ## operation ID is unique; retries within the call reuse it.
+   private function update_autoflow_stage( $link, $kind, $requestID, $hpcRequestID, $status, $message, array $parts )
+   {
+      $event  = array_merge( array( $requestID, (string) $hpcRequestID, uniqid( '', true ) ), $parts );
+      $result = us3_unit_of_work::run( $link, $this->unattended_operation( $kind, $event ),
+         function ( us3_unit_of_work $uow ) use ( $requestID, $status, $message ) {
+            $row = $this->lock_autoflow_stage( $uow, (int) $requestID );
+            if ( $row === null )
+               return array( 'receipt' => array( 'autoflowAnalysis' => 'missing' ) );
+            if ( $this->stage_has_ended( $row[ 'status' ] ) )
+               return array( 'receipt' => array( 'autoflowAnalysis' => 'kept ' . $row[ 'status' ] ) );
+            $uow->exec( "UPDATE autoflowAnalysis SET status = ?, statusMsg = ? WHERE requestID = ?", 'ssi',
+                        array( $status, $message, (int) $requestID ) );
+            return array( 'receipt' => array( 'autoflowAnalysis' => $status ) );
+         } );
+      if ( ! in_array( $result[ 'status' ], array( 'ok', 'replayed' ), true ) )
+         return array( "autoflowAnalysis $requestID not updated ({$result['status']}: "
+                     . ( isset( $result[ 'error' ] ) ? $result[ 'error' ] : '' ) . ")", $result[ 'session_cleared' ] );
+      return array( true, $result[ 'session_cleared' ] );
+   }
+
    private function exec_bound( $link, $sql, array $args )
    {
       $stmt = mysqli_prepare( $link, $sql );
@@ -996,15 +1054,22 @@ class submit_slurm extends jobsubmit
       {
          try
          {
-            $qfmsg = mysqli_real_escape_string( $link, $statusMsg );
-            $query = "UPDATE autoflowAnalysis SET "
-                   . "status='SUBMIT_TIMEOUT', "
-                   . "statusMsg='Job submission failed: $qfmsg' "
-                   . "WHERE requestID=$autoflowID";
-            $result = mysqli_query( $link, $query );
-            if ( ! $result )
+            ## Under the run lock, and only from a status that has not ended: a cancel the
+            ## desktop made meanwhile is kept.
+            $hpcRequestID = isset( $this->data[ 'job' ][ 'requestID' ] ) ? $this->data[ 'job' ][ 'requestID' ] : null;
+            list( $done, $linkUsable ) = $this->update_autoflow_stage( $link, 'hpc.submit.failed', $autoflowID, $hpcRequestID,
+                                                                       'SUBMIT_TIMEOUT', 'Job submission failed: ' . $statusMsg,
+                                                                       array( 'failed', (string) $statusMsg ) );
+            if ( $done !== true )
             {
-               $this->message[] = "markAutoflowSubmitFailed: invalid query: $query " . mysqli_error( $link );
+               $this->message[] = "markAutoflowSubmitFailed: $done";
+            }
+            ## A connection whose session could not be cleared is not used again
+            if ( ! $linkUsable )
+            {
+               db_connection_pool::shared()->release( $link, false );
+               $link = null;
+               $dbUnreachable = true;
             }
 
             ## The investigator's address and the run's own tripleName are
@@ -1015,9 +1080,9 @@ class submit_slurm extends jobsubmit
             ## this try, before the pooled connection is released below -- not
             ## closed outright, since release() returns it to the pool for
             ## reuse by the next caller.
-            $lookup_stmt = mysqli_prepare( $link,
+            $lookup_stmt = $link ? mysqli_prepare( $link,
                "SELECT p.email, a.tripleName FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
-             . " WHERE a.requestID = ?" );
+             . " WHERE a.requestID = ?" ) : false;
             if ( $lookup_stmt )
             {
                mysqli_stmt_bind_param( $lookup_stmt, 'i', $autoflowID );
@@ -1180,33 +1245,50 @@ class submit_slurm extends jobsubmit
 
       try
       {
-         ## Replay-safe: a repeated call for the same accepted job keeps its row.
-         $result = $this->row_exists( $link, "SELECT 1 FROM HPCAnalysisResult WHERE "
-                                    . "HPCAnalysisRequestID=? AND gfacID=? LIMIT 1", array( $requestID, $slurm_id ) );
-         if ( ! $result ) {
-            $result = $this->exec_bound( $link, "INSERT INTO HPCAnalysisResult SET HPCAnalysisRequestID=?, jobfile=?, gfacID=?",
-                                         array( $requestID, $this->data[ 'jobfile' ], $slurm_id ) );
+         ## One unit of work: the result row and the run's analysis row together, in the lock
+         ## order, as an unattended job. Replay-safe: a repeated call for the same accepted job
+         ## returns the first call's receipt and keeps its row.
+         $jobfile = $this->data[ 'jobfile' ];
+         $result  = us3_unit_of_work::run( $link, $this->unattended_operation( 'hpc.submit.accepted',
+                                           array( $requestID, $slurm_id, (int) $autoflowID ) ),
+            function ( us3_unit_of_work $uow ) use ( $requestID, $slurm_id, $jobfile, $autoflowID ) {
+               $uow->lock_root( 'HPCAnalysisRequest', (int) $requestID );
+               $analysis = $autoflowID > 0 ? $this->lock_autoflow_stage( $uow, (int) $autoflowID ) : null;
+               if ( ! $uow->rows( "SELECT 1 FROM HPCAnalysisResult WHERE HPCAnalysisRequestID = ? AND gfacID = ? LIMIT 1",
+                                  'is', array( (int) $requestID, (string) $slurm_id ) ) )
+                  $uow->exec( "INSERT INTO HPCAnalysisResult SET HPCAnalysisRequestID = ?, jobfile = ?, gfacID = ?",
+                              'iss', array( (int) $requestID, (string) $jobfile, (string) $slurm_id ) );
+               $stage = 'none';
+               if ( $analysis !== null )
+               {
+                  $stage = $this->stage_has_ended( $analysis[ 'status' ] ) ? 'kept ' . $analysis[ 'status' ] : 'SUBMITTED';
+                  if ( $stage === 'SUBMITTED' )
+                     $uow->exec( "UPDATE autoflowAnalysis SET currentGfacID = ?, currentHPCARID = ?, status = 'SUBMITTED',"
+                               . " statusMsg = 'Job submitted' WHERE requestID = ?", 'sii',
+                                 array( (string) $slurm_id, (int) $requestID, (int) $autoflowID ) );
+               }
+               return array( 'receipt' => array( 'requestID' => (int) $requestID, 'gfacID' => (string) $slurm_id,
+                                                  'autoflowAnalysis' => $stage ) );
+            } );
+         if ( ! $result[ 'session_cleared' ] ) {
+            $pool->release( $link, false );
+            $link = null;
          }
-         if ( ! $result ) {
-            $this->message[] = "WARNING: job {$this->data['eprfile']}: HPCAnalysisResult insert failed - job is running but "
-                             . "unrecorded: " . mysqli_error( $link );
+         if ( ! in_array( $result[ 'status' ], array( 'ok', 'replayed' ), true ) ) {
+            $this->message[] = "WARNING: job {$this->data['eprfile']}: recording it failed ({$result['status']}: "
+                             . ( isset( $result[ 'error' ] ) ? $result[ 'error' ] : '' ) . ") - job is running but unrecorded";
             return false;
          }
-
-         if ( $autoflowID > 0 ) {
-            $result = $this->exec_bound( $link, "UPDATE autoflowAnalysis SET currentGfacID=?, currentHPCARID=?, "
-                                         . "status='SUBMITTED', statusMsg='Job submitted' WHERE requestID=?",
-                                         array( $slurm_id, $requestID, $autoflowID ) );
-            if ( ! $result ) {
-               $this->message[] = "WARNING: job {$this->data['eprfile']}: autoflowAnalysis update failed - the pipeline will not "
-                                . "advance: " . mysqli_error( $link );
-               $ok = false;
-            }
+         $stage = isset( $result[ 'receipt' ][ 'autoflowAnalysis' ] ) ? $result[ 'receipt' ][ 'autoflowAnalysis' ] : 'none';
+         if ( strpos( $stage, 'kept ' ) === 0 ) {
+            $this->message[] = "NOTE: job {$this->data['eprfile']}: autoflowAnalysis $autoflowID was already "
+                             . substr( $stage, 5 ) . " and is left as it is";
          }
       }
       finally
       {
-         $pool->release( $link );
+         if ( $link )
+            $pool->release( $link );
       }
 
       ## Write to global gfac DB (job tracking)

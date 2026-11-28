@@ -1217,7 +1217,8 @@ function dispatch_close_finished( $link, $db )
  * never-submitted failure or expiry, canceled for a cancellation before
  * acceptance, each with the user message. Accepted stages are left to the
  * existing submission and monitor path, and an existing failure report is
- * kept. Returns the rows changed, or null when a read or a write failed.
+ * kept. A row that changed after it was read is left for the next pass.
+ * Returns the rows changed, or null when a read or a write failed.
  */
 function dispatch_mirror_autoflow( $link, $db )
 {
@@ -1232,7 +1233,7 @@ function dispatch_mirror_autoflow( $link, $db )
    }
    $statuses = array( DISPATCH_SUBMISSION_UNKNOWN => 'SUBMIT_TIMEOUT', DISPATCH_BLOCKED => 'BLOCKED',
                       DISPATCH_EXPIRED => 'failed', DISPATCH_FAILED => 'failed', DISPATCH_CANCELLED => 'canceled' );
-   $rows = dispatch_rows_checked( $link, "SELECT a.requestID, a.status, a.statusMsg, r.state, r.reasonCode, r.selectedCluster,
+   $rows = dispatch_rows_checked( $link, "SELECT a.requestID, a.status, a.statusMsg, a.rowVersion, r.state, r.reasonCode, r.selectedCluster,
          r.retryAt, r.notifiedAt, r.cancelRequested
       FROM `$db`.autoflowAnalysis a
       JOIN `$db`.dispatch_request r ON r.autoflowAnalysisID = a.requestID AND r.HPCAnalysisRequestID = a.currentHPCARID
@@ -1251,8 +1252,11 @@ function dispatch_mirror_autoflow( $link, $db )
       if ( $status === $r[ 'status' ] && $msg === $r[ 'statusMsg' ] ) {
          continue;
       }
+      ## Only the row as it was read: a change since (a desktop cancel, a submission) is kept,
+      ## and the next pass reads it again
       $n = dispatch_affected( $link, "UPDATE `$db`.autoflowAnalysis SET status = ?, statusMsg = ?
-         WHERE requestID = ? AND (currentGfacID IS NULL OR currentGfacID = '')", 'ssi', array( $status, $msg, (int) $r[ 'requestID' ] ) );
+         WHERE requestID = ? AND rowVersion = ? AND (currentGfacID IS NULL OR currentGfacID = '')", 'ssis',
+         array( $status, $msg, (int) $r[ 'requestID' ], (string) $r[ 'rowVersion' ] ) );
       $failed = $failed || $n < 0;
       $changed += max( 0, $n );
    }

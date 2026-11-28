@@ -137,6 +137,22 @@ class db_connection_pool
       ## for the overwhelmingly common case where nothing was open.
       try { @mysqli_rollback( $conn ); @mysqli_autocommit( $conn, true ); } catch ( \Throwable $e ) { }
 
+      ## The row-version triggers record the person and client from these session variables, so
+      ## a reused connection must not carry the last caller's. A connection that cannot clear
+      ## them is closed instead.
+      $cleared = false;
+      try
+      {
+         $cleared = (bool) @mysqli_query( $conn, "SET @US3_ACTING_ID = NULL, @US3_CLIENT = NULL,"
+                                               . " @US3_COORDINATED = NULL, @US3_ID = NULL" );
+      }
+      catch ( \Throwable $e ) { }
+      if ( ! $cleared )
+      {
+         try { @mysqli_close( $conn ); } catch ( \Throwable $e ) { }
+         return;
+      }
+
       $this->idle[ $key ][] = $conn;
    }
 

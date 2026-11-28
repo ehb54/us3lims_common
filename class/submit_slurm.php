@@ -180,7 +180,7 @@ class submit_slurm extends jobsubmit
          if ( $job_id === '' )
          {
             $this->message[] = "ERROR: submission configuration invalid: " . $error->getMessage();
-            $detail = implode( '; ', array_merge( array( $error->getMessage() ), $this->config_errors ) );
+            $detail = $error->getMessage();
             ## Raised before sbatch ran: nothing was submitted.
             if ( $this->submitOutcome === null )
                $this->submissionResult = $this->make_result( SUBMIT_NOT_ACCEPTED, 'configuration', $detail );

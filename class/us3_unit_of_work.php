@@ -30,7 +30,7 @@ class us3_unit_of_work_replay extends RuntimeException {}
 
 class us3_unit_of_work
 {
-   const RETRIES = 3;
+   const RETRIES = 3;   // reruns after the first attempt
 
    private $link;
    private $op;
@@ -39,7 +39,7 @@ class us3_unit_of_work
    private $recorded  = false;
 
    private static $manifest_cache = null;
-   private static $schema_ok;
+   private static $schema_ok = array();
 
    ## ------------------------------------------------------------ entry points
 
@@ -59,7 +59,7 @@ class us3_unit_of_work
       for ( $try = 1; ; $try++ )
       {
          $uow    = new us3_unit_of_work( $link, $op );
-         $result = $uow->attempt( $body, $try < self::RETRIES );
+         $result = $uow->attempt( $body, $try <= self::RETRIES );
          $result[ 'session_cleared' ] = $uow->end();
          if ( $result[ 'status' ] !== 'retry' )
             return $result;
@@ -78,7 +78,7 @@ class us3_unit_of_work
          $this->exec( "UPDATE operationRecord SET receipt = ? WHERE operationID = ?", 'ss',
                       array( $receipt, $this->op[ 'operationID' ] ) );
          if ( ! mysqli_commit( $this->link ) )
-            throw new RuntimeException( mysqli_error( $this->link ) );
+            throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
          return array( 'status' => 'ok', 'receipt' => json_decode( $receipt, true ) ) + $out;
       }
       catch ( us3_unit_of_work_replay $e )
@@ -99,7 +99,7 @@ class us3_unit_of_work
       }
       catch ( Throwable $e )
       {
-         $errno = mysqli_errno( $this->link );
+         $errno = self::errno_of( $e, $this->link );
          $this->rollback();
          $deadlock = in_array( $errno, array( 1213, 1205 ), true );
          if ( $deadlock && $may_retry )
@@ -135,8 +135,13 @@ class us3_unit_of_work
            . dechex( 8 | ( hexdec( $h[ 16 ] ) & 3 ) ) . substr( $h, 17, 3 ) . '-' . substr( $h, 20, 12 );
    }
 
-   /** The aggregate's version on $link: a locking read inside a unit of work, a plain read outside. */
-   public static function version( $link, $aggregate, $rootID, $locking = false )
+   /** The aggregate's version on $link, read without locks, as a client records it when it reads. */
+   public static function version( $link, $aggregate, $rootID )
+   {
+      return self::read_version( $link, $aggregate, $rootID, false );
+   }
+
+   private static function read_version( $link, $aggregate, $rootID, $locking )
    {
       $ctx = hash_init( 'sha256' );
       hash_update( $ctx, "agg-v1\n$aggregate\n" );
@@ -204,7 +209,7 @@ class us3_unit_of_work
       $res = mysqli_query( $this->link, "SELECT * FROM {$root['table']} WHERE "
                                       . str_replace( '?', (string) (int) $id, $root[ 'predicate' ] ) . " FOR UPDATE" );
       if ( ! $res )
-         throw new RuntimeException( mysqli_error( $this->link ) );
+         throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
       $row = mysqli_fetch_assoc( $res );
       return $row ?: null;
    }
@@ -213,7 +218,7 @@ class us3_unit_of_work
    public function lock_aggregate( $aggregate, $id )
    {
       $this->check_order( $aggregate, $id );
-      return self::version( $this->link, $aggregate, $id, true );
+      return self::read_version( $this->link, $aggregate, $id, true );
    }
 
    /** Share-locks a referenced root, at its aggregate's place in the order. */
@@ -223,7 +228,7 @@ class us3_unit_of_work
       $this->check_order( $aggregate, $id );
       if ( ! mysqli_query( $this->link, "SELECT 1 FROM {$root['table']} WHERE "
                                       . str_replace( '?', (string) (int) $id, $root[ 'predicate' ] ) . " LOCK IN SHARE MODE" ) )
-         throw new RuntimeException( mysqli_error( $this->link ) );
+         throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
    }
 
    /** Locks the aggregate and fails the unit of work with a conflict when it changed since $seen. */
@@ -246,15 +251,25 @@ class us3_unit_of_work
       $acting = (int) $this->op[ 'actingPersonID' ];
       if ( ! $stmt || ! mysqli_stmt_bind_param( $stmt, 'sssiss', $this->op[ 'operationID' ], $this->op[ 'kind' ], $roots,
                                                 $acting, $this->op[ 'client' ], $sha ) )
-         throw new RuntimeException( mysqli_error( $this->link ) );
-      if ( ! mysqli_stmt_execute( $stmt ) )
+         throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
+      try
+      {
+         $ok = mysqli_stmt_execute( $stmt );
+      }
+      catch ( mysqli_sql_exception $e )
+      {
+         if ( $e->getCode() === 1062 )
+            throw new us3_unit_of_work_replay( $e->getMessage() );
+         throw $e;
+      }
+      if ( ! $ok )
       {
          $errno = mysqli_stmt_errno( $stmt );
          $error = mysqli_stmt_error( $stmt );
          mysqli_stmt_close( $stmt );
          if ( $errno === 1062 )
             throw new us3_unit_of_work_replay( $error );
-         throw new RuntimeException( $error );
+         throw new RuntimeException( $error, $errno );
       }
       mysqli_stmt_close( $stmt );
    }
@@ -266,14 +281,15 @@ class us3_unit_of_work
          $this->record();
       $stmt = mysqli_prepare( $this->link, $sql );
       if ( ! $stmt )
-         throw new RuntimeException( mysqli_error( $this->link ) );
+         throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
       if ( $types !== '' )
          mysqli_stmt_bind_param( $stmt, $types, ...$values );
       if ( ! mysqli_stmt_execute( $stmt ) )
       {
+         $errno = mysqli_stmt_errno( $stmt );
          $error = mysqli_stmt_error( $stmt );
          mysqli_stmt_close( $stmt );
-         throw new RuntimeException( $error );
+         throw new RuntimeException( $error, $errno );
       }
       $n = mysqli_stmt_affected_rows( $stmt );
       mysqli_stmt_close( $stmt );
@@ -285,11 +301,11 @@ class us3_unit_of_work
    {
       $stmt = mysqli_prepare( $this->link, $sql );
       if ( ! $stmt )
-         throw new RuntimeException( mysqli_error( $this->link ) );
+         throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
       if ( $types !== '' )
          mysqli_stmt_bind_param( $stmt, $types, ...$values );
       if ( ! mysqli_stmt_execute( $stmt ) )
-         throw new RuntimeException( mysqli_stmt_error( $stmt ) );
+         throw new RuntimeException( mysqli_stmt_error( $stmt ), mysqli_stmt_errno( $stmt ) );
       $rows = mysqli_fetch_all( mysqli_stmt_get_result( $stmt ), MYSQLI_ASSOC );
       mysqli_stmt_close( $stmt );
       return $rows;
@@ -308,9 +324,10 @@ class us3_unit_of_work
                 return $v === null ? 'NULL' : ( is_int( $v ) ? (string) $v : "'" . mysqli_real_escape_string( $this->link, (string) $v ) . "'" );
              }, $args ) ) . ")";
       if ( ! mysqli_multi_query( $this->link, $sql ) )
-         throw new RuntimeException( mysqli_error( $this->link ) );
-      $sets   = array();
-      $status = null;
+         throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
+      $sets     = array();
+      $status   = null;
+      $statuses = 0;
       do
       {
          $res = mysqli_store_result( $this->link );
@@ -320,14 +337,16 @@ class us3_unit_of_work
             $sets[] = $rows;
             if ( $rows && array_key_exists( 'status', $rows[ 0 ] ) )
             {
-               if ( $status !== null )
-                  throw new us3_unit_of_work_refusal( "$procedure returned more than one status" );
+               $statuses++;
                $status = (int) $rows[ 0 ][ 'status' ];
             }
          }
       } while ( mysqli_more_results( $this->link ) && mysqli_next_result( $this->link ) );
+      ## Every result set is read first, so the connection is in step for the rollback
       if ( mysqli_errno( $this->link ) )
-         throw new RuntimeException( mysqli_error( $this->link ) );
+         throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
+      if ( $statuses > 1 )
+         throw new us3_unit_of_work_refusal( "$procedure returned more than one status" );
       if ( $status === null )
          throw new us3_unit_of_work_refusal( "$procedure returned no status" );
       if ( $status !== 0 )
@@ -353,18 +372,41 @@ class us3_unit_of_work
       $client = substr( $this->op[ 'client' ], 0, 64 );
       $stmt = mysqli_prepare( $this->link, "SET @US3_ACTING_ID = ?, @US3_CLIENT = ?, @US3_COORDINATED = 1, @US3_ID = NULL" );
       if ( ! $stmt || ! mysqli_stmt_bind_param( $stmt, 'is', $acting, $client ) || ! mysqli_stmt_execute( $stmt ) )
-         throw new RuntimeException( mysqli_error( $this->link ) );
+         throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
       mysqli_stmt_close( $stmt );
       if ( ! mysqli_query( $this->link, 'START TRANSACTION' ) )
-         throw new RuntimeException( mysqli_error( $this->link ) );
+         throw new RuntimeException( mysqli_error( $this->link ), mysqli_errno( $this->link ) );
       $this->link_in_transaction = true;
    }
 
    private $link_in_transaction = false;
 
+   ## Never throws: it runs inside the error handling, whatever mysqli_report() mode is set.
    private function rollback()
    {
-      @mysqli_rollback( $this->link );
+      try
+      {
+         @mysqli_rollback( $this->link );
+      }
+      catch ( Throwable $e )
+      {
+      }
+   }
+
+   ## The server error number behind $e: mysqli's own exception, or one of this class's, which
+   ## carry it because closing a statement resets the connection's error.
+   private static function errno_of( Throwable $e, $link )
+   {
+      if ( $e instanceof mysqli_sql_exception || ( $e instanceof RuntimeException && $e->getCode() > 0 ) )
+         return (int) $e->getCode();
+      try
+      {
+         return (int) mysqli_errno( $link );
+      }
+      catch ( Throwable $e2 )
+      {
+         return 0;
+      }
    }
 
    /** Clears the session variables. False when that failed: the caller must not reuse the connection. */
@@ -464,9 +506,10 @@ class us3_unit_of_work
    ## on every manifest table. Reads still work without them; coordinated writes refuse.
    private static function require_schema( $link )
    {
-      if ( self::$schema_ok === null )
-         self::$schema_ok = new SplObjectStorage();
-      if ( isset( self::$schema_ok[ $link ] ) )
+      ## Keyed by the connection's object and server thread, so a closed link is not kept alive
+      ## and a new link that reuses its object ID is checked again
+      $key = spl_object_id( $link ) . ':' . (int) mysqli_thread_id( $link );
+      if ( isset( self::$schema_ok[ $key ] ) )
          return;
       $tables = array_unique( array_map( function ( $r ) { return $r[ 'table' ]; }, self::manifest() ) );
       $res = mysqli_query( $link, "SELECT"
@@ -477,6 +520,6 @@ class us3_unit_of_work
       $row = $res ? mysqli_fetch_row( $res ) : array( 0, 0 );
       if ( (int) $row[ 0 ] < 2 || (int) $row[ 1 ] < 2 * count( $tables ) )
          throw new us3_unit_of_work_refusal( 'this database lacks row versions; upgrade it (uslims_upgrade.php) before coordinated writes' );
-      self::$schema_ok[ $link ] = true;
+      self::$schema_ok[ $key ] = true;
    }
 }

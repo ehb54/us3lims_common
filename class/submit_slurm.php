@@ -835,10 +835,12 @@ class submit_slurm extends jobsubmit
    }
 
    ## Sets one autoflow stage's status as a unit of work, unless its status has ended.
-   ## True, or why not.
+   ## [ true or why not, whether $link may still be used ]. Each call is its own event, so its
+   ## operation ID is unique; retries within the call reuse it.
    private function update_autoflow_stage( $link, $kind, $requestID, $hpcRequestID, $status, $message, array $parts )
    {
-      $result = us3_unit_of_work::run( $link, $this->unattended_operation( $kind, array_merge( array( $requestID ), $parts ) ),
+      $event  = array_merge( array( $requestID, (string) $hpcRequestID, uniqid( '', true ) ), $parts );
+      $result = us3_unit_of_work::run( $link, $this->unattended_operation( $kind, $event ),
          function ( us3_unit_of_work $uow ) use ( $requestID, $status, $message ) {
             $row = $this->lock_autoflow_stage( $uow, (int) $requestID );
             if ( $row === null )
@@ -849,11 +851,10 @@ class submit_slurm extends jobsubmit
                         array( $status, $message, (int) $requestID ) );
             return array( 'receipt' => array( 'autoflowAnalysis' => $status ) );
          } );
-      if ( ! $result[ 'session_cleared' ] )
-         @mysqli_close( $link );
       if ( ! in_array( $result[ 'status' ], array( 'ok', 'replayed' ), true ) )
-         return "autoflowAnalysis $requestID not updated ({$result['status']}: " . ( isset( $result[ 'error' ] ) ? $result[ 'error' ] : '' ) . ")";
-      return true;
+         return array( "autoflowAnalysis $requestID not updated ({$result['status']}: "
+                     . ( isset( $result[ 'error' ] ) ? $result[ 'error' ] : '' ) . ")", $result[ 'session_cleared' ] );
+      return array( true, $result[ 'session_cleared' ] );
    }
 
    private function exec_bound( $link, $sql, array $args )
@@ -1055,12 +1056,20 @@ class submit_slurm extends jobsubmit
          {
             ## Under the run lock, and only from a status that has not ended: a cancel the
             ## desktop made meanwhile is kept.
-            $done = $this->update_autoflow_stage( $link, 'hpc.submit.failed', $autoflowID, null,
-                                                  'SUBMIT_TIMEOUT', 'Job submission failed: ' . $statusMsg,
-                                                  array( 'failed', (string) $statusMsg ) );
+            $hpcRequestID = isset( $this->data[ 'job' ][ 'requestID' ] ) ? $this->data[ 'job' ][ 'requestID' ] : null;
+            list( $done, $linkUsable ) = $this->update_autoflow_stage( $link, 'hpc.submit.failed', $autoflowID, $hpcRequestID,
+                                                                       'SUBMIT_TIMEOUT', 'Job submission failed: ' . $statusMsg,
+                                                                       array( 'failed', (string) $statusMsg ) );
             if ( $done !== true )
             {
                $this->message[] = "markAutoflowSubmitFailed: $done";
+            }
+            ## A connection whose session could not be cleared is not used again
+            if ( ! $linkUsable )
+            {
+               db_connection_pool::shared()->release( $link, false );
+               $link = null;
+               $dbUnreachable = true;
             }
 
             ## The investigator's address and the run's own tripleName are
@@ -1071,9 +1080,9 @@ class submit_slurm extends jobsubmit
             ## this try, before the pooled connection is released below -- not
             ## closed outright, since release() returns it to the pool for
             ## reuse by the next caller.
-            $lookup_stmt = mysqli_prepare( $link,
+            $lookup_stmt = $link ? mysqli_prepare( $link,
                "SELECT p.email, a.tripleName FROM autoflowAnalysis a JOIN people p ON p.personID = a.invID"
-             . " WHERE a.requestID = ?" );
+             . " WHERE a.requestID = ?" ) : false;
             if ( $lookup_stmt )
             {
                mysqli_stmt_bind_param( $lookup_stmt, 'i', $autoflowID );

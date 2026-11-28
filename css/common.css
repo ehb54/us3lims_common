@@ -586,8 +586,7 @@ fieldset#clusters tr.subheader th
 #content:is(.record-page, .project-page) tfoot { text-align: left; }
 #content input[type=submit][name=update],
 #content.account-page input[type=submit] {
-  border: 1px solid #225952; border-radius: .25em; padding: .4em .8em;
-  background: #225952; color: white;
+  border-radius: .25em; padding: .4em .8em;
 }
 #content.record-page input[name=delete] { margin-inline-start: 1em; color: #812e27; }
 #content.project-page table.sortable th { text-align: left; }
@@ -621,7 +620,11 @@ fieldset#clusters tr.subheader th
 #content .gmp-status-partial { background: #e3ebf7; color: #304e7a; }
 #content .gmp-status-not-started, #content .gmp-status-not-signed { background: #faf1d7; color: #694b0f; }
 #content .gmp-status-reject { background: #f9e3df; color: #80372f; }
-#content.plugin-settings section:has(table) h3, #content .audit-stage h2 {
+#content.plugin-settings section:has(table) h3 {
+  border-inline-start: 4px solid #387870;
+  background: #e8f0ee; color: #25483f; padding: .45em .7em;
+}
+#content .audit-stage h2 {
   border-inline-start: 4px solid #387870;
   background: #e8f0ee; color: #25483f; padding: .45em .7em;
 }
@@ -648,11 +651,11 @@ fieldset#clusters tr.subheader th
 #content.account-page .account-card td { padding: .3em 0; }
 #content.account-page label { color: #29443f; font-weight: bold; }
 #content.account-page input:not([type=submit]):not([type=reset]) {
-  border: 1px solid #aabfba; border-radius: 6px; padding: .7em; background: #fff; color: #203333;
+  border: 1px solid #5d8079; border-radius: 6px; padding: .7em; background: #fff; color: #203333;
 }
 #content.account-page .account-card input:not([type=submit]) { width: 100%; }
-#content.account-page input:focus-visible, #content.account-page a:focus-visible { outline: 3px solid #72bdb0; outline-offset: 2px; }
-#content.account-page input[type=submit] { padding: .75em 1.2em; background: #176b60; border-color: #176b60; border-radius: 6px; font-weight: bold; cursor: pointer; }
+#content.account-page input:focus-visible, #content.account-page a:focus-visible { outline: 3px solid #286e63; outline-offset: 2px; }
+#content.account-page input[type=submit] { padding: .75em 1.2em; border-radius: 6px; font-weight: bold; cursor: pointer; }
 #content.account-page input[type=submit]:hover { background: #11554c; }
 #content.account-page .account-card input[type=submit] { width: 100%; margin-top: .8em; }
 #content.account-page a { color: #176b60; font-weight: bold; }
@@ -685,7 +688,7 @@ fieldset#clusters tr.subheader th
 #content a { color: #176b60; }
 #content a:visited { color: #4c6078; }
 #content a:focus-visible, #content :is(input, select, textarea, button):focus-visible {
-  outline: 3px solid #72bdb0; outline-offset: 2px;
+  outline: 3px solid #286e63; outline-offset: 2px;
 }
 
 /* Keep the navigation available and let content fit smaller screens. */
@@ -709,7 +712,7 @@ fieldset#clusters tr.subheader th
 
 /* Shared record, selector and workflow details. */
 #content:is(.record-page, .project-page, .selector-page, .workflow-page) :is(input[type=text], input[type=password], input[type=email], input[type=number], select, textarea) {
-  border: 1px solid #aabfba; border-radius: 4px; padding: .4em .5em;
+  border: 1px solid #5d8079; border-radius: 4px; padding: .4em .5em;
   background-color: #fff; color: #203333;
 }
 #content:is(.record-page, .project-page, .selector-page, .workflow-page) label { color: #29443f; }

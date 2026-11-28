@@ -16,7 +16,7 @@ $filename = basename( $_SERVER['PHP_SELF'] );
 ## CLI-driven autoflow submission. filectime() would then run against
 ## $_SERVER['PHP_SELF'], which a CLI process never sets to a real file, and
 ## the warning would be reported as the submission's failure reason by
-## submitone.php's check_cli_errors_in_dump() (gridctl).
+## submitone.php (gridctl).
 if ( !isset( $is_cli ) ) {
    $is_cli = php_sapi_name() === 'cli';
 }

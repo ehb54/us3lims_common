@@ -3,7 +3,7 @@ include 'checkinstance.php';
 
 include 'header.php';
 ?>
-<div id='content'>
+<div id='content' class='reading-page'>
 
 	<h1 class="title">Local Facility Administrator Contact:</h1>
    <table cellpadding='10' border='1'>

@@ -82,11 +82,11 @@ ul ul ul {
 }
 
 table.style1 {
-  border                : 5px groove #2B4E72;
+  border                : 1px solid #cad7d4;
   width                 : 98%;
-  margin                : 2em 1em;
-  border-radius         : 4px;
-  overflow              : hidden;
+  margin                : 1em auto;
+  border-collapse       : collapse;
+  overflow-wrap         : anywhere;
 }
 
 /* Outranks table.style1 so list tables keep their former inline 95% width. */
@@ -98,23 +98,21 @@ table.style1 thead th {
   font-family           : Arial, Helvetica, sans-serif;
   font-size             : 14px;
   font-weight           : bold;
-  background            : linear-gradient(#2B4E72, #1B325F);
-  color                 : white;
+  background            : #e8f0ee;
+  color                 : #25483f;
   line-height           : 1.5;
 }
 
-table.style1 td {
-  border                : 1px solid black;
+table.style1 td, table.style1 tbody th {
+  border-bottom         : 1px solid #d9e1df;
 }
 
 table.style1 tbody th {
-  border                : 1px solid black;
   text-align            : left;
 }
 
-/* Zebra striping for readability on dense tables. */
 table.style1 tbody tr:nth-child(even) {
-  background-color      : #F2F2F2;
+  background-color      : #f6f8f7;
 }
 
 table.noborder td {
@@ -175,6 +173,14 @@ a.block:hover {
   display               : none;
 }
 
+/* Shared navigation colors, drawn from the dark banner and its teal lettering. */
+:root {
+  --lims-nav-surface: #262b2c;
+  --lims-nav-rule: #485052;
+  --lims-nav-hover: #384443;
+  --lims-nav-accent: #a6dfd4;
+}
+
 /* Header */
 
 #header {
@@ -216,7 +222,7 @@ a.block:hover {
   vertical-align        : bottom;
   width                 : 820px;      /* 1000px - the 190px padding */
   float                 : left;
-  background-color      : black;
+  background-color      : var(--lims-nav-surface);
   height                : 37px;
 }
 
@@ -238,7 +244,7 @@ a.block:hover {
   width                 : 137px;
   padding               : 0px 0px 0px 0px;
   display               : block;
-  background            : #7F7F7F url(../images/button-gradient.png) repeat-x;
+  background            : var(--lims-nav-surface);
   color                 : white;
   font-weight           : bold;
   text-decoration       : none;
@@ -250,9 +256,11 @@ a.block:hover {
   background-color      : cyan;
 }
 
-#globalnav li a:hover {
+#globalnav li a:hover,
+#globalnav li a:focus-visible {
+  background-color      : var(--lims-nav-hover);
   text-decoration       : none;
-  color                 : cyan;
+  color                 : var(--lims-nav-accent);
   font-size             : 12px;
   font-weight           : bold;
 }
@@ -276,12 +284,13 @@ a.block:hover {
   padding               : 3px 0px 0px 0px;
 }
 
-#globalnav ul.level1 li.submenu:hover ul.level2 {
+#globalnav ul.level1 li.submenu:hover ul.level2,
+#globalnav ul.level1 li.submenu:focus-within > ul.level2 {
   display               : block;
 }
 
 #globalnav ul.level1 li.submenu ul.level2 li a:hover {
-  color                 : cyan;
+  color                 : var(--lims-nav-accent);
 }
 
 #globalnav ul.level3 {
@@ -293,12 +302,31 @@ a.block:hover {
   display               : block;
 }
 
+#globalnav > ul.level1 {
+  display               : flex;
+}
+
+#globalnav > ul.level1 > li {
+  flex                  : 1;
+}
+
+#globalnav > ul.level1 > li > a {
+  width                 : auto;
+  height                : 37px;
+  padding               : 0;
+  line-height           : 37px;
+}
+
+#globalnav ul ul {
+  z-index               : 1;
+}
+
 /* Page */
 
 #page {
   width                 : 1000px;
   margin                : auto;
-  background            : #FFFFFF  url(../images/links_background.gif) repeat-y;
+  background            : linear-gradient(to right, var(--lims-nav-surface) 180px, #fff 180px);
   border                : solid black;
   border-width          : 0px 0px 0px 0px;
   box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -316,10 +344,11 @@ a.block:hover {
 
 div#sidebar {
   float                 : left;
-  width                 : 156px;                /* 180 - 12x2 in padding */
-  background            : #7F7F7F url(../images/black-grey-gradient.png) repeat-x;
-  padding               : 1em 12px 2em;   /* a minimum spacing all round */
-  color                 : white;
+  width                 : 156px; /* 180px including horizontal padding */
+  padding               : 1em 12px 2em;
+  background-color      : var(--lims-nav-surface);
+  color                 : #fff;
+  font-family           : Arial, Helvetica, sans-serif;
 }
 
 /* Outranks div#sidebar so the utility class replaces the former inline style. */
@@ -328,36 +357,41 @@ div#sidebar.pb-30em {
 }
 
 div#sidebar h4 {
-  margin                : 0;
-  padding-top           : 1em;
-  background-color      : transparent;
-  font-family           : Arial, Helvetica, Sans-serif;
-  color                 : white;
-  font-size             : 1.2em;
-  font-weight           : bold;
+  margin                : 14px 0 3px;
+  padding               : 10px 6px 0;
+  border-top            : 1px solid var(--lims-nav-rule);
+  background            : transparent;
+  color                 : var(--lims-nav-accent);
+  font                  : bold 13px/1.4 Arial, Helvetica, sans-serif;
+}
+
+div#sidebar h4:first-child {
+  margin-top            : 0;
+  padding-top           : 0;
+  border-top            : 0;
 }
 
 div#sidebar a {
-  width                 : 140px;
-  height                : 20px;
-  background            : transparent url(../images/button-gradient.png) repeat-x;
   display               : block;
-  margin                : 0;
-  padding               : 6px;
-  color                 : white;
-  font-size             : 13px;
-  font-weight           : bold;
-  text-decoration       : none;
+  padding               : 5px 6px;
   border-radius         : 3px;
-  transition            : background-color 0.15s ease, color 0.15s ease;
+  background            : transparent;
+  color                 : #fff;
+  font                  : normal 14px/1.4 Arial, Helvetica, sans-serif;
+  text-decoration       : none;
+  overflow-wrap         : anywhere;
 }
 
-#sidebar a:hover {
-  background            : white url(../images/button-gradient-hover.png) repeat-x;
-  color                 : cyan;
-  font-size             : 13px;
-  font-weight           : bold;
-  text-decoration       : none;
+div#sidebar a:hover,
+div#sidebar a:focus {
+  background-color      : var(--lims-nav-hover);
+  color                 : #fff;
+  text-decoration       : underline;
+}
+
+div#sidebar a:focus-visible {
+  outline               : 2px solid var(--lims-nav-accent);
+  outline-offset        : 0;
 }
 
 /* Content */
@@ -377,12 +411,12 @@ div#sidebar a {
 div#content p
 {
   /*padding-bottom        : 1em;*/
-  text-align            : justify;
+  text-align            : left;
 }
 
 .title {
   margin                : 0px;
-  padding               : 2em 0px 1em;
+  padding               : 1em 0 .5em;
   font-size             : 180%;
   font-weight           : bold;
   color                 : #555555;
@@ -437,8 +471,23 @@ fieldset.option_value {
   font-family           : Arial, Helvetica, sans-serif;
   font-size             : 85%;
   text-align            : center;
-  background            : #FFFFFF  url(../images/links_background.gif) repeat-y;
+  background            : linear-gradient(to right, var(--lims-nav-surface) 180px, #fff 180px);
   box-shadow            : 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* The page already paints the sidebar and the outer shadow. */
+#footer.page-footer {
+  width                 : auto;
+  height                : auto;
+  margin                : 0;
+  padding               : 10px 25px 14px;
+  background            : transparent;
+  box-shadow            : none;
+  color                 : #50585b;
+}
+
+#page > #footer.page-footer {
+  margin-left           : 180px;
 }
 
 #info {
@@ -528,4 +577,162 @@ fieldset#clusters tr.subheader th
     width: 100%;
     height:100%;
   }
+}
+
+/* Record views, result lists and forms share a content column. */
+#content :is(input, select, textarea) { box-sizing: border-box; max-width: 100%; }
+#content.record-page > form > table.style1 > tbody > tr > th:not([colspan]),
+#content.project-page > form > table.style1 > tbody > tr > th:not([colspan]) { width: 30%; }
+#content:is(.record-page, .project-page) tfoot { text-align: left; }
+#content input[type=submit][name=update],
+#content.account-page input[type=submit] {
+  border-radius: .25em; padding: .4em .8em;
+}
+#content.record-page input[name=delete] { margin-inline-start: 1em; color: #812e27; }
+#content.project-page table.sortable th { text-align: left; }
+#content.selector-page form, #content.selector-page #runID { margin: .65em 0; }
+#content.selector-page label { overflow-wrap: anywhere; }
+#content.selector-page pre, #content.diagnostic-page pre { max-width: 100%; overflow-x: auto; }
+#content.workflow-page fieldset {
+  min-width: 0; max-width: 100%; box-sizing: border-box;
+  border: 1px solid #c9d6d3; margin-block: 1em; padding: .65em 1em;
+}
+#content.workflow-page legend { padding-inline: .35em; font-weight: bold; color: #25483f; }
+#content.workflow-page input[type=number] { width: 8em; }
+#content.operations-page table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+#content.operations-page :is(td, th) {
+  text-align: left; vertical-align: top; padding: .35em .55em;
+  border-bottom: 1px solid #d9e1df; overflow-wrap: anywhere;
+}
+#content.operations-page th { background: #e8f0ee; }
+.admin-groups { padding: 0; list-style: none; }
+.admin-groups > li { margin-block: 1em; font-weight: bold; color: #25483f; }
+.admin-groups ul { padding-inline-start: 1.4em; margin-block: .35em; }
+#content.reading-page p, #content.account-page p { max-width: 72ch; line-height: 1.5; }
+#content.account-page form { max-width: 38em; }
+#content.account-page :is(th, td) { padding: .35em .55em; text-align: left; }
+#content.plugin-settings > section { margin-block: 1.25em; }
+#content.plugin-settings .plugin-danger { border-top: 2px solid #b57870; padding-top: .5em; }
+#content.plugin-settings input[name=remove_license] { color: #812e27; }
+
+/* Optional GMP views use the same status colors as the queue and user audit. */
+#content .gmp-status-completed, #content .gmp-status-approve { background: #daf0e4; color: #205c3a; }
+#content .gmp-status-partial { background: #e3ebf7; color: #304e7a; }
+#content .gmp-status-not-started, #content .gmp-status-not-signed { background: #faf1d7; color: #694b0f; }
+#content .gmp-status-reject { background: #f9e3df; color: #80372f; }
+#content.plugin-settings section:has(table) h3 {
+  border-inline-start: 4px solid #387870;
+  background: #e8f0ee; color: #25483f; padding: .45em .7em;
+}
+#content .audit-stage h2 {
+  border-inline-start: 4px solid #387870;
+  background: #e8f0ee; color: #25483f; padding: .45em .7em;
+}
+#content.selector-page #personID, #content.selector-page #report_content {
+  padding-inline: .7em; border-inline-start: 3px solid #c9d6d3;
+}
+#content.project-page .sortable td, #content.diagnostic-page :is(td, th) { vertical-align: top; }
+#content.diagnostic-page fieldset { border: 1px solid #c9d6d3; padding: .65em 1em; }
+#content.diagnostic-page pre { padding: .6em; background: #f6f8f7; }
+#content.workflow-page .submit { margin-block: .4em; }
+
+/* Account access: a calm, readable form shared across instances. */
+#content.account-page { background: #f5f8f7; }
+#content.account-page .account-card {
+  box-sizing: border-box; max-width: 32em; margin: 2em 0; padding: 2.25em;
+  background: #fff; border: 1px solid #dbe7e4; border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(35, 72, 62, .08); color: #203333;
+}
+#content.account-page .account-eyebrow { color: #277d71; font-size: .75em; font-weight: bold; letter-spacing: .12em; text-transform: uppercase; }
+#content.account-page .account-card .title { margin: .3em 0; color: #203333; }
+#content.account-page .account-intro { color: #536c67; margin-bottom: 1.5em; }
+#content.account-page .account-card table, #content.account-page .account-card tbody,
+#content.account-page .account-card tr, #content.account-page .account-card td { display: block; width: 100%; box-sizing: border-box; }
+#content.account-page .account-card td { padding: .3em 0; }
+#content.account-page label { color: #29443f; font-weight: bold; }
+#content.account-page input:not([type=submit]):not([type=reset]) {
+  border: 1px solid #5d8079; border-radius: 6px; padding: .7em; background: #fff; color: #203333;
+}
+#content.account-page .account-card input:not([type=submit]) { width: 100%; }
+#content.account-page input:focus-visible, #content.account-page a:focus-visible { outline: 3px solid #286e63; outline-offset: 2px; }
+#content.account-page input[type=submit] { padding: .75em 1.2em; border-radius: 6px; font-weight: bold; cursor: pointer; }
+#content.account-page input[type=submit]:hover { background: #11554c; }
+#content.account-page .account-card input[type=submit] { width: 100%; margin-top: .8em; }
+#content.account-page a { color: #176b60; font-weight: bold; }
+#content.account-page .account-new { border-top: 1px solid #e1eae8; padding-top: 1.4em; margin-top: 1.5em; color: #536c67; }
+@media (max-width: 600px) { #content.account-page .account-card { padding: 1.25em; margin: 1em 0; } }
+#content.account-page .account-card-wide { max-width: 42em; }
+#content.account-page .account-card-wide th { padding: .4em 0; }
+#content.account-page .account-card-wide thead th { padding: .8em 0; border-bottom: 1px solid #e1eae8; }
+#content.account-page .account-card-wide tfoot td { padding-top: 1em; }
+#content.account-page .account-note { padding: .8em 1em; background: #edf5f3; border-left: 3px solid #72a99e; color: #29443f; }
+#content.account-page .account-card form p label { display: block; margin-bottom: .5em; }
+#content.account-page .account-card .message:empty { display: none; }
+#content.account-page .account-card th { display: block; box-sizing: border-box; width: 100%; text-align: left; }
+
+/* Shared controls: reserve the filled treatment for an explicitly primary action. */
+#content :is(input[type=submit], input[type=button], input[type=reset], button) {
+  background: #f4f8f7; border: 1px solid #94b1ab; border-radius: 4px;
+  color: #25483f; padding: .4em .8em; cursor: pointer;
+}
+#content :is(input[type=submit], input[type=button], input[type=reset], button):hover {
+  background: #e1efeb;
+}
+#content :is(input[type=submit], input[type=button], input[type=reset], button):disabled {
+  opacity: .6; cursor: not-allowed;
+}
+#content input[type=submit][name=update], #content.account-page input[type=submit] {
+  background: #176b60; border-color: #176b60; color: #fff;
+}
+#content input[type=submit][name=update]:hover, #content.account-page input[type=submit]:hover { background: #11554c; }
+#content a { color: #176b60; }
+#content a:visited { color: #4c6078; }
+#content a:focus-visible, #content :is(input, select, textarea, button):focus-visible {
+  outline: 3px solid #286e63; outline-offset: 2px;
+}
+
+/* Keep the navigation available and let content fit smaller screens. */
+@media screen and (max-width: 1000px) {
+  #header, #page, #search_page, #footer { width: 100%; box-sizing: border-box; }
+  #header img { max-width: 100%; height: auto; }
+  #header table { max-width: 100%; }
+  #globalnav { box-sizing: border-box; width: 100%; height: auto; padding-left: 0; float: none; }
+  #globalnav > ul { display: flex; flex-wrap: wrap; }
+  #globalnav > ul > li { float: none; }
+  #content { width: auto; margin-left: 180px; padding: 0 1em 2em; }
+  #search_content { width: auto; margin: 0; padding: 0 1em 2em; }
+}
+@media screen and (max-width: 600px) {
+  #page { background: #fff; }
+  div#sidebar, div#sidebar.pb-30em { float: none; width: auto; padding: 1em; }
+  #content { margin-left: 0; }
+  #page > #footer.page-footer { margin-left: 0; }
+  #content :is(pre, .audit-scroll) { max-width: 100%; overflow-x: auto; }
+}
+
+/* Shared record, selector and workflow details. */
+#content:is(.record-page, .project-page, .selector-page, .workflow-page) :is(input[type=text], input[type=password], input[type=email], input[type=number], select, textarea) {
+  border: 1px solid #5d8079; border-radius: 4px; padding: .4em .5em;
+  background-color: #fff; color: #203333;
+}
+#content:is(.record-page, .project-page, .selector-page, .workflow-page) label { color: #29443f; }
+#content:is(.record-page, .project-page, .selector-page, .workflow-page) :is(input, select, textarea):disabled {
+  background-color: #eef2f1; color: #52645f;
+}
+#content:is(.record-page, .project-page, .operations-page, .diagnostic-page) table.style1 :is(td, th) {
+  padding: .5em .65em; vertical-align: top;
+}
+#content:is(.record-page, .project-page) input[name=delete] {
+  color: #812e27; border-color: #c99c96; background: #fff8f7;
+}
+#content:is(.record-page, .project-page) input[name=delete]:hover { background: #f9e3df; }
+#content.workflow-page fieldset { border-radius: 4px; }
+#content.workflow-page legend { font-size: 1.05em; }
+@media screen and (max-width: 600px) {
+  #header table { width: 100%; }
+  #header table td:first-child { width: 100%; }
+  #header table td:not(:first-child) { display: none; }
+  #header img { display: block; max-width: 100%; height: auto; }
+  #globalnav > ul.level1 > li { flex: 1 1 33.333%; }
+  #content :is(table.style1, .summary_table) { display: block; max-width: 100%; overflow-x: auto; }
 }

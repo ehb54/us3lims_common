@@ -278,8 +278,8 @@ $single_tenant_deployment = false;
 $default_local_cluster = 'us3iab-node0';
 
 ## Define cluster connection details and resource limits here.
-## TODO marks a site's own login, work directory or module lines, which stay out of this file;
-## uslims_upgrade.php --cluster-values sets them from a private one.
+## TODO marks a login, work directory or module setup that must be configured before activation.
+## Set these values in the deployed global_config.php.
 ## Instance cluster_config.php selects which clusters may be used; loaders
 ## fall back to ../cluster_config.php, then ../uslims3_newlims/cluster_config.php.
 ## The first existing file wins. A cluster must be active in both configurations.
@@ -416,8 +416,7 @@ $cluster_details =
          ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules"
      ]
      ## Bridges-2: configure MPI and UltraScan modules before activation.
-     ## Keep airavata-workdirs until the remote directory is migrated; changing
-     ## only this template breaks staging and result collection.
+     ## Set the work directory to the path prepared on the cluster before activation.
      ,'bridges2' => [
          'active'              => false
          ,'name'               => 'bridges2.psc.edu'
@@ -448,8 +447,7 @@ $cluster_details =
          ,'env_script_lines'   => "module purge\n## TODO: load correct OpenMPI and Qt/UltraScan modules"
      ]
      ## Expanse: preserve the module environment; module purge removes srun from PATH.
-     ## Keep airavata-workingdirs until the remote directory is migrated; changing
-     ## only this template breaks staging and result collection.
+     ## Set the work directory to the path prepared on the cluster before activation.
      ,'expanse' => [
          'active'              => false
          ,'name'               => 'expanse.sdsc.edu'

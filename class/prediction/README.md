@@ -17,8 +17,9 @@ It exists for one evaluation window and is meant to be removed afterwards.
 | The switch | `$global_runtime_advisory_enabled` in `global_config.php` |
 
 Families served: `2DSA`, `GA`, `PCSA`. A request whose method begins with one of
-those names belongs to that family, so `2DSA-CG` is 2DSA and `GA-MC` is GA.
-`DMGA` belongs to none and is not served.
+those names belongs to that family, so `GA-MC` is GA. `DMGA` belongs to none and
+is not served. Neither is a custom grid (`2DSA_CG`): its request carries a grid
+model in place of the grid parameters the 2DSA model is fitted with.
 
 ## Turning it on
 
@@ -104,7 +105,7 @@ reconstruction job. Collect the records first; they cannot be rebuilt.
 | status | meaning |
 | --- | --- |
 | `ok` | a recommendation was produced |
-| `unsupported` | not served: another family, no artifact for this family, or a destination with no cluster code |
+| `unsupported` | not served: another family, a custom grid, no artifact for this family, or a destination with no cluster code |
 | `input_error` | an operand the model was fitted with was absent, not numeric, or a category level it was not fitted with |
 | `artifact_error` | the artifact for this family could not be read, or holds another family's model |
 | `record_error` | a recommendation was produced and the row could not be written |

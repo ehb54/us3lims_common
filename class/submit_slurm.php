@@ -27,6 +27,14 @@ class submit_slurm extends jobsubmit
    ## specific reason rather than a generic "submission aborted".
    protected $stage_error = '';
 
+   ## Why stage_files() failed, as a code: plan_rejected, staging_rejected or unreachable.
+   protected $stage_code = '';
+
+   ## What the last submit() did, and sbatch's failure text; see submission_result().
+   protected $submissionResult = null;
+   protected $submitError = '';
+   protected $breakerNotice = '';
+
    ## Set alongside $stage_error by stageFailure(), so submit()'s call to
    ## markAutoflowSubmitFailed() can tell admin about a breaker trip hit
    ## during staging the same way it does for one hit during sbatch:
@@ -54,30 +62,85 @@ class submit_slurm extends jobsubmit
    protected $dispatchToken = '';
    protected $commentKept = null;
 
-   ## Top-level: stage files then submit
+   /**
+    * What the last submit() did: the dispatch outcome (certainty, retryable, reason, job_id), whether an
+    * accepted job was also recorded and is monitored (tracked), and the failure text (detail), which is for
+    * administrators: it can name logins, paths and cluster output.
+    * reason is accepted, a dispatch_outcome_from_sbatch_result() code, or why sbatch never ran: no_data,
+    * configuration, plan_rejected, staging_rejected, unreachable or not_submitted.
+    */
+   public function submission_result()
+   {
+      $result = $this->submissionResult ?? $this->make_result( SUBMIT_NOT_ACCEPTED, 'not_submitted' );
+      if ( $this->breakerNotice !== '' )
+         $result[ 'detail' ] = ltrim( "{$result[ 'detail' ]}; {$this->breakerNotice}", '; ' );
+      return $result;
+   }
+
+   private function make_result( $certainty, $reason, $detail = '', $retryable = false )
+   {
+      return array( 'certainty' => $certainty, 'retryable' => $retryable, 'reason' => $reason, 'job_id' => '',
+                    'tracked' => false, 'detail' => (string) $detail );
+   }
+
+   ## One instance submits a batch, so nothing of a request may carry over to the next.
+   public function clear()
+   {
+      parent::clear();
+      $this->reset_submission();
+   }
+
+   private function reset_submission()
+   {
+      $this->submissionResult = null;
+      $this->submitOutcome    = null;
+      $this->submitError      = '';
+      $this->breakerNotice    = '';
+      $this->stage_error      = '';
+      $this->stage_code       = '';
+      $this->stage_transient  = false;
+   }
+
+   ## Top-level: stage files then submit; submission_result() says what happened.
    public function submit()
    {
+      $this->reset_submission();
       if ( ! isset( $this->data[ 'job' ][ 'cluster_shortname' ] ) )
       {
          $this->message[] = "ERROR: data profile is not defined. Return to Queue Setup.\n";
+         $this->submissionResult = $this->make_result( SUBMIT_NOT_ACCEPTED, 'no_data', 'data profile is not defined' );
          return;
       }
 
+      ## Until proven otherwise: an exception not caught below can come after sbatch ran.
+      $this->submissionResult = $this->make_result( SUBMIT_UNKNOWN, 'result_lost' );
       $savedir = getcwd();
       try
       {
          chdir( $this->data[ 'job' ][ 'directory' ] );
+         $cluster = $this->execution_cluster();
+         if ( ! isset( $this->grid[ $cluster ] ) )
+            throw new InvalidArgumentException( "cluster $cluster is not configured" );
          $this->require_request_column();
 
+         $logged = count( $this->message );
          if ( ! $this->stage_files() ) {
             ## Persist staging failure for autoflow requests.
+            ## A refused plan says why only in the messages.
+            $errors = $this->stage_code !== 'plan_rejected' ? array()
+                    : preg_replace( '/^ERROR:\s*/', '', preg_grep( '/^ERROR:/', array_slice( $this->message, $logged ) ) );
             $this->message[] = "ERROR: stage_files failed - submission aborted";
-            $this->markAutoflowSubmitFailed( $this->stage_error !== '' ? $this->stage_error : 'staging failed',
+            $reason = $this->stage_error !== '' ? $this->stage_error : 'staging failed';
+            $this->submissionResult = $this->make_result( SUBMIT_NOT_ACCEPTED,
+               $this->stage_code !== '' ? $this->stage_code : 'staging_rejected',
+               implode( ': ', array_merge( array( $reason ), $errors ) ), $this->stage_transient );
+            $this->markAutoflowSubmitFailed( $reason,
                'staging', $this->stage_breaker_just_tripped, $this->stage_breaker_just_tripped );
             return;
          }
 
          $this->submit_job();
+         $this->submissionResult = $this->submitOutcome + array( 'tracked' => false, 'detail' => $this->submitError );
 
          ## Only write DB records and launch jobmonitor if we have a valid Slurm job ID.
          ## A missing ID means sbatch failed; the error is already in $this->message.
@@ -85,6 +148,7 @@ class submit_slurm extends jobsubmit
             ## Report success only after recording the job and launching its monitor.
             if ( $this->update_db() )
             {
+               $this->submissionResult[ 'tracked' ] = true;
                ## Only now: the job is submitted and recorded. Advisory only,
                ## off unless global_config.php turns it on, cannot throw, and
                ## cannot change what was already submitted above.
@@ -101,21 +165,33 @@ class submit_slurm extends jobsubmit
                }
                $this->message[] = "submit complete";
             }
+            else
+               $this->submissionResult[ 'detail' ] = $this->tracking_failure();
          } else {
             $this->message[] = "ERROR: submit_job failed — no valid Slurm job ID; DB not updated";
          }
       }
       catch ( InvalidArgumentException | UnexpectedValueException $error )
       {
-         if ( empty( $this->data[ 'eprfile' ] ) )
+         ## Accepted as soon as sbatch said so, even when a later step of submit_job() threw.
+         $job_id = (string) ( $this->data[ 'eprfile' ] ?? '' );
+         if ( $job_id === '' && $this->submitOutcome !== null && $this->submitOutcome[ 'certainty' ] === SUBMIT_ACCEPTED )
+            $job_id = (string) $this->submitOutcome[ 'job_id' ];
+         if ( $job_id === '' )
          {
             $this->message[] = "ERROR: submission configuration invalid: " . $error->getMessage();
-            $this->markAutoflowSubmitFailed( $error->getMessage(), 'configuration' );
+            $detail = implode( '; ', array_merge( array( $error->getMessage() ), $this->config_errors ) );
+            ## Raised before sbatch ran: nothing was submitted.
+            if ( $this->submitOutcome === null )
+               $this->submissionResult = $this->make_result( SUBMIT_NOT_ACCEPTED, 'configuration', $detail );
+            $this->markAutoflowSubmitFailed( $detail, 'configuration' );
          }
          else
          {
-            $this->message[] = "WARNING: job {$this->data['eprfile']} was accepted, but submission"
+            $this->message[] = "WARNING: job $job_id was accepted, but submission"
                              . " setup failed: " . $error->getMessage();
+            $this->submissionResult = array( 'certainty' => SUBMIT_ACCEPTED, 'retryable' => false, 'reason' => 'accepted',
+               'job_id' => $job_id, 'tracked' => false, 'detail' => 'submission setup failed: ' . $error->getMessage() );
          }
       }
       finally
@@ -393,6 +469,7 @@ class submit_slurm extends jobsubmit
    {
       ## Per job: a trip seen by an earlier job of the same batch is not this one's.
       $this->stage_breaker_just_tripped = false;
+      $this->stage_code = 'plan_rejected';
       $cluster   = $this->execution_cluster();
       $requestID = $this->data[ 'job' ][ 'requestID' ];
       $login     = $this->remote( $cluster )->login();
@@ -440,6 +517,7 @@ class submit_slurm extends jobsubmit
       $infra  = remote_exec_infra_fault( $res );
       $detail = $res[ 'stderr' ] !== '' ? $res[ 'stderr' ] : $res[ 'text' ];
       $this->stage_transient = $infra;
+      $this->stage_code = $infra ? 'unreachable' : 'staging_rejected';
 
       $msg = $infra
            ? "cluster unreachable during staging ($step): {$res['class']} after {$res['attempts']} attempt(s): $detail"
@@ -578,6 +656,7 @@ class submit_slurm extends jobsubmit
 
       $submitResult = $this->attemptSubmit( $cluster, $workdir );
       $this->submitOutcome = $submitResult[ 'outcome' ];
+      $this->submitError   = $submitResult[ 'error' ];
 
       if ( ! $submitResult[ 'submit_ok' ] ) {
          $this->data[ 'eprfile' ] = '';
@@ -895,8 +974,8 @@ class submit_slurm extends jobsubmit
       ## instance page $admin_email is that instance's contact, not the site admin.
       $siteAdmin = ! empty( $global_site_admin_email ) ? $global_site_admin_email
                  : ( ! empty( $GLOBALS[ 'listen_admin_email' ] ) ? $GLOBALS[ 'listen_admin_email' ] : 'root@localhost' );
-      ## gridctl sends the one admin notice for a submission it drives (from this page's ERROR:
-      ## output), so common mailing too sent the same failure twice.
+      ## gridctl sends the one admin notice for a submission it drives, so common mailing too sent
+      ## the same failure twice.
       $gridctlNotifiesAdmin = defined( 'US3_GRIDCTL_SUBMISSION' );
 
       $investigator_email = null;
@@ -987,8 +1066,9 @@ class submit_slurm extends jobsubmit
                      && mail_submission_fail_to_admin( $statusMsg ) === true;
       if ( $infraFailure && $breakerJustTripped && $gridctlNotifiesAdmin )
       {
-         $this->message[] = "ERROR: the cluster's circuit breaker just opened; submissions that reach it"
-                          . " over ssh are refused until its cooldown expires";
+         $this->breakerNotice = "the cluster's circuit breaker just opened; submissions that reach it"
+                              . " over ssh are refused until its cooldown expires";
+         $this->message[] = "ERROR: {$this->breakerNotice}";
       }
       elseif ( $infraFailure && $breakerJustTripped )
       {

@@ -141,7 +141,7 @@ $global_dispatch_max_wait_seconds = 86400;
 ## dashboard is the record either way. Unset or false: no email.
 $global_dispatch_alert_email = false;
 
-## Metascheduler pool dispatch settings.
+## Metascheduler pool dispatch settings. docs/METASCHEDULER-POOLS.md has the steps and examples.
 ##
 ## A pool is a $cluster_details entry with a "clusters" member list. Each
 ## member needs 'tier' => 'local' or 'national'. Without a 'dispatch' key a

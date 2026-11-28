@@ -108,6 +108,35 @@ class us3_unit_of_work
       }
    }
 
+   /**
+    * Records who a connection's writes outside a unit of work are made for: $personID (0 for no
+    * person) and $client. A page or tool that writes without coordination still sets these, so
+    * the row-version triggers never record a leftover @US3_ID. False when they could not be set.
+    */
+   public static function attribute( $link, $personID, $client )
+   {
+      try
+      {
+         $stmt = @mysqli_prepare( $link, "SET @US3_ACTING_ID = ?, @US3_CLIENT = ?, @US3_COORDINATED = NULL, @US3_ID = NULL" );
+         $id   = (int) $personID;
+         $c    = substr( (string) $client, 0, 64 );
+         return $stmt && mysqli_stmt_bind_param( $stmt, 'is', $id, $c ) && mysqli_stmt_execute( $stmt );
+      }
+      catch ( Throwable $e )
+      {
+         return false;
+      }
+   }
+
+   /** A new random operation ID, for a form to post back so a repeated submission replays. */
+   public static function new_operation_id()
+   {
+      $b = random_bytes( 16 );
+      $b[6] = chr( ord( $b[6] ) & 0x0f | 0x40 );
+      $b[8] = chr( ord( $b[8] ) & 0x3f | 0x80 );
+      return vsprintf( '%s%s-%s-%s-%s-%s%s%s', str_split( bin2hex( $b ), 4 ) );
+   }
+
    /** The committed record of an operation ID, or null. */
    public static function lookup( $link, $operationID )
    {
